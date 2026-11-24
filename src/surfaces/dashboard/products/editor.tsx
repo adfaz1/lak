@@ -6,7 +6,7 @@ import { replace } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
 import { LOCATIONS, LOC_IDS, type Channel, type LocId } from '../../merchant/domain';
-import { parseMoney, takenSkus, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
+import { parseMoney, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
 import { available, levelOf } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
 import { draftsStore, levelsStore, productsStore } from '../../merchant/stores';
@@ -134,7 +134,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
     const map: Record<string, string> = { nameAr: tx('الاسم بالعربية', 'Arabic name'), nameEn: tx('الاسم بالإنجليزية', 'English name'), price: tx('السعر', 'Price'), compareAt: tx('السعر قبل الخصم', 'Compare-at price'), cost: tx('التكلفة', 'Cost'), sku: 'SKU', weight: tx('الوزن', 'Weight'), slug: tx('الرابط', 'URL handle'), colors: tx('الألوان', 'Colours'), sizes: tx('المقاسات', 'Sizes') };
     if (a === 'media') return tx(`النص البديل للصورة ${Number(b) + 1}`, `Alt text, image ${Number(b) + 1}`);
     if (a === 'stock') return tx(`الكمية · ${loc(b)}`, `Quantity · ${loc(b)}`);
-    if (a === 'v') { const v = draft.variants[Number(b)]; const n = v ? [v.color, v.size].filter(Boolean).join(' / ') : b; return `${n} · ${c === 'stock' ? `${tx('الكمية', 'Qty')} ${loc(d)}` : c === 'price' ? tx('السعر', 'Price') : 'SKU'}`; }
+    if (a === 'v') { const v = draft.variants[Number(b)]; const n = v ? variantText(v.color, v.size)[lang] : b; return `${n} · ${c === 'stock' ? `${tx('الكمية', 'Qty')} ${loc(d)}` : c === 'price' ? tx('السعر', 'Price') : 'SKU'}`; }
     return map[a] ?? k;
   };
 
@@ -410,7 +410,7 @@ function Variants({ draft, set, fe, known }: SecProps & { known: Set<string> }) 
               </tr></thead>
               <tbody className="divide-y divide-border">
                 {draft.variants.map((v, i) => {
-                  const label = [v.color, v.size].filter(Boolean).join(' / ');
+                  const label = variantText(v.color, v.size)[lang];
                   const isFresh = !known.has(v.sku.trim());
                   const total = LOC_IDS.reduce((s, loc) => { const lv = levelOf(levels, v.sku, loc); return s + (lv ? available(lv) : 0); }, 0);
                   return (

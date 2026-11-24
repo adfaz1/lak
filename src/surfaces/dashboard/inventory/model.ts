@@ -5,23 +5,23 @@
 //   available = on hand − reserved (what can still be sold)
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
 import { LOC_IDS, type L, type LocId } from '../../merchant/domain';
-import { normaliseDigits, skusOf, type Product } from '../../merchant/catalog';
+import { normaliseDigits, skusOf, variantText, type Product } from '../../merchant/catalog';
 import {
   available, coverage, levelOf, lowStock, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
 } from '../../merchant/inventory';
 
-export interface SkuInfo { productId: string | undefined; name: L; variant: string }
+export interface SkuInfo { productId: string | undefined; name: L; variant: L }
 
 /** Product name and variant label for every SKU in the catalogue. */
 export function skuInfo(products: Product[]): Map<string, SkuInfo> {
   const m = new Map<string, SkuInfo>();
   for (const p of products) for (const s of skusOf(p)) {
     const v = p.variants.find((x) => x.sku === s);
-    m.set(s, { productId: p.id, name: p.name, variant: v ? [v.color, v.size].filter(Boolean).join(' / ') : '' });
+    m.set(s, { productId: p.id, name: p.name, variant: v ? variantText(v.color, v.size) : { ar: '', en: '' } });
   }
   return m;
 }
-export const infoFor = (m: Map<string, SkuInfo>, sku: string): SkuInfo => m.get(sku) ?? { productId: undefined, name: { ar: sku, en: sku }, variant: '' };
+export const infoFor = (m: Map<string, SkuInfo>, sku: string): SkuInfo => m.get(sku) ?? { productId: undefined, name: { ar: sku, en: sku }, variant: { ar: '', en: '' } };
 
 export type Tab = 'levels' | 'low' | 'transfers' | 'log';
 export const readTab = (v: string | null): Tab => (v === 'low' || v === 'transfers' || v === 'log' ? v : 'levels');
@@ -32,7 +32,7 @@ export const levelKey = (l: Pick<Level, 'sku' | 'loc'>) => `${l.sku}@${l.loc}`;
 
 const matches = (q: string, sku: string, i: SkuInfo) => {
   const n = q.trim().toLowerCase();
-  return !n || sku.toLowerCase().includes(n) || i.name.en.toLowerCase().includes(n) || i.name.ar.includes(q.trim()) || i.variant.toLowerCase().includes(n);
+  return !n || sku.toLowerCase().includes(n) || i.name.en.toLowerCase().includes(n) || i.name.ar.includes(q.trim()) || i.variant.en.toLowerCase().includes(n) || i.variant.ar.includes(q.trim());
 };
 
 /** Levels per SKU and warehouse, filtered by search and warehouse; low rows only on the low-stock view. */

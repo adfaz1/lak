@@ -276,7 +276,7 @@ function AdjustModal({ level, info, onClose }: { level: Level; info: SkuInfo; on
 
   return (
     <Modal title={tx('تعديل الكمية', 'Adjust quantity')} onClose={onClose}
-      description={<>{info.name[lang]}{info.variant && ` · ${info.variant}`} · {LOCATIONS[level.loc][lang]}</>}
+      description={<>{info.name[lang]}{info.variant[lang] && ` · ${info.variant[lang]}`} · {LOCATIONS[level.loc][lang]}</>}
       footer={<><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={submit} disabled={!!conflict}>{tx('سجّل التعديل', 'Record adjustment')}</Button></>}>
       {conflict && (
         <Alert tone="warn" title={tx('تغيّرت الكمية بعد أن فتحت النموذج', 'The quantity changed after you opened this')}

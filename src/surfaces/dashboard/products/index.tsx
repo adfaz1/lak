@@ -12,7 +12,7 @@ import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Mone
 import { Alert, BulkBar, DataTable, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import {
-  STATUSES, activeChannels, bulkChanged, bulkCheck, bulkRowsFor, categoriesOf, categoryKey, filterProducts, isLow, listPhoto, paginate, priceRange,
+  STATUSES, activeChannels, bulkChanged, bulkCheck, bulkRowsFor, categoriesOf, categoryKey, filterProducts, listPhoto, lowSkuCount, paginate, priceRange,
   readChannel, readTab, selectionScope, stockOf, tabCounts, type StatusTab,
 } from './model';
 import { NoAccess, ReviewTools, STATUS_TONE, downloadText, phref, roleBadge, useNames, useRole } from './common';
@@ -112,8 +112,14 @@ function ProductList({ route }: { route: Route }) {
   const stockCell = (p: Product) => {
     const s = stockOf(p, levels);
     if (s === null) return <span className="text-xs text-muted">{tx('رقمي', 'Digital')}</span>;
-    const low = isLow(p, levels);
-    return <span className={cn('font-semibold tabular-nums', s === 0 ? 'text-red-600 dark:text-red-400' : low ? 'text-amber-700 dark:text-amber-300' : 'text-fg')}>{s}{low && <span className="sr-only"> {tx('منخفض', 'low')}</span>}</span>;
+    // The total is shown as is; a low variant or warehouse is named under it rather than colouring a healthy total.
+    const lowSkus = lowSkuCount(p, levels);
+    return (
+      <span className="inline-flex flex-col leading-tight">
+        <span className={cn('font-semibold tabular-nums', s === 0 ? 'text-red-600 dark:text-red-400' : 'text-fg')}>{s === 0 ? tx('نفد', 'Sold out') : s}</span>
+        {s > 0 && lowSkus > 0 && <span className="text-[11px] font-medium text-amber-700 dark:text-amber-300">{p.variants.length ? tx(`${lowSkus} ${lowSkus === 1 ? 'متغير منخفض' : 'متغيرات منخفضة'}`, `${lowSkus} low variant${lowSkus === 1 ? '' : 's'}`) : tx('منخفض في مستودع', 'Low in a warehouse')}</span>}
+      </span>
+    );
   };
   const channelsCell = (p: Product) => {
     const on = activeChannels(p);

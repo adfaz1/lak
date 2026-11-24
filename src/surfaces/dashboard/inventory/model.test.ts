@@ -12,8 +12,8 @@ const info = skuInfo(products);
 
 describe('levels', () => {
   it('names each SKU with its product and variant', () => {
-    expect(info.get('ABY-LIN-BLA-M')).toMatchObject({ productId: 'p1', variant: 'Black / M' });
-    expect(info.get('OUD-100')!.variant).toBe('');
+    expect(info.get('ABY-LIN-BLA-M')).toMatchObject({ productId: 'p1', variant: { ar: 'أسود / M', en: 'Black / M' } });
+    expect(info.get('OUD-100')!.variant).toEqual({ ar: '', en: '' });
   });
   it('filters by warehouse and search, and puts the emptiest first on the low view', () => {
     const r = levelRows(levels, info, { q: 'oud', loc: '' });

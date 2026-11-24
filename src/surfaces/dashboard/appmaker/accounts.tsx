@@ -10,7 +10,7 @@ import { StoreIcon } from './overview';
 import { useAppData, useS } from './parts';
 import { appStore } from './state';
 
-const TEAM: Record<Platform, string> = { ios: 'Demo Store Trading (7XK2M4Q9TA)', android: 'Demo Store Trading · 4821-0937' };
+const TEAM: Record<Platform, string> = { ios: 'Dar Nuwa Trading (7XK2M4Q9TA)', android: 'Dar Nuwa Trading · 4821-0937' };
 
 export default function Accounts({ canManage }: { canManage: boolean }) {
   const tx = useTx();

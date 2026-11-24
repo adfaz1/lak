@@ -14,10 +14,11 @@ import type { Role } from './perms';
 
 export const ordersStore = createStore.key('merchant.ordersStore')(allOrders);
 export const productsStore = createStore.key('merchant.productsStore')(productFixtures);
-export const levelsStore = createStore.key('merchant.levelsStore')(() => initialLevels(productFixtures().flatMap(skusOf)));
+// Digital products (gift cards) have no warehouse stock.
+export const levelsStore = createStore.key('merchant.levelsStore')(() => initialLevels(productFixtures().filter((p) => p.type !== 'digital').flatMap(skusOf)));
 export const stockLogStore = createStore.key('merchant.stockLogStore')<StockLog[]>(() => [
-  { id: 'ADJ-201', sku: 'OUD-100', loc: 'ryd', delta: -2, before: 6, after: 4, reason: 'damaged', who: 'Faisal', note: 'Broken in packing' },
-  { id: 'ADJ-200', sku: 'BAG-LTH-01', loc: 'ryd', delta: 5, before: 2, after: 7, reason: 'received', who: 'Faisal', note: 'Supplier delivery' },
+  { id: 'ADJ-201', sku: 'OUD-100', loc: 'ryd', delta: -2, before: 6, after: 4, reason: 'damaged', who: 'فيصل', note: 'انكسرت أثناء التغليف' },
+  { id: 'ADJ-200', sku: 'BAG-LTH-01', loc: 'ryd', delta: 5, before: 2, after: 7, reason: 'received', who: 'فيصل', note: 'توريد من المورّد' },
 ]);
 export const transfersStore = createStore.key('merchant.transfersStore')(transferFixtures);
 export const financeStore = createStore.key('merchant.financeStore')(() => financeFixtures());
@@ -44,7 +45,7 @@ export const appsStore = createStore.key('merchant.appsStore')(appFixtures);
 export const setupStore = createStore.key('merchant.setupStore')(setupFixture);
 export const ticketsStore = createStore.key('merchant.ticketsStore')<{ id: string; subject: string; state: 'open' }[]>(() => []);
 export const notesStore = createStore.key('merchant.notesStore')<Record<string, { id: string; kind: 'internal' | 'message'; text: string; channel?: 'email' | 'sms'; by: string }[]>>(() => ({
-  'C-1001': [{ id: 'N1', kind: 'internal', text: 'Prefers delivery after 4 pm.', by: 'Faisal' }],
+  'C-1001': [{ id: 'N1', kind: 'internal', text: 'تفضّل التوصيل بعد الرابعة عصرًا.', by: 'فيصل' }],
 }));
 /** Unsaved product edits kept for this session, so navigating away does not lose typed input. */
 export const draftsStore = createStore.key('merchant.draftsStore')<Record<string, ProductDraft>>(() => ({}));

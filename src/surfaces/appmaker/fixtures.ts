@@ -19,7 +19,7 @@ export const SPLASHES = ['#1e1b18', '#f6efe4', '#84603d', '#2f4a3a', '#fffdf9'];
 export const ACCENTS = ['#84603d', '#1e1b18', '#2f4a3a', '#9a2f1d', '#3f5a8a'];
 
 const liveConfig: AppConfig = {
-  name: { ar: 'متجر ديمو', en: 'Demo Store' },
+  name: { ar: 'دار نُوى', en: 'Dar Nuwa' },
   iconId: 'i1',
   splash: '#1e1b18',
   accent: '#84603d',
@@ -47,13 +47,13 @@ export function initialListing(): Listing {
   return {
     subtitle: { ar: 'عبايات وعطور ومستلزمات المنزل', en: 'Abayas, fragrance and home' },
     description: {
-      ar: 'تطبيق متجر ديمو: تسوّق العبايات والشالات والعطور ومستلزمات المنزل، واحفظ مفضلتك، وتابع طلباتك من مكان واحد.',
-      en: 'The Demo Store app: shop abayas, stoles, fragrance and home goods, keep a wishlist and follow your orders in one place.',
+      ar: 'تطبيق دار نُوى: تسوّق العبايات والشالات والعطور ومستلزمات المنزل، واحفظ مفضلتك، وتابع طلباتك من مكان واحد.',
+      en: 'The Dar Nuwa app: shop abayas, stoles, fragrance and home goods, keep a wishlist and follow your orders in one place.',
     },
     keywords: 'abaya, fragrance, عباية, عطور, شال',
     category: 'shopping',
-    supportUrl: 'https://demo-store.lak.sa/help',
-    privacyUrl: 'https://demo-store.lak.sa/privacy',
+    supportUrl: 'https://dar-nuwa.lak.sa/help',
+    privacyUrl: 'https://dar-nuwa.lak.sa/privacy',
     reviewNotes: '',
     screenshots: 3,
   };

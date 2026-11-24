@@ -165,7 +165,7 @@ function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
         {editable && (
           <div className="flex flex-wrap items-end gap-2 border-t border-border px-5 py-4">
             <Field label={tx('أضف صنفًا', 'Add an item')} className="min-w-0 flex-1 basis-64">
-              {(p) => <Select {...p} value={addSku} onChange={(e) => setAddSku(e.target.value)}><option value="">{tx('اختر SKU…', 'Choose a SKU…')}</option>{allSkus.map((s) => { const n = infoFor(info, s); return <option key={s} value={s}>{s} — {n.name[lang]}{n.variant && ` · ${n.variant}`}</option>; })}</Select>}
+              {(p) => <Select {...p} value={addSku} onChange={(e) => setAddSku(e.target.value)}><option value="">{tx('اختر SKU…', 'Choose a SKU…')}</option>{allSkus.map((s) => { const n = infoFor(info, s); return <option key={s} value={s}>{s} — {n.name[lang]}{n.variant[lang] && ` · ${n.variant[lang]}`}</option>; })}</Select>}
             </Field>
             <Button variant="secondary" disabled={!addSku} onClick={() => { edit({ lines: [...draft.lines, { sku: addSku, qty: 1, received: 0 }] }); setAddSku(''); }}><Plus className="size-4" aria-hidden="true" />{tx('أضف', 'Add')}</Button>
           </div>

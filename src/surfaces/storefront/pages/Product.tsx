@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Check, ChevronDown, Heart, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
+import { Bell, Check, ChevronDown, Heart, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { Alert, Select } from '../../../ds/kit';
 import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
@@ -25,6 +25,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const [err, setErr] = useState<('color' | 'size')[]>([]);
   const [added, setAdded] = useState<string | null>(null);
   const [city, setCity] = useState<CityId>('riyadh');
+  const [notify, setNotify] = useState<string[]>([]);
   const colorRef = useRef<HTMLFieldSetElement>(null);
   const sizeRef = useRef<HTMLFieldSetElement>(null);
 
@@ -78,6 +79,11 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const colorVariants = (c: ColorId) => p.variants.filter((v) => v.color === c && (!size || v.size === size));
   const soldAll = (vs: { stock: number }[]) => vs.length > 0 && vs.every((v) => v.stock <= 0);
   const level = variant && stockLevel(variant);
+  // Nothing can be bought: every variant is out, or the chosen one is. Offer a back-in-stock alert instead of an inert button.
+  const allOut = soldAll(p.variants);
+  const unavailable = allOut || soldOutVariant;
+  const notifyKey = allOut ? p.id : variant?.id ?? p.id;
+  const notified = notify.includes(notifyKey);
 
   return (
     <div className={cn(WRAP, 'py-6 sm:py-10')}>
@@ -94,6 +100,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             <div className="flex flex-wrap items-baseline gap-3">
               <Price v={price} compareAt={p.compareAt} from={!variant && new Set(p.variants.map((v) => v.price)).size > 1} className="text-xl" />
               <span className="text-xs text-muted">{t.inclVat}</span>
+              {allOut && <span className="rounded-full bg-surface-2 px-2.5 py-1 text-xs font-semibold text-muted">{t.soldOut}</span>}
             </div>
             <p className="max-w-prose leading-relaxed text-muted">{l(p.blurb)}</p>
           </div>
@@ -145,19 +152,28 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
               {p.colors.length + p.sizes.length > 0 && <span className="text-muted">· {variantLabel(p, color, size, lang)}</span>}
             </p>
           )}
-          {soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
+          {allOut ? <p role="status" className="text-sm font-medium">{t.allOut}</p> : soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
           {variant && variant.stock > 0 && room <= 0 && <p className="text-[13px] text-muted">{t.maxed}</p>}
 
           <div className="flex items-center gap-2">
-            <Stepper value={qty} max={Math.max(1, Math.min(room || 10, 10))} onChange={(n) => setQty(Math.max(1, n))} label={t.qty} decLabel={t.dec} incLabel={t.inc} />
-            <Button size="lg" className="h-12 flex-1" onClick={add} disabled={!canOrder || (!!variant && room <= 0)}>
-              <ShoppingBag className="size-5" aria-hidden="true" />{soldOutVariant ? t.soldOut : t.add}
-            </Button>
+            {unavailable ? (
+              <Button size="lg" variant="secondary" className="h-12 flex-1" disabled={notified} onClick={() => setNotify((n) => [...n, notifyKey])}>
+                <Bell className="size-5" aria-hidden="true" />{notified ? t.notifyOn : t.notifyMe}
+              </Button>
+            ) : (
+              <>
+                <Stepper value={qty} max={Math.max(1, Math.min(room || 10, 10))} onChange={(n) => setQty(Math.max(1, n))} label={t.qty} decLabel={t.dec} incLabel={t.inc} />
+                <Button size="lg" className="h-12 flex-1" onClick={add} disabled={!canOrder || (!!variant && room <= 0)}>
+                  <ShoppingBag className="size-5" aria-hidden="true" />{t.add}
+                </Button>
+              </>
+            )}
             <button type="button" aria-pressed={wish} aria-label={wish ? t.wishOn : t.wishAdd} title={wish ? t.wishOn : t.wishAdd} onClick={() => toggleWish(p.id)}
               className="grid size-12 shrink-0 place-items-center rounded-xl border border-border bg-surface hover:bg-surface-2">
               <Heart className={cn('size-5', wish && 'fill-current text-brand-700 dark:text-brand-300')} aria-hidden="true" />
             </button>
           </div>
+          {notified && <p role="status" className="text-[13px] text-muted">{t.notifyNote}</p>}
           {!canOrder && <p className="text-[13px] text-amber-800 dark:text-amber-300">{t.browseOnly}</p>}
 
           {added && (
@@ -170,7 +186,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </Alert>
           )}
 
-          <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
+          {!allOut && <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
             <h2 id="sf-eta-h" className="flex items-center gap-2 text-sm font-semibold"><Truck className="size-4 text-muted" aria-hidden="true" />{t.delivery}
               {est && <InfoHint>{t.basis(String(est.handling), est.transit[0] === est.transit[1] ? String(est.transit[0]) : `${est.transit[0]}–${est.transit[1]}`)}</InfoHint>}
             </h2>
@@ -182,7 +198,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </label>
             {est && <p className="font-semibold">{est.from === est.to ? t.estimateSame(dl(est.from)) : t.estimate(dl(est.from), dl(est.to))}</p>}
             <p className="text-[13px] text-muted">{l(std.note)}</p>
-          </section>
+          </section>}
 
           <div className="divide-y divide-border border-y border-border">
             <details className="group py-1" open>

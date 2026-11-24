@@ -34,6 +34,13 @@ export function isLow(p: Product, levels: Level[]): boolean {
   return lowStock(levels).some((l) => skus.has(l.sku));
 }
 
+/** How many of the product's SKUs are at or below their threshold in at least one warehouse. */
+export function lowSkuCount(p: Product, levels: Level[]): number {
+  if (p.type === 'digital') return 0;
+  const skus = new Set(skusOf(p));
+  return new Set(lowStock(levels).filter((l) => skus.has(l.sku)).map((l) => l.sku)).size;
+}
+
 /** Lowest and highest selling price across variants; `from` when they differ. */
 export function priceRange(p: Product): { min: number; max: number; from: boolean } {
   const prices = p.variants.length ? p.variants.map((v) => v.price) : [p.price];

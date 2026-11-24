@@ -7,7 +7,8 @@ import {
 import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
 import { cn, IconButton, useTx } from '../../ds/ui';
-import { BUILT, sectionHref } from './pages';
+import { BUILT } from './pages';
+import { SearchDialog } from './search';
 import { testStore } from '../merchant/stores';
 
 export const dhref = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard${path ? `/${path}` : ''}`, q);
@@ -62,8 +63,13 @@ export function Shell({ active, counts, store, children }: { active: string; cou
   const [mobile, setMobile] = useState(false);
   const [dark, setDark] = useState(() => readPref('lak.theme', 'light') === 'dark');
   useEffect(() => { writePref('lak.theme', dark ? 'dark' : 'light'); }, [dark]);
+  const [searching, setSearching] = useState(false);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobile(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobile(false);
+      const typing = e.target instanceof HTMLElement && (e.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName));
+      if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === '/' && !typing)) { e.preventDefault(); setSearching(true); }
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
@@ -112,6 +118,7 @@ export function Shell({ active, counts, store, children }: { active: string; cou
 
   return (
     <div className={cn('lak', dark && 'dark')} dir={lang === 'ar' ? 'rtl' : 'ltr'}>
+      <SearchDialog open={searching} onClose={() => setSearching(false)} />
       <a href="#lak-main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">{tx('تخطَّ إلى المحتوى', 'Skip to content')}</a>
       <div className="flex min-h-screen bg-bg">
         <aside className={cn('sticky top-0 hidden h-screen shrink-0 flex-col border-e border-border bg-surface transition-[width] duration-200 lg:flex', collapsed ? 'w-[76px]' : 'w-64')}>
@@ -135,9 +142,11 @@ export function Shell({ active, counts, store, children }: { active: string; cou
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="glass sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-border px-4 sm:px-6">
             <IconButton label={tx('فتح القائمة', 'Open menu')} onClick={() => setMobile(true)} className="lg:hidden"><Menu className="size-5" aria-hidden="true" /></IconButton>
-            <a href={sectionHref('orders', '', { focus: 'search' })} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface-2/60 px-3 text-sm text-subtle transition-colors hover:border-brand-300 hover:text-muted sm:max-w-sm">
-              <Search className="size-4 shrink-0" aria-hidden="true" /><span className="truncate">{tx('ابحث عن طلب أو منتج أو عميل', 'Search orders, products, customers')}</span>
-            </a>
+            <button type="button" onClick={() => setSearching(true)} aria-haspopup="dialog" aria-keyshortcuts="Control+K Meta+K /"
+              className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface-2/60 px-3 text-sm text-subtle transition-colors hover:border-brand-300 hover:text-muted sm:max-w-sm">
+              <Search className="size-4 shrink-0" aria-hidden="true" /><span className="min-w-0 flex-1 truncate text-start">{tx('ابحث في الطلبات والمنتجات والعملاء والإعدادات', 'Search orders, products, customers, settings')}</span>
+              <kbd className="hidden rounded-md border border-border px-1.5 font-sans text-[11px] text-subtle md:inline">⌘K</kbd>
+            </button>
             <div className="ms-auto flex items-center gap-1">
               <span className="me-1 hidden rounded-full bg-amber-500/12 px-2.5 py-1 text-xs font-semibold text-amber-800 sm:inline dark:text-amber-300" title={tx('كل البيانات أمثلة اختبار، والعمليات الخارجية محاكاة.', 'All data are test examples; external operations are simulated.')}>{tx('نسخة تجريبية', 'Demo')}</span>
               <IconButton label={lang === 'ar' ? 'English' : 'العربية'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}><Languages className="size-5" aria-hidden="true" /></IconButton>

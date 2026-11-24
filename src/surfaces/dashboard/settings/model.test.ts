@@ -50,7 +50,7 @@ describe('team', () => {
   });
   it('rejects invalid, duplicate and owner invites', () => {
     expect(inviteError(team, 'pro', 'nope', 'finance')).toBe('email');
-    expect(inviteError(team, 'pro', 'FAISAL@demo-store.test', 'finance')).toBe('duplicate');
+    expect(inviteError(team, 'pro', 'FAISAL@darnuwa.test', 'finance')).toBe('duplicate');
     expect(inviteError(team, 'pro', 'a@b.test', 'owner')).toBe('role');
   });
   it('expires invites after 7 days, which frees the seat', () => {

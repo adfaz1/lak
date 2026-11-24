@@ -65,6 +65,18 @@ export function productFixtures(): Product[] {
   ];
 }
 
+/** Colour names are stored as the merchant typed them; common ones get an Arabic label for display. */
+const COLOR_AR: Record<string, string> = {
+  black: 'أسود', navy: 'كحلي', white: 'أبيض', beige: 'بيج', olive: 'زيتي', sand: 'رملي', grey: 'رمادي', gray: 'رمادي', brown: 'بني', tan: 'بني فاتح',
+  red: 'أحمر', blue: 'أزرق', green: 'أخضر', gold: 'ذهبي', pink: 'وردي', cream: 'كريمي', burgundy: 'عنابي', camel: 'جملي',
+};
+export const colorText = (c: string, lang: 'ar' | 'en'): string => (lang === 'ar' ? COLOR_AR[c.trim().toLowerCase()] ?? c : c);
+/** "Black / L" in both languages. */
+export const variantText = (color: string, size: string): L => ({
+  ar: [color && colorText(color, 'ar'), size].filter(Boolean).join(' / '),
+  en: [color, size].filter(Boolean).join(' / '),
+});
+
 /** Every stock-keeping unit of a product: its variants, or the product itself. */
 export const skusOf = (p: Product): string[] => (p.variants.length ? p.variants.map((v) => v.sku) : [p.sku]);
 

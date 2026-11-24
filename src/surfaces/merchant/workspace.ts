@@ -118,7 +118,7 @@ export function zoneFixtures(): Zone[] {
 
 export type DomainState = 'none' | 'pending' | 'verified' | 'failed';
 export interface DomainSettings { slug: string; host: string; state: DomainState; checks: number }
-export const domainFixture = (): DomainSettings => ({ slug: 'demo-store', host: '', state: 'none', checks: 0 });
+export const domainFixture = (): DomainSettings => ({ slug: 'dar-nuwa', host: '', state: 'none', checks: 0 });
 export const validSlug = (s: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(s) && s.length >= 3 && s.length <= 40;
 export const validHost = (s: string) => /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(s.trim().toLowerCase()) && !s.includes('..');
 
@@ -140,7 +140,7 @@ export const notifyFixture = (): Notify => ({
 });
 
 export interface StoreDetails { name: string; category: string; email: string; phone: string; timezone: string; weightUnit: 'g' | 'kg' }
-export const storeFixture = (): StoreDetails => ({ name: 'Demo Store', category: 'fashion', email: 'owner@demo-store.test', phone: '+966 5x xxx 0123', timezone: 'Asia/Riyadh', weightUnit: 'kg' });
+export const storeFixture = (): StoreDetails => ({ name: 'دار نُوى', category: 'fashion', email: 'owner@darnuwa.test', phone: '+966 5x xxx 0123', timezone: 'Asia/Riyadh', weightUnit: 'kg' });
 export const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
 export interface StoreStatus { published: boolean; accepting: boolean; maintenance: boolean; message: string }
@@ -151,9 +151,9 @@ export const statusFixture = (): StoreStatus => ({ published: true, accepting: t
 export type MemberStatus = 'active' | 'invited' | 'expired';
 export interface Member { id: string; name: string; email: string; role: Role; status: MemberStatus }
 export const teamFixture = (): Member[] => [
-  { id: 'u1', name: 'Noura (owner)', email: 'owner@demo-store.test', role: 'owner', status: 'active' },
-  { id: 'u2', name: 'Faisal', email: 'faisal@demo-store.test', role: 'fulfilment', status: 'active' },
-  { id: 'u3', name: 'Huda', email: 'huda@demo-store.test', role: 'finance', status: 'invited' },
+  { id: 'u1', name: 'سارة', email: 'owner@darnuwa.test', role: 'owner', status: 'active' },
+  { id: 'u2', name: 'فيصل', email: 'faisal@darnuwa.test', role: 'fulfilment', status: 'active' },
+  { id: 'u3', name: 'هدى', email: 'huda@darnuwa.test', role: 'finance', status: 'invited' },
 ];
 /** Seats in use: active members and pending invites count; expired invites do not. */
 export const seatsUsed = (m: Member[]) => m.filter((x) => x.status !== 'expired').length;

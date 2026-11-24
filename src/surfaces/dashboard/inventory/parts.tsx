@@ -24,7 +24,7 @@ export function SkuCell({ sku, info, sub }: { sku: string; info: SkuInfo; sub?: 
     <span className="flex items-center gap-3">
       <ProductImage src={skuPhoto(sku)} alt={info.name[lang]} size={40} />
       <span className="min-w-0">
-        <span className="block truncate font-semibold text-fg">{info.name[lang]}{info.variant && <span className="font-normal text-muted"> · {info.variant}</span>}</span>
+        <span className="block truncate font-semibold text-fg">{info.name[lang]}{info.variant[lang] && <span className="font-normal text-muted"> · {info.variant[lang]}</span>}</span>
         <span className="block text-xs font-normal text-muted"><Ref>{sku}</Ref>{sub && <> · {sub}</>}</span>
       </span>
     </span>
