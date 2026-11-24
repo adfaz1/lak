@@ -15,6 +15,15 @@ import type { DraftLog } from '../assistant/model';
 import { deliveriesStore, reminderWorkItems, reorderStore, sequenceStore } from '../marketing/reminders-model';
 import { couponsStore } from '../../merchant/stores';
 import { rank } from './model';
+import { verificationStore } from '../../merchant/verification-store';
+import { verificationWorkItem } from '../settings/verification-work';
+import type { L } from '../../merchant/domain';
+
+/** Wraps a work item produced by another section so the queue can rank and render it. */
+export function external(x: Omit<WorkItem, 'kind' | 'facts'> & { title: L; why: L; cta: L; moneyLabel?: L }, kind: WorkItem['kind'] = 'settlement'): WorkItem {
+  const { title, why, cta, moneyLabel, ...rest } = x;
+  return { ...rest, kind, facts: { problem: 'external', titleAr: title.ar, titleEn: title.en, whyAr: why.ar, whyEn: why.en, ctaAr: cta.ar, ctaEn: cta.en, moneyAr: moneyLabel?.ar ?? null, moneyEn: moneyLabel?.en ?? null } } as WorkItem;
+}
 
 export const queueStore = createStore.key('dashboard.workQueue')<QueueState>(emptyQueueState);
 export const assistantLogStore = createStore.key('dashboard.assistantLog')<DraftLog[]>(() => []);
@@ -32,11 +41,13 @@ export function useWork(empty = false): { all: WorkItem[]; mine: WorkItem[]; rol
   const autos = automationsStore.use();
   const role = testStore.use().role;
   // Cart and reorder reminders report only steps that need the merchant (provider down, coupon broken).
+  const v = verificationStore.use(); const ver = useMemo(() => verificationWorkItem(v), [v]);
   const seq = sequenceStore.use(); const rules = reorderStore.use(); const deliveries = deliveriesStore.use(); const coupons = couponsStore.use();
   const all = useMemo(() => (empty ? [] : rank([
     ...workQueue({ orders, levels, history: HISTORY, payouts: fin.payouts, txs: fin.txs, apps, providers: settings.providers, domain: settings.domain, runs, automations: autos }),
     ...reminderWorkItems({ seq, rules, deliveries, coupons }),
-  ])), [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos, seq, rules, deliveries, coupons]);
+    ...(ver ? [external(ver)] : []),
+  ])), [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos, seq, rules, deliveries, coupons, ver]);
   return { all, mine: useMemo(() => forRole(role, all), [role, all]), role };
 }
 

@@ -23,9 +23,10 @@ export const customerOf = (customers: Customer[], id?: string, name?: L) =>
   (id ? customers.find((c) => c.id === id) : undefined) ?? (name ? customers.find((c) => c.name.en === name.en) : undefined);
 const ordersOf = (orders: Order[], c: { id?: string; name: L }) => orders.filter((o) => (o.customerId && c.id ? o.customerId === c.id : o.customer.en === c.name.en));
 /** The customer's most recent order that contains the product, if any. */
-export function orderForProduct(orders: Order[], c: { id?: string; name: L } | undefined, productId: string): Order | undefined {
+export function orderForProduct(orders: Order[], c: { id?: string; name: L } | undefined, productId: string, before = Infinity, now = Date.now()): Order | undefined {
   if (!c) return undefined;
-  return ordersOf(orders, c).filter((o) => o.items.some((it) => productIdForSku(it.sku) === productId)).sort((a, b) => a.hoursAgo - b.hoursAgo)[0];
+  const list = ordersOf(orders, c).filter((o) => o.items.some((it) => productIdForSku(it.sku) === productId) && (o.placedAt ?? now - o.hoursAgo * H) <= before).sort((a, b) => a.hoursAgo - b.hoursAgo);
+  return list.find((o) => o.ship === 'delivered') ?? list[0];
 }
 const RETURN_STATUS: Record<OrderReturn['stage'], CaseStatus> = { requested: 'new', approved: 'customer', received: 'us', inspected: 'us', rejected: 'resolved', refunded: 'resolved', exchanged: 'resolved' };
 const hasArabic = (s: string) => /[؀-ۿ]/.test(s);
@@ -37,13 +38,13 @@ export function derivedCases(s: Sources): Case[] {
     const isLow = r.kind === 'review' && (r.rating ?? 5) <= 3;
     if (!isLow && r.kind !== 'question') continue;
     const cust = customerOf(s.customers, r.customerId, r.author);
-    const o = orderForProduct(s.orders, cust ? { id: cust.id, name: cust.name } : { name: r.author }, r.productId);
     const at = dayAt(r.at);
+    const o = orderForProduct(s.orders, cust ? { id: cust.id, name: cust.name } : { name: r.author }, r.productId, at);
     const answered = !!r.reply;
     const type: CaseType = isLow ? 'review' : 'question';
     out.push({
       id: `CS-${r.id}`, type, status: answered ? 'resolved' : 'new', priority: suggestPriority(type, { rating: r.rating }),
-      subject: isLow ? { ar: `تقييم ${r.rating}★`, en: `${r.rating}★ review` } : { ar: 'سؤال عن منتج', en: 'Product question' },
+      subject: isLow ? { ar: `تقييم ${r.rating}★`, en: `${r.rating}★ review` } : o ? { ar: 'سؤال من مشترٍ سابق', en: 'Question from a past buyer' } : { ar: 'سؤال قبل الشراء', en: 'Pre-purchase question' },
       source: 'review', sourceId: r.id, orderRef: o?.ref, customerId: cust?.id, customer: r.author, productId: r.productId,
       lang: hasArabic(r.text) ? 'ar' : 'en', openedAt: at, updatedAt: at, waitingSince: at, resolvedAt: answered ? at : undefined, firstReplyAt: answered ? at : undefined,
       messages: [

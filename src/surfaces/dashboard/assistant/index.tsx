@@ -348,6 +348,7 @@ function RiskView({ a }: { a: Answers }) {
           </a></li>
         ))}
       </ul>
+      {r.count > r.rows.length && <p className="text-xs text-muted">{tx(`نعرض ${r.rows.length} من ${r.count}، الأعلى إنفاقًا أولًا.`, `Showing ${r.rows.length} of ${r.count}, highest spend first.`)}</p>}
       <p className="text-xs text-muted">{tx(`${r.reachable} منهم وافقوا على التواصل. الباقون لا تُرسل لهم رسائل.`, `${r.reachable} of them agreed to be contacted. The others are not messaged.`)}</p>
     </>
   );

@@ -47,8 +47,8 @@ export default function Inbox({ route }: { route: Route }) {
     <PageHeader title={tx('صندوق الخدمة', 'Service inbox')}
       description={all.length ? tx(`${formatInt(open.length)} مفتوحة${late ? ` · ${formatInt(late)} تجاوزت المهلة` : ''}`, `${formatInt(open.length)} open${late ? ` · ${formatInt(late)} past due` : ''}`) : undefined}
       actions={perms.manage && state !== 'error' ? <div className="flex items-center gap-2">
-        <Button variant="ghost" className="hidden sm:inline-flex" onClick={() => setDlg('canned')}><MessageSquareReply className="size-4" aria-hidden="true" />{tx('الردود الجاهزة', 'Canned replies')}</Button>
-        {all.length > 0 && <Button variant="ghost" className="hidden md:inline-flex" onClick={() => { const rows = listCases(all, lq, who.name, now).rows; download(`cases-${new Date().toISOString().slice(0, 10)}.csv`, casesCsv(rows, lang, now)); logAction('orders', { ar: `تصدير ${rows.length} حالة`, en: `Exported ${rows.length} case(s)` }); toast({ tone: 'ok', text: tx(`نُزّل ملف فيه ${formatInt(rows.length)} حالة`, `Downloaded ${formatInt(rows.length)} case(s)`) }); }}><Download className="size-4" aria-hidden="true" />{tx('تصدير', 'Export')}</Button>}
+        <span className="hidden sm:block"><Button variant="ghost" onClick={() => setDlg('canned')}><MessageSquareReply className="size-4" aria-hidden="true" />{tx('الردود الجاهزة', 'Canned replies')}</Button></span>
+        {all.length > 0 && <span className="hidden md:block"><Button variant="ghost" onClick={() => { const rows = listCases(all, lq, who.name, now).rows; download(`cases-${new Date().toISOString().slice(0, 10)}.csv`, casesCsv(rows, lang, now)); logAction('orders', { ar: `تصدير ${rows.length} حالة`, en: `Exported ${rows.length} case(s)` }); toast({ tone: 'ok', text: tx(`نُزّل ملف فيه ${formatInt(rows.length)} حالة`, `Downloaded ${formatInt(rows.length)} case(s)`) }); }}><Download className="size-4" aria-hidden="true" />{tx('تصدير', 'Export')}</Button></span>}
         <Button className="bg-brand-gradient hover:opacity-95" onClick={() => setDlg('new')}><Plus className="size-4" aria-hidden="true" />{tx('حالة جديدة', 'New case')}</Button>
       </div> : undefined} />
   );
@@ -80,7 +80,7 @@ export default function Inbox({ route }: { route: Route }) {
     <div className="space-y-6">
       <div className={cn(id && 'hidden lg:block')}>{header}</div>
       <div className={cn('grid gap-6', id && 'lg:grid-cols-[320px_minmax(0,1fr)]')}>
-        <Card className={cn('min-w-0 self-start', id && 'hidden lg:block')}>
+        <Card className={cn('min-w-0 self-start', id && 'scrollbar-thin hidden lg:sticky lg:top-6 lg:block lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto')}>
           <CaseList route={route} all={all} me={who.name} now={now} current={id} canBulk={perms.manage} />
         </Card>
         {id && (c ? <CaseView key={c.id} c={c} all={all} src={src} now={now} backHref={listHref} /> : (

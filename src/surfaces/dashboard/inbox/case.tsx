@@ -1,7 +1,7 @@
 // One case: the conversation with internal notes and history, a composer with bilingual canned replies and a
 // preview in the customer's language, and the context Salla keeps on other pages: the order (payment, fulfilment,
 // shipment, items), the customer's value, the review or return it came from, and resolution actions in context.
-import { useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import {
   ArrowLeft, ArrowRight, CheckCircle2, CircleDollarSign, ExternalLink, FlaskConical, Gift, Lock, MessageSquareReply, PackagePlus, RotateCcw,
   Send, StickyNote, Truck, UserRound,
@@ -88,7 +88,7 @@ export function CaseView({ c, all, src, now, backHref }: { c: Case; all: Case[];
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-fg sm:text-xl">{c.subject[lang]}</h1>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
-            <Ref>{c.id}</Ref><span aria-hidden="true">·</span><span>{T.type(c.type)}{c.ship && ` · ${T.issue(c.ship.issue)}`}</span><span aria-hidden="true">·</span><span>{T.source(c.source)}</span><span aria-hidden="true">·</span><When at={c.openedAt} />
+            <Ref>{c.id}</Ref>{c.orderRef && <><span aria-hidden="true">·</span><a className="font-semibold text-brand-700 hover:underline dark:text-brand-300" href={link(`/dashboard/orders/${c.orderRef}`)}><Ref>#{c.orderRef}</Ref></a></>}<span aria-hidden="true">·</span><span>{T.type(c.type)}{c.ship && ` · ${T.issue(c.ship.issue)}`}</span><span aria-hidden="true">·</span><span>{T.source(c.source)}</span><span aria-hidden="true">·</span><When at={c.openedAt} />
           </p>
         </div>
         <div className="hidden shrink-0 items-center gap-2 sm:flex"><StatusBadge s={c.status} />{(c.priority === 'urgent' || c.priority === 'high') && <Badge tone={PRIO_TONE[c.priority]}>{T.prio(c.priority)}</Badge>}</div>
@@ -195,7 +195,7 @@ function Thread({ c }: { c: Case }) {
   return (
     <Card aria-labelledby="h-thread">
       <CardHeader id="h-thread" title={<span className="flex items-center gap-1.5">{tx('المحادثة', 'Conversation')}<InfoHint>{tx('رسائل العميل وردودك وملاحظات الفريق وسجل الحالة، بالترتيب.', 'Customer messages, your replies, team notes and the case history, in order.')}</InfoHint></span>} />
-      <ol className="space-y-3 px-4 pb-5 sm:px-5">{items.map((x) => <div key={x.key} className="contents">{x.node}</div>)}</ol>
+      <ol className="space-y-3 px-4 pb-5 sm:px-5">{items.map((x) => <Fragment key={x.key}>{x.node}</Fragment>)}</ol>
     </Card>
   );
 }
@@ -243,6 +243,7 @@ function Composer({ c, ctx, onPreview }: { c: Case; ctx: CaseContext; onPreview:
       return;
     }
     if (channel !== 'store' && !addressFor(contact, channel)) return;
+    setTried(false);
     onPreview();
   };
   const chans: (NoticeChannel | 'store')[] = c.type === 'question' ? (c.orderRef ? ['store', 'email', 'sms'] : ['store']) : ['email', 'sms', 'whatsapp'];

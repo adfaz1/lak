@@ -6,7 +6,7 @@ import { Gift, PackagePlus, Plus, Send, Trash2, Truck, UserRound } from 'lucide-
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
 import { link, navigate } from '../../../core/router';
-import { CARRIERS, type CarrierId, type L, type Order } from '../../merchant/domain';
+import { CARRIERS, shipmentRef, type CarrierId, type L, type Order } from '../../merchant/domain';
 import { caseMessage, type NoticeChannel } from '../../merchant/ops';
 import { cannedStore, couponsStore, customersStore, inboxStore, logAction, ordersStore, reviewsStore, settingsStore, teamStore } from '../../merchant/stores';
 import {
@@ -36,7 +36,7 @@ export function contactOf(ctx: CaseContext): Contact {
   return { email: ctx.order?.contact?.email ?? ctx.customer?.email, phone: ctx.order?.contact?.phone ?? ctx.customer?.phone };
 }
 export const addressFor = (c: Contact, ch: NoticeChannel) => (ch === 'email' ? c.email : c.phone);
-export const maskAddr = (v: string) => (v.includes('@') ? v.replace(/^(.).*(@.*)$/, '$1•••$2') : v.replace(/\d(?=\d{3})/g, '•'));
+export const maskAddr = (v: string) => (v.includes('@') ? v.replace(/^(.).*(@.*)$/, '$1•••$2') : `•••• ${v.replace(/\D/g, '').slice(-4)}`);
 
 /* ---------- Bulk assign / close ---------- */
 
@@ -145,7 +145,7 @@ export function EscalateModal({ c, order, onClose }: { c: Case; order?: Order; o
   const sim = simStore.use();
   const parcel = order?.fulfilments.filter((f) => !f.voided).at(-1);
   const [carrier, setCarrier] = useState<CarrierId>(c.ship?.carrier ?? parcel?.carrier ?? 'a');
-  const [tracking, setTracking] = useState(c.ship?.tracking ?? parcel?.tracking ?? parcel?.ref ?? '');
+  const [tracking, setTracking] = useState(c.ship?.tracking ?? parcel?.tracking ?? parcel?.ref ?? (order && order.ship !== 'none' ? shipmentRef(order) : ''));
   const [issue, setIssue] = useState<ShipIssue>(c.ship?.issue ?? 'late');
   const [tried, setTried] = useState(false);
   const run = () => {

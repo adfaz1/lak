@@ -46,7 +46,9 @@ export function useWorkText() {
         const spare = Number(f.spare) > 0 ? tx(`فائض ${f.spare} في ${locName(String(f.from)).ar}`, `${f.spare} spare in ${locName(String(f.from)).en}`) : '';
         return { title: productName(sku), sub: sku, why: [state, cover, spare].filter(Boolean).join(' · '), cta: Number(f.spare) > 0 ? tx('حضّر تحويلًا', 'Draft a transfer') : tx('المخزون', 'Inventory'), money: tx('مبيعات قد تفوت خلال 7 أيام (تقدير)', 'Sales at risk in 7 days (estimate)') };
       }
-      case 'settlement': return f.problem === 'diff'
+      // Items handed over by other sections (verification, customer service) carry their own wording in facts.
+      case 'settlement': if (f.problem === 'external') return { title: String(lang === 'ar' ? f.titleAr : f.titleEn), why: String(lang === 'ar' ? f.whyAr : f.whyEn), cta: String(lang === 'ar' ? f.ctaAr : f.ctaEn), money: f.moneyAr ? String(lang === 'ar' ? f.moneyAr : f.moneyEn) : '' };
+        return f.problem === 'diff'
         ? { title: tx(`التحويل ${f.payout} لا يطابق كشفه`, `Payout ${f.payout} does not match its statement`), why: tx('المبلغ المحوّل يختلف عن صافي العمليات في الكشف', 'The transferred amount differs from the statement net'), cta: tx('طابِق', 'Reconcile'), money: tx('الفرق', 'Difference') }
         : { title: tx(`التحويل ${f.payout} لم يصل بعد`, `Payout ${f.payout} has not arrived`), why: tx(`قيد التحويل منذ ${f.date}، أكثر من 3 أيام`, `In transit since ${f.date}, over 3 days`), cta: tx('افتح الكشف', 'Open statement'), money: tx('مبلغ التحويل', 'Payout amount') };
       case 'integration': {

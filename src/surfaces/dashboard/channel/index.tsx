@@ -1,6 +1,8 @@
 // «سوق لك» channel (`#/dashboard/channel`): store eligibility, which products shoppers see in the LAK marketplace
 // and why, fees awaiting approval, pause / resume with a consequence preview, and marketplace orders.
 // View only: the rules come from ./model (which uses the marketplace's own rules in market/domain.ts).
+import { verificationStore } from '../../merchant/verification-store';
+import { isVerified } from '../../merchant/verification';
 import { useState, type ReactNode } from 'react';
 import {
   BadgeCheck, CheckCircle2, Circle, Clock, Eye, EyeOff, Globe2, Megaphone, PackageOpen, Pencil, SearchX, Send, ShoppingBag, Store, Truck, Users, Warehouse,
@@ -85,7 +87,10 @@ function Channel({ route }: { route: Route }) {
   const role = useRole();
   const state = useDashState();
   const review = useReviewMode();
-  const fx = channelStore.use();
+  const fxRaw = channelStore.use();
+  // Verification has one source (settings → verification); the channel no longer keeps its own flag.
+  const vStatus = verificationStore.use().status;
+  const fx = { ...fxRaw, verified: fxRaw.verified && isVerified(vStatus) };
   const products = productsStore.use();
   const levels = levelsStore.use();
   const orders = ordersStore.use();

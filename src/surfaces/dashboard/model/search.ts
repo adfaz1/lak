@@ -35,11 +35,13 @@ const hasAll = (hay: string, ws: string[]) => ws.every((w) => hay.includes(w));
 function orderHits(orders: Order[], q: string): Hit[] {
   const ws = words(q.replace('#', ''));
   const d = digits(q);
+  const numeric = /^[#\s\d]+$/.test(norm(q));
   const scored = orders.map((o) => {
     const ref = o.ref;
     let score = 0;
     if (d && ref === d) score = 100;
-    else if (d.length >= 3 && ref.includes(d)) score = 60;
+    // Part of a number only when the query is a number («104»), not digits inside a SKU or a command.
+    else if (d.length >= 3 && numeric && ref.includes(d)) score = 60;
     else if (hasAll(norm(`${o.customer.ar} ${o.customer.en} ${o.city.ar} ${o.city.en}`), ws)) score = 40;
     return { o, score };
   }).filter((x) => x.score > 0).sort((a, b) => b.score - a.score || a.o.hoursAgo - b.o.hoursAgo);
@@ -121,7 +123,7 @@ function transferIntent(raw: string, n: string, data: SearchData): Intent | null
   if (sku) query.sku = sku;
   if (to) query.to = to.id;
   if (sku && qty) query.qty = String(qty);
-  const bits = [sku && { ar: sku, en: sku }, qty && sku && { ar: `${qty} وحدة`, en: `${qty} units` }, to && { ar: `إلى ${to.name.ar}`, en: `to ${to.name.en}` }].filter(Boolean) as L[];
+  const bits = [sku && { ar: sku, en: sku }, qty && sku && { ar: `الكمية ${qty}`, en: `qty ${qty}` }, to && { ar: `إلى ${to.name.ar}`, en: `to ${to.name.en}` }].filter(Boolean) as L[];
   return {
     id: 'cmd-transfer', tool: 'inventory-transfers', need: 'inventory.transfer', title: { ar: 'تحويل مخزون بين المستودعات', en: 'Transfer stock between warehouses' },
     sub: { ar: [...bits.map((b) => b.ar), 'مسودة، لا تتحرك وحدات قبل «أرسل»'].join(' · '), en: [...bits.map((b) => b.en), 'draft; nothing moves until you send it'].join(' · ') },

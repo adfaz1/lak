@@ -238,7 +238,7 @@ function DocsSection({ draft, set, tried, errors, flagged }: { draft: VForm; set
               <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', f ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400' : 'bg-surface-2 text-muted')}>{f ? <BadgeCheck className="size-4" aria-hidden="true" /> : <FileUp className="size-4" aria-hidden="true" />}</span>
               <div className="min-w-0 flex-1 basis-48">
                 <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-fg">{DOC_LABEL[kind][lang]}{!required && <span className="text-xs font-normal text-subtle">{tx('(اختياري)', '(optional)')}</span>}{flagged.has(kind) && <Badge tone="red">{tx('مطلوب تصحيحه', 'Needs a fix')}</Badge>}</p>
-                <p className="truncate text-xs text-muted">{busy === kind ? tx('يُرفع…', 'Uploading…') : f ? <><bdi>{f.name}</bdi> · {kb(f.size)}{!url && tx(' · أعد الرفع للمعاينة', ' · re-upload to preview')}</> : tx('لم يُرفع بعد', 'Not uploaded yet')}</p>
+                <p className="truncate text-xs text-muted">{busy === kind ? tx('يُرفع…', 'Uploading…') : f ? <><bdi>{f.name}</bdi> · <bdi dir="ltr">{kb(f.size)}</bdi>{!url && tx(' · أعد الرفع للمعاينة', ' · re-upload to preview')}</> : tx('لم يُرفع بعد', 'Not uploaded yet')}</p>
                 {problem && <p role="alert" className="mt-0.5 text-xs font-medium text-red-600 dark:text-red-400">{problem}</p>}
               </div>
               <input ref={(el) => { inputs.current[kind] = el; }} type="file" className="sr-only" tabIndex={-1} aria-hidden="true" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" data-doc={kind}
@@ -307,7 +307,7 @@ function HistoryCard({ v }: { v: Verification }) {
         {v.history.map((h, i) => (
           <li key={i} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2.5 text-[13px]">
             <Badge tone={STATUS_TONE[h.status]}>{STATUS_LABEL[h.status][lang]}</Badge>
-            <span className="text-muted">{h.by}</span>
+            <span className="text-muted">{h.by.startsWith('LAK') ? tx('فريق لك (محاكاة)', 'LAK team (simulated)') : h.by}</span>
             {h.note && <span className="min-w-0 flex-1 truncate text-fg">{h.note}</span>}
             <span className="ms-auto text-xs tabular-nums text-subtle">{when(h.at, lang)}</span>
           </li>
@@ -339,7 +339,7 @@ function ReviewerSim({ v }: { v: Verification }) {
     setAsk(null);
   };
   const label: Record<Decision, string> = { under_review: tx('ابدأ المراجعة', 'Start review'), needs_info: tx('اطلب استكمالًا', 'Ask for more'), verified: tx('وثّق', 'Verify'), rejected: tx('ارفض', 'Reject') };
-  const options = v.form.entity ? [...requiredDocs(v.form).map((d) => ({ k: d.kind as string, l: DOC_LABEL[d.kind] })), ...requiredFields(v.form).filter((k) => k !== 'entity').map((k) => ({ k: k as string, l: FIELD_LABEL[k] }))] : [];
+  const options = v.form.entity ? [...requiredDocs(v.form).map((d) => ({ k: d.kind as string, l: DOC_LABEL[d.kind] })), ...requiredFields(v.form).filter((k) => k !== 'entity' && !requiredDocs(v.form).some((d) => d.kind === (k as string))).map((k) => ({ k: k as string, l: FIELD_LABEL[k] }))] : [];
   return (
     <div className="space-y-3 rounded-2xl border border-dashed border-border bg-surface px-4 py-3" role="region" aria-label={tx('مراجع لك (محاكاة)', 'LAK reviewer (simulated)')}>
       <div className="flex flex-wrap items-center gap-2">

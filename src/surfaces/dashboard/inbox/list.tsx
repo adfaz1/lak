@@ -119,19 +119,26 @@ export function CaseList({ route, all, me, now, current, canBulk }: { route: Rou
                   <a href={caseHref(c.id)} aria-current={on ? 'true' : undefined} className="flex min-w-0 flex-1 items-start gap-3">
                     <TypeIcon t={c.type} />
                     <span className="min-w-0 flex-1">
-                      <span className="flex items-baseline justify-between gap-2">
+                      <span className={cn('flex items-baseline gap-2', compact ? 'justify-between' : 'justify-between md:justify-start')}>
                         <span className={cn('truncate text-sm text-fg', c.status === 'new' ? 'font-bold' : 'font-semibold')}>{c.customer[lang]}</span>
                         <span className="shrink-0 text-[11px] text-muted"><Ref>{c.orderRef ? `#${c.orderRef}` : c.id}</Ref></span>
                       </span>
                       <span className="block truncate text-[13px] text-fg">{T.type(c.type)} · {c.subject[lang]}</span>
                       {last && <span className="mt-0.5 block truncate text-xs text-muted" dir="auto">{last.from === 'store' ? tx('أنت: ', 'You: ') : ''}{last.text}</span>}
-                      <span className="mt-2 flex flex-wrap items-center gap-1.5">
+                      <span className={cn('mt-2 flex flex-wrap items-center gap-1.5', !compact && 'md:hidden')}>
                         <SlaChip c={c} now={now} />
                         {!compact && <StatusBadge s={c.status} />}
                         {(c.priority === 'urgent' || c.priority === 'high') && <Badge tone={PRIO_TONE[c.priority]}>{T.prio(c.priority)}</Badge>}
                         {c.assignee ? <span className="text-[11px] text-muted">{c.assignee}</span> : <span className="text-[11px] text-subtle">{tx('غير مسندة', 'Unassigned')}</span>}
                       </span>
                     </span>
+                    {!compact && (
+                      <span className="hidden w-[420px] shrink-0 items-center gap-3 self-center md:grid md:grid-cols-[150px_110px_1fr]">
+                        <span><SlaChip c={c} now={now} /></span>
+                        <span className="flex flex-wrap gap-1"><StatusBadge s={c.status} />{(c.priority === 'urgent' || c.priority === 'high') && <Badge tone={PRIO_TONE[c.priority]}>{T.prio(c.priority)}</Badge>}</span>
+                        <span className={cn('truncate text-xs', c.assignee ? 'text-fg' : 'text-subtle')}>{c.assignee ?? tx('غير مسندة', 'Unassigned')}</span>
+                      </span>
+                    )}
                   </a>
                 </li>
               );

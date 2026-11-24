@@ -42,7 +42,9 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
   const role = testStore.use().role;
   const perms = orderPerms(role);
   const who = useActor();
-  const [dialog, setDialog] = useState<Dialog>(null);
+  // A command from global search («refund 10479», «return 10479») opens the matching dialog once.
+  const act = route.query.get('act');
+  const [dialog, setDialog] = useState<Dialog>(() => (act === 'refund' || act === 'return' ? act : null));
   const backHref = ohref('', toParams(readQuery(route.query)));
   const back = { href: backHref, label: tx('الطلبات', 'Orders') };
   const o = state === 'empty' ? undefined : all.find((x) => x.ref === refId);

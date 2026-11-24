@@ -2,6 +2,7 @@
 // Money states with definitions and drill-downs, settlement issues, payouts with a reconciling statement and mismatch /
 // returned-payout resolution, the ledger with URL filters, held funds, invoices, CSV export by period, and plan & billing.
 // View only: rules live in ./model.ts and merchant/finance.ts.
+import { PayoutHoldNotice } from '../settings/verification-notice';
 import { useState, type ReactNode } from 'react';
 import {
   Lock, Download, Landmark, ArrowLeft, Check, Minus, Receipt, Wallet, Clock, BadgeCheck, Send, Banknote, Percent, RotateCcw, SearchX, FileX, CircleDollarSign, ShieldAlert, FlaskConical, FileText,
@@ -128,6 +129,7 @@ function Overview({ route }: { route: Route }) {
     <div className="space-y-6">
       {header}
       <FinanceReviewSim />
+      <PayoutHoldNotice />
       <IssuesPanel issues={issues} />
       <MoneyCards data={data} empty={empty} />
       <Card>
