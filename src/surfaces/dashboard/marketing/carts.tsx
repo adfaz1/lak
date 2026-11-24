@@ -67,7 +67,7 @@ export default function Carts({ route, empty, canSend }: { route: Route; empty: 
       code: discCoupon.code, isNew: disc.kind === 'new', maxCost,
       label: discCoupon.type === 'percent' ? { ar: `خصم ${discCoupon.value}%`, en: `${discCoupon.value}% off` } : { ar: 'خصم ثابت', en: 'Fixed discount' },
     } : undefined,
-    onStart: disc.kind === 'new' && discCoupon ? () => couponsStore.set((cs) => [discCoupon, ...cs]) : undefined,
+    onStart: disc.kind === 'new' && discCoupon ? () => { couponsStore.set((cs) => [discCoupon, ...cs]); setDisc({ kind: 'existing', code: discCoupon.code }); } : undefined,
     finish: (handed) => {
       const rec = simulateRecovery(cartsStore.get(), handed, discCoupon, productsStore.get());
       const campaign = nextCampaignId(campaignsStore.get());

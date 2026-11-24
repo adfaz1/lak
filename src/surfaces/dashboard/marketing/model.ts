@@ -264,11 +264,11 @@ export const maxDiscountCost = (c: Coupon | undefined, carts: Cart[], products: 
 
 /**
  * Simulated attribution: which handed-over carts were completed within the window. Deterministic so the demo is
- * stable: every third cart (by number) completes; with a discount, every second. Real attribution needs orders
+ * stable: every fourth cart (by number) completes; with a discount, every third. Real attribution needs orders
  * linked to the message (click or code) on the server.
  */
 export function simulateRecovery(carts: Cart[], handedIds: string[], coupon: Coupon | undefined, products: Product[]) {
-  const every = coupon ? 2 : 3;
+  const every = coupon ? 3 : 4;
   const recovered = carts.filter((c) => handedIds.includes(c.id) && !c.purchased && Number(c.id.replace(/\D/g, '')) % every === 0);
   const rows = recovered.map((c) => { const d = cartDiscount(coupon, c, products); return { id: c.id, customerId: c.customerId, revenue: c.value - d, discount: d }; });
   return { rows, orders: rows.length, revenue: rows.reduce((s, r) => s + r.revenue, 0), discount: rows.reduce((s, r) => s + r.discount, 0) };

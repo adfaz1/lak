@@ -32,7 +32,7 @@ export function auditOrder(prev: Order | undefined, next: Order) {
   }
 }
 const AUDIT_TEXT: Record<string, [string, string]> = {
-  created: ['الطلب مدفوع/أُنشئ', 'Order paid or created'], confirmed: ['أُكّد الطلب', 'Order confirmed'], confirmUndone: ['تراجع عن التأكيد', 'Confirmation undone'],
+  confirmed: ['أُكّد الطلب', 'Order confirmed'], confirmUndone: ['تراجع عن التأكيد', 'Confirmation undone'],
   labelIssued: ['صدر ملصق', 'Label issued'], labelFailed: ['فشل إصدار ملصق', 'Label failed'], partialFulfilled: ['جُهّز وصدر ملصق', 'Fulfilled, label issued'],
   refundRequested: ['طُلب استرداد', 'Refund requested'], refundConfirmed: ['أُكّد استرداد', 'Refund confirmed'], refundFailed: ['رُفض استرداد', 'Refund declined'],
   restocked: ['أُعيد للمخزون', 'Restocked'], slipPrinted: ['طُبعت قائمة تعبئة', 'Packing slip printed'], manualCreated: ['طلب يدوي', 'Manual order'],
