@@ -34,7 +34,7 @@ const C = {
       ['هوية التاجر لمتجره', 'هوية لك في منتجاتنا، وهوية التاجر في متجره وتطبيقه.'],
     ] as [string, string][],
     facts: 'معلومات الشركة', founded: 'سنة التأسيس', hq: 'المقر', cr: 'السجل التجاري',
-    join: 'ابدأ إنشاء متجرك', talk: 'تواصل معنا', fix: 'صحّح الحقول المعلّمة', draftBadge: 'مسودة',
+    join: 'ابدأ إنشاء متجرك', talk: 'تواصل معنا', fix: 'صحّح الحقول المعلّمة', draftBadge: 'مسودة', noDocs: 'لا توجد وثائق منشورة بعد', noDocsBody: 'تظهر هنا الشروط والسياسات بعد اعتمادها.',
   },
   en: {
     cEyebrow: 'Contact us', cTitle: 'How can we reach you?', cLead: 'Write to us about plans, your store or a problem you hit. This form is simulated in the preview and sends no messages.',
@@ -59,7 +59,7 @@ const C = {
       ['The merchant’s brand in their store', 'LAK’s brand on our products; the merchant’s brand on their store and app.'],
     ],
     facts: 'Company facts', founded: 'Founded', hq: 'Headquarters', cr: 'Commercial registration',
-    join: 'Start your store', talk: 'Contact us', fix: 'Fix the marked fields', draftBadge: 'Draft',
+    join: 'Start your store', talk: 'Contact us', fix: 'Fix the marked fields', draftBadge: 'Draft', noDocs: 'No documents published yet', noDocsBody: 'Terms and policies appear here once approved.',
   },
 };
 
@@ -175,7 +175,7 @@ export function Legal({ id }: { id?: string }) {
       <div className={cn(wrap, 'space-y-12 py-14 sm:py-20')}>
         <Intro eyebrow={c.lEyebrow} title={id ? c.missing : c.lTitle} lead={c.lLead} />
         {docs.length === 0 ? (
-          <Card><EmptyState as="h2" icon={<FileText className="size-6" aria-hidden="true" />} title={c.pendingDocs}>{c.pendingDocsWhy}</EmptyState></Card>
+          <Card><EmptyState as="h2" icon={<FileText className="size-6" aria-hidden="true" />} title={c.noDocs}>{c.noDocsBody}</EmptyState></Card>
         ) : (
           <ul className="grid gap-4 md:grid-cols-3">
             {docs.map((d) => (
