@@ -14,7 +14,7 @@ import { shippingQuote as quoteZone } from '../settings/model';
 import type { Product } from '../../merchant/catalog';
 import { can, canSee, type Role } from '../../merchant/perms';
 import {
-  act, canMarkShipped, collected as collectedOf, fulfilEffects, markShipped, openReturns, payView, placedAt, refundableNow, stamp, takeHeld,
+  act, canMarkShipped, collected as collectedOf, confirmTransfer, fulfilEffects, markShipped, openReturns, payView, placedAt, refundableNow, stamp, takeHeld,
   type Actor, type PayView, type StockEffect,
 } from '../../merchant/ops';
 import type { Level, StockLog } from '../../merchant/inventory';
@@ -32,9 +32,9 @@ export const SORTS: Sort[] = ['new', 'old', 'high', 'low'];
 export type ListView = View | 'cancelled';
 export const LIST_VIEWS: ListView[] = [...VIEW_IDS, 'cancelled'];
 const inView = (v: ListView) => (o: Order) => (v === 'cancelled' ? !!o.cancelled : VIEWS[v](o));
-export const PAY_METHODS = ['card', 'applepay', 'bnpl', 'cod', 'manual'] as const;
+export const PAY_METHODS = ['card', 'applepay', 'bnpl', 'cod', 'bank', 'manual'] as const;
 export type PayMethodFilter = (typeof PAY_METHODS)[number];
-export const methodOf = (o: Order): PayMethodFilter | undefined => (o.manual ? (o.manual.pay === 'cod' ? 'cod' : 'manual') : o.payment?.method);
+export const methodOf = (o: Order): PayMethodFilter | undefined => (o.manual ? (o.manual.pay === 'cod' ? 'cod' : 'manual') : o.payment?.method === 'bank' ? 'manual' : o.payment?.method);
 
 export interface ListQuery {
   view: ListView; q: string; ch?: Channel; pay?: Pay; ful?: Ful; ship?: Ship; sort: Sort; page: number;
@@ -156,9 +156,9 @@ export function ageOf(hours: number): Age {
   return { unit: 'd', n: Math.round(hours / 24) };
 }
 
-export type NextKind = 'fulfil' | 'fulfilRest' | 'contact' | 'ship' | 'deliver' | 'cancelRequest' | 'returns' | 'none';
+export type NextKind = 'fulfil' | 'fulfilRest' | 'contact' | 'ship' | 'deliver' | 'cancelRequest' | 'returns' | 'transfer' | 'none';
 export type NextReason = 'payFailed' | 'late' | 'ready' | 'partial' | 'refundPending' | 'labelIssued' | 'inTransit' | 'delivered' | 'refunded'
-  | 'verifying' | 'link' | 'cancelled' | 'cancelRequest' | 'returnOpen';
+  | 'verifying' | 'link' | 'cancelled' | 'cancelRequest' | 'returnOpen' | 'bankDue';
 export interface Next { kind: NextKind; reason: NextReason; remaining: number }
 
 /**
@@ -171,6 +171,7 @@ export function nextAction(o: Order): Next {
   if (o.cancelRequest?.state === 'open') return { kind: 'cancelRequest', reason: 'cancelRequest', remaining };
   const pv = payView(o);
   if (pv === 'verifying') return { kind: 'none', reason: 'verifying', remaining };
+  if (pv === 'bank_due') return { kind: 'transfer', reason: 'bankDue', remaining };
   if (pv === 'link') return { kind: 'contact', reason: 'link', remaining };
   if (o.pay === 'failed') return { kind: 'contact', reason: 'payFailed', remaining };
   if (openReturns(o).length) return { kind: 'returns', reason: 'returnOpen', remaining };
@@ -476,6 +477,23 @@ export function siblings(options: SkuOption[], sku: string): SkuOption[] {
 /** The location with the most sellable units of a SKU (first listed wins a tie), or undefined when none has any. */
 export function bestStockLoc(o: SkuOption, locs: LocId[], need = 1): LocId | undefined {
   return locs.filter((l) => (o.avail[l] ?? 0) >= need).sort((a, b) => (o.avail[b] ?? 0) - (o.avail[a] ?? 0))[0];
+}
+
+/** Confirm a bank transfer and hold stock for each line, as the store does for paid orders. */
+export function confirmTransferWithStock(o: Order, levels: Level[], who: Actor, now: number, note = ''): { order: Order; levels: Level[] } {
+  const paid = confirmTransfer(o, who, now, note);
+  if (paid === o) return { order: o, levels };
+  let lv = levels;
+  let held = 0;
+  const items = paid.items.map((it) => {
+    if (!it.sku || it.reserved || !lv.some((l) => l.sku === it.sku)) return it;
+    const r = reserve(lv, it.sku, it.qty);
+    lv = r.levels;
+    held += it.qty - r.short;
+    return { ...it, reserved: r.picks };
+  });
+  const order = { ...paid, items };
+  return { order: held ? act(order, 'stockReserved', who, now, { units: held }) : order, levels: lv };
 }
 
 /* ---------- Manual order (`#/dashboard/orders/new`) ---------- */

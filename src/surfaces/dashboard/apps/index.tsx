@@ -193,7 +193,7 @@ function Detail({ id }: { id: string }) {
       {review && a.state !== 'not_connected' && (
         <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-xs text-muted">
           <span className="font-semibold">{tx('مراجعة: الإجراء التالي', 'Review: next action')}</span>
-          <Select aria-label={tx('نتيجة الإجراء التالي', 'Next action outcome')} className="h-8 w-auto" value={sim.failNext ?? ''} onChange={(e) => appsSimStore.set({ failNext: (e.target.value || null) as Cause | null })}>
+          <Select aria-label={tx('نتيجة الإجراء التالي', 'Next action outcome')} className="h-8 w-auto" style={{ width: "auto" }} value={sim.failNext ?? ''} onChange={(e) => appsSimStore.set({ failNext: (e.target.value || null) as Cause | null })}>
             <option value="">{tx('ينجح', 'Succeeds')}</option>{(Object.keys(CAUSES) as Cause[]).map((c) => <option key={c} value={c}>{tx('يفشل: ', 'Fails: ')}{c}</option>)}
           </Select>
         </div>

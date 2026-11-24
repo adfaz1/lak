@@ -2,7 +2,7 @@
 // buy X get Y), items in scope, conditions, limits, schedule; live preview on a sample basket and conflict check.
 // Unsaved input is kept for the session (navigating away does not lose it). Editing a live offer is reviewed in a Modal.
 import { useState, type ReactNode } from 'react';
-import { ArrowLeft, ReceiptText, SearchX, Sparkles, Ticket } from 'lucide-react';
+import { ArrowLeft, Pause, Play, ReceiptText, SearchX, Sparkles, Ticket } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import { link, navigate } from '../../../core/router';
@@ -15,7 +15,7 @@ import { Alert, Checkbox, Field, Input, Modal, PageHeader, SaveBar, Select, useT
 import { skuPhoto, productIdForSku } from '../model/media';
 import { can } from '../../merchant/perms';
 import { useUnsaved } from '../unsaved';
-import { SAMPLES, buildCoupon, checkDraft, couponConflicts, couponDiff, couponState, draftFromCoupon, emptyDraft, previewOffer, scopeOptions, type CouponField } from './model';
+import { SAMPLES, buildCoupon, checkDraft, couponActions, couponConflicts, couponDiff, couponState, draftFromCoupon, emptyDraft, previewOffer, scopeOptions, type CouponField } from './model';
 import { useCouponText } from './coupons';
 import { Locked, useRole } from './access';
 
@@ -38,8 +38,10 @@ export default function CouponEditor({ code, auto }: { code: string; auto?: bool
   const d = drafts[code] ?? initial;
   const dirty = JSON.stringify(d) !== JSON.stringify(initial);
   const [tried, setTried] = useState(false);
-  const [sampleId, setSampleId] = useState(SAMPLES[0].id);
+  // Start on the first sample the offer applies to, so a scoped or buy-X-get-Y offer shows its effect at once.
+  const [sampleId, setSampleId] = useState(() => (base && SAMPLES.find((x) => !previewOffer(base, x, products).block)?.id) || SAMPLES[0].id);
   const [review, setReview] = useState(false);
+  const [statusTo, setStatusTo] = useState<'activate' | 'pause' | null>(null);
   const canManage = can(role, 'marketing.manage');
   useUnsaved(dirty, { ar: 'تعديلات العرض', en: 'Offer edits' });
 
@@ -105,9 +107,27 @@ export default function CouponEditor({ code, auto }: { code: string; auto?: bool
 
   return (
     <div className="space-y-6 pb-20">
-      <PageHeader back={{ href: LIST, label: tx('الكوبونات', 'Coupons') }}
+      <PageHeader back={{ href: LIST, label: tx('الكوبونات والعروض', 'Coupons & offers') }}
         title={isNew ? (isAuto ? tx('عرض تلقائي جديد', 'New automatic offer') : tx('كوبون جديد', 'New coupon')) : <Ref>{code}</Ref>}
-        meta={base ? <><Badge tone={live ? 'green' : 'gray'}>{ct.state(couponState(base))}</Badge><span className="text-xs text-muted tabular-nums">{tx(`استُخدم ${base.used} مرة`, `Used ${base.used} times`)}</span></> : undefined} />
+        meta={base ? <><Badge tone={live ? 'green' : 'gray'}>{ct.state(couponState(base))}</Badge><span className="text-xs text-muted tabular-nums">{tx(`استُخدم ${base.used} مرة`, `Used ${base.used} times`)}</span></> : undefined}
+        actions={base && canManage && !dirty && couponActions(base).length ? (couponActions(base)[0] === 'activate'
+          ? <Button onClick={() => setStatusTo('activate')}><Play className="size-4" aria-hidden="true" />{tx('فعّل', 'Activate')}</Button>
+          : <Button variant="secondary" onClick={() => setStatusTo('pause')}><Pause className="size-4" aria-hidden="true" />{tx('أوقف', 'Pause')}</Button>) : undefined} />
+      {statusTo && base && (
+        <Modal title={statusTo === 'activate' ? tx(`تفعيل ${base.code}`, `Activate ${base.code}`) : tx(`إيقاف ${base.code}`, `Pause ${base.code}`)} onClose={() => setStatusTo(null)}
+          footer={<><Button variant="secondary" onClick={() => setStatusTo(null)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => {
+            couponsStore.set((cs) => cs.map((x) => (x.code === base.code ? { ...x, status: statusTo === 'activate' ? 'active' : 'paused' } : x)));
+            logAction('marketing', statusTo === 'activate' ? { ar: `فعّل العرض ${base.code}`, en: `Activated offer ${base.code}` } : { ar: `أوقف العرض ${base.code}`, en: `Paused offer ${base.code}` }, { target: base.code });
+            toast({ tone: 'ok', text: statusTo === 'activate' ? tx(`فُعّل ${base.code}`, `${base.code} activated`) : tx(`أُوقف ${base.code}`, `${base.code} paused`) });
+            setStatusTo(null);
+          }}>{statusTo === 'activate' ? tx('فعّل', 'Activate') : tx('أوقف', 'Pause')}</Button></>}>
+          <ul className="space-y-1.5 text-sm text-fg">
+            {statusTo === 'activate'
+              ? <><li>{base.auto ? tx('يُطبَّق تلقائيًا في سلة المتجر على كل سلة تحقق شروطه.', 'Applies automatically in the store bag to every basket that meets it.') : tx('يُقبل الكود عند الدفع في كل القنوات.', 'The code is accepted at checkout in every channel.')}</li><li>{tx('لا يُرسل للعملاء تلقائيًا.', 'It is not sent to customers automatically.')}</li></>
+              : <><li>{tx('يتوقف في الطلبات الجديدة.', 'It stops for new orders.')}</li><li>{tx('الطلبات السابقة لا تتغير.', 'Past orders do not change.')}</li></>}
+          </ul>
+        </Modal>
+      )}
       {drafts[code] && dirty && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We kept your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard')}</Button>} />}
       {!canManage && <Locked>{tx('دورك يعرض الكوبون فقط.', 'Your role can only view this coupon.')}</Locked>}
 
@@ -205,7 +225,7 @@ export default function CouponEditor({ code, auto }: { code: string; auto?: bool
                 {SAMPLES.map((s) => (
                   <button key={s.id} type="button" role="radio" aria-checked={s.id === sampleId} onClick={() => setSampleId(s.id)}
                     className={cn('flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-start transition-colors', s.id === sampleId ? 'border-brand-400 bg-brand-500/5' : 'border-border hover:border-brand-300')}>
-                    <span className="flex -space-x-2 rtl:space-x-reverse">{s.skus.map((k) => <ProductImage key={k} src={skuPhoto(k)} alt={products.find((p) => p.id === productIdForSku(k))?.name[lang] ?? k} size={32} className="ring-2 ring-surface" />)}</span>
+                    <span className="flex -space-x-2 rtl:space-x-reverse">{s.skus.map((k, i) => <ProductImage key={`${k}-${i}`} src={skuPhoto(k)} alt={products.find((p) => p.id === productIdForSku(k))?.name[lang] ?? k} size={32} className="ring-2 ring-surface" />)}</span>
                     <span className="min-w-0 flex-1 text-[13px] font-medium text-fg">{s.label[lang]}</span>
                     <Money v={s.subtotal} className="text-xs text-muted" />
                   </button>

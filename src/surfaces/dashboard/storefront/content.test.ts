@@ -9,6 +9,7 @@ import {
   resolveMenu, robotsTxt, sitemapUrls, slugIssue, snippet, toBlocks,
 } from './content';
 
+import type { MenuItem } from './content';
 const products = productFixtures();
 const levels = initialLevels(products.filter((p) => p.type !== 'digital').flatMap(skusOf));
 const c = contentFixture(Date.parse('2026-11-24T12:00:00Z'));
@@ -46,7 +47,7 @@ describe('pages', () => {
 
 describe('menus', () => {
   it('resolves links to store paths and skips unpublished or missing targets', () => {
-    const items = [
+    const items: MenuItem[] = [
       { id: 'a', label: { ar: '', en: '' }, target: { kind: 'category' as const, id: 'bags' } },
       { id: 'b', label: { ar: '', en: '' }, target: { kind: 'page' as const, id: 'pg3' } },
       { id: 'c', label: { ar: 'خصوصية', en: 'Privacy' }, target: { kind: 'policy' as const, id: 'privacy' } },
@@ -97,5 +98,23 @@ describe('SEO', () => {
   });
   it('shows only https social links in a fixed order', () => {
     expect(socialLinks({ tiktok: 'https://tiktok.com/@a', instagram: 'https://instagram.com/a', x: 'javascript:alert(1)' }).map((s) => s.id)).toEqual(['instagram', 'tiktok']);
+  });
+});
+
+describe('bank transfer at checkout (settings → storefront)', () => {
+  it('is offered only when the merchant saved bank details, and amex counts as card', async () => {
+    const { storeConfig } = await import('../../storefront/bridge');
+    const { providerFixtures } = await import('../../merchant/workspace');
+    const { applyPayment } = await import('../../storefront/domain');
+    const base = { store: { name: 'دار نُوى' }, providers: providerFixtures().map((p) => (p.id === 'amex' ? { ...p, state: 'active' as const } : p)), plan: 'plus' as const, cod: { min: 0, max: 200000 }, policies: policyFixtures(), zones: [] };
+    const ck = { guest: true, codPerCustomer: null };
+    expect(storeConfig(base, ck).methods).not.toContain('bank');
+    const bank = { bank: 'مصرف الراجحي', beneficiary: 'مؤسسة دار نوى', iban: 'SA0380000000608010167519' };
+    const cfg = storeConfig({ ...base, bank }, ck);
+    expect(cfg.methods).toContain('bank');
+    expect(cfg.bank?.iban).toBe(bank.iban);
+    if (providerFixtures().some((p) => p.id === 'amex')) expect(cfg.methods).toContain('card');
+    const order = { pay: { method: 'card', state: 'awaiting', attempts: [] }, lines: [], totals: { discount: 0, shipping: 0 } } as never;
+    expect(applyPayment(order, { type: 'bank' }, 'bank', 1).order.pay).toMatchObject({ method: 'bank', state: 'transfer_due' });
   });
 });

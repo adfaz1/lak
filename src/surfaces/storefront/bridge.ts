@@ -9,7 +9,7 @@ import { CUSTOMER, openReturn, storeReturnState } from '../merchant/ops';
 import { bestAutoOffer, offerDiscount, type Coupon as MCoupon, type OfferLine } from '../merchant/growth';
 import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type SocialId, type StoreDetails, type Zone } from '../merchant/workspace';
 import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
-import type { Plan } from '../merchant/finance';
+import type { BankDetails, Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
 import {
   CITIES, DAY, MERCHANT, cityById, computeTotals, isSettled, vatIn,
@@ -87,6 +87,8 @@ export interface StoreConfig {
   methods: PayMethod[];
   bnplNames: L[];
   zones: Zone[];
+  /** Bank-transfer details shown to the shopper when they choose bank transfer; null = not offered. */
+  bank: BankDetails | null;
 }
 
 const FIXTURE_NAME_AR = 'دار نُوى';
@@ -102,22 +104,22 @@ export function returnDaysFrom(policies: Policy[]): number {
   return m ? Number(m[1]) : MERCHANT.returnDays;
 }
 
-const METHOD_OF: Record<string, PayMethod | undefined> = { mada: 'card', cards: 'card', applepay: 'applepay', tabby: 'bnpl', tamara: 'bnpl', cod: 'cod' };
-/** Store payment methods from connected providers. Bank transfer and wallets the store cannot take are left out. */
+const METHOD_OF: Record<string, PayMethod | undefined> = { mada: 'card', cards: 'card', amex: 'card', applepay: 'applepay', tabby: 'bnpl', tamara: 'bnpl', cod: 'cod', bank: 'bank' };
+/** Store payment methods from connected providers. Bank transfer is offered only with bank details saved (see storeConfig); wallets the store cannot take are left out. */
 export function payMethodsFrom(providers: Provider[], plan: Plan): { methods: PayMethod[]; bnplNames: L[] } {
   const live = visibleAtCheckout(providers, plan);
-  const methods = (['card', 'applepay', 'bnpl', 'cod'] as PayMethod[]).filter((m) => live.some((p) => METHOD_OF[p.id] === m));
+  const methods = (['card', 'applepay', 'bnpl', 'cod', 'bank'] as PayMethod[]).filter((m) => live.some((p) => METHOD_OF[p.id] === m));
   return { methods, bnplNames: live.filter((p) => METHOD_OF[p.id] === 'bnpl').map((p) => p.name) };
 }
 
 export function storeConfig(
-  s: { store: Pick<StoreDetails, 'name'>; providers: Provider[]; plan: Plan; cod: { min: number; max: number }; policies: Policy[]; zones: Zone[] },
+  s: { store: Pick<StoreDetails, 'name'>; providers: Provider[]; plan: Plan; cod: { min: number; max: number }; policies: Policy[]; zones: Zone[]; bank?: BankDetails | null },
   checkout: { guest: boolean; codPerCustomer: number | null },
 ): StoreConfig {
   const pm = payMethodsFrom(s.providers, s.plan);
   return {
     name: storeName(s.store), codFee: 0, codMin: s.cod.min, codMax: s.cod.max, codOpenLimit: checkout.codPerCustomer, guest: checkout.guest,
-    returnDays: returnDaysFrom(s.policies), methods: pm.methods, bnplNames: pm.bnplNames, zones: s.zones,
+    returnDays: returnDaysFrom(s.policies), methods: s.bank?.iban ? pm.methods : pm.methods.filter((x) => x !== 'bank'), bank: s.bank?.iban ? s.bank : null, bnplNames: pm.bnplNames, zones: s.zones,
   };
 }
 
@@ -269,7 +271,7 @@ export function merchantPay(s: PayState): MPay {
   return isSettled(s) ? 'paid' : 'failed';
 }
 const paymentState = (s: PayState): NonNullable<MOrder['payment']>['state'] =>
-  s === 'paid' || s === 'cod_due' || s === 'cod_collected' || s === 'verifying' ? s : s === 'challenge' ? 'verifying' : 'declined';
+  s === 'paid' || s === 'cod_due' || s === 'cod_collected' || s === 'verifying' ? s : s === 'challenge' || s === 'transfer_due' ? 'verifying' : 'declined';
 
 export interface Book { orders: MOrder[]; levels: Level[]; customers: Customer[]; coupons: MCoupon[] }
 

@@ -40,8 +40,8 @@ export function useLabels() {
   const tx = useTx();
   return {
     view: (v: ListView) => ({ all: tx('الكل', 'All'), needs: tx('يحتاج تجهيزًا', 'To fulfil'), late: tx('متأخر', 'Late'), payfail: tx('دفع لم يكتمل', 'Payment incomplete'), shipped: tx('شُحن', 'Shipped'), returns: tx('مرتجعات', 'Returns'), cancelled: tx('ملغاة', 'Cancelled') })[v],
-    payView: (p: PayView) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), verifying: tx('بانتظار التحقق', 'Pending verification'), cod_due: tx('دفع عند الاستلام', 'Cash on delivery'), cod_collected: tx('حُصّل عند الاستلام', 'COD collected'), link: tx('بانتظار الدفع', 'Awaiting payment'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
-    method: (m: PayMethodFilter) => ({ card: tx('بطاقة', 'Card'), applepay: 'Apple Pay', bnpl: tx('تقسيط', 'Buy now, pay later'), cod: tx('عند الاستلام', 'Cash on delivery'), manual: tx('يدوي', 'Manual') })[m],
+    payView: (p: PayView) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), verifying: tx('بانتظار التحقق', 'Pending verification'), bank_due: tx('بانتظار التحويل', 'Awaiting transfer'), cod_due: tx('دفع عند الاستلام', 'Cash on delivery'), cod_collected: tx('حُصّل عند الاستلام', 'COD collected'), link: tx('بانتظار الدفع', 'Awaiting payment'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
+    method: (m: PayMethodFilter) => ({ card: tx('بطاقة', 'Card'), applepay: 'Apple Pay', bnpl: tx('تقسيط', 'Buy now, pay later'), cod: tx('عند الاستلام', 'Cash on delivery'), bank: tx('تحويل بنكي', 'Bank transfer'), manual: tx('يدوي', 'Manual') })[m],
     stage: (s: ReturnStage) => ({ requested: tx('طلب جديد', 'Requested'), approved: tx('موافق عليه', 'Approved'), rejected: tx('مرفوض', 'Rejected'), received: tx('استُلم', 'Received'), inspected: tx('فُحص', 'Inspected'), refunded: tx('رُدّ المبلغ', 'Refunded'), exchanged: tx('استُبدل', 'Exchanged') })[s],
     channel: (c: Channel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app') })[c],
     pay: (p: Pay) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
@@ -53,7 +53,7 @@ export function useLabels() {
 }
 
 export const PAY_TONE: Record<Pay, Tone> = { paid: 'green', failed: 'red', partially_refunded: 'amber', refunded: 'gray' };
-export const PAYVIEW_TONE: Record<PayView, Tone> = { paid: 'green', failed: 'red', verifying: 'amber', cod_due: 'sky', cod_collected: 'green', link: 'amber', partially_refunded: 'amber', refunded: 'gray' };
+export const PAYVIEW_TONE: Record<PayView, Tone> = { paid: 'green', failed: 'red', verifying: 'amber', bank_due: 'amber', cod_due: 'sky', cod_collected: 'green', link: 'amber', partially_refunded: 'amber', refunded: 'gray' };
 export const FUL_TONE: Record<Ful, Tone> = { none: 'brand', partial: 'amber', done: 'green' };
 export const SHIP_TONE: Record<Ship, Tone> = { none: 'gray', label: 'sky', transit: 'sky', delivered: 'green' };
 

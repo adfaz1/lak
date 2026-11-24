@@ -13,7 +13,7 @@ import { useCatalog, useConfig, useOrders } from '../data';
 import { simNow, useSim } from '../review';
 
 export const payTone = (s: PayState): Tone =>
-  s === 'paid' || s === 'cod_collected' ? 'green' : s === 'declined' ? 'red' : s === 'verifying' || s === 'challenge' || s === 'awaiting' ? 'amber' : 'sky';
+  s === 'paid' || s === 'cod_collected' ? 'green' : s === 'declined' ? 'red' : s === 'verifying' || s === 'challenge' || s === 'awaiting' || s === 'transfer_due' ? 'amber' : 'sky';
 export const fulTone = (s: FulState): Tone => (s === 'fulfilled' ? 'green' : s === 'unfulfilled' ? 'gray' : 'sky');
 export const shipTone = (s: ShipState): Tone => (s === 'delivered' ? 'green' : s === 'none' ? 'gray' : 'sky');
 
@@ -107,7 +107,27 @@ function Statuses({ o }: { o: Order }) {
       {row(t.payment, <Badge tone={payTone(o.pay.state)}>{t.payS[o.pay.state]}</Badge>)}
       {row(t.fulfilment, <Badge tone={fulTone(o.ful)}>{pickup && o.ful === 'fulfilled' ? t.fulPickup : t.fulS[o.ful]}</Badge>)}
       {row(t.shipment, <Badge tone={shipTone(o.shipment)}>{pickup ? t.shipPickup : t.shipS[o.shipment]}</Badge>)}
+      {o.pay.state === 'transfer_due' && <BankBox o={o} />}
     </dl>
+  );
+}
+
+/** Where to send a bank transfer: the merchant's saved account (Settings → Payments). Shown until the transfer is confirmed. */
+function BankBox({ o }: { o: Order }) {
+  const { t, m } = useS();
+  const bank = useConfig().bank;
+  if (!bank) return null;
+  return (
+    <div className="space-y-2 py-3">
+      <p className="text-sm font-semibold text-fg">{t.bankPay}: {m(o.totals.total)}</p>
+      <div className="grid gap-1 rounded-xl bg-surface-2 p-3 text-sm">
+        <p><span className="text-muted">{t.bankBeneficiary}: </span>{bank.beneficiary}</p>
+        {bank.bank && <p><span className="text-muted">{t.bankName}: </span>{bank.bank}</p>}
+        <p><span className="text-muted">{t.bankIban}: </span><bdi dir="ltr" className="font-mono tracking-wide">{bank.iban}</bdi></p>
+      </div>
+      <p className="text-xs text-muted">{t.bankRefHint(o.ref)}</p>
+      <SimNote>{t.bankSim}</SimNote>
+    </div>
   );
 }
 

@@ -105,7 +105,7 @@ export default function Reviews({ route, empty, canManage }: { route: Route; emp
                     {r.log.length > 0 && <p className="text-[11px] text-subtle">{r.log.map((l) => `${({ published: tx('نُشر', 'published'), hidden: tx('أُخفي', 'hidden'), replied: tx('رُدّ عليه', 'replied'), reported: tx('أُبلغ عنه', 'reported'), restored: tx('أُعيد', 'restored') })[l.what]} · ${l.by === me ? tx('أنت', 'you') : l.by} · ${l.at}`).join(' — ')}</p>}
                     {canManage ? (
                       <div className="flex flex-wrap gap-2 pt-1">
-                        {r.status !== 'published' && !r.report && <Button size="sm" onClick={() => setStatus([r.id], 'published')}><Check className="size-3.5" aria-hidden="true" />{tx('انشر', 'Publish')}</Button>}
+                        {r.status !== 'published' && !r.report && (r.kind === 'review' || r.reply) && <Button size="sm" onClick={() => setStatus([r.id], 'published')}><Check className="size-3.5" aria-hidden="true" />{tx('انشر', 'Publish')}</Button>}
                         {r.status !== 'hidden' && <Button size="sm" variant="secondary" onClick={() => setStatus([r.id], 'hidden')}><EyeOff className="size-3.5" aria-hidden="true" />{tx('أخفِ', 'Hide')}</Button>}
                         <Button size="sm" variant="secondary" onClick={() => setReply(r)}><MessageSquareReply className="size-3.5 rtl:-scale-x-100" aria-hidden="true" />{r.reply ? tx('عدّل الرد', 'Edit reply') : r.kind === 'question' ? tx('أجب', 'Answer') : tx('رد', 'Reply')}</Button>
                         {!r.report && <Button size="sm" variant="ghost" onClick={() => setReport(r)}><Flag className="size-3.5" aria-hidden="true" />{tx('أبلغ', 'Report')}</Button>}
@@ -205,19 +205,19 @@ function SettingsCard({ settings, canManage }: { settings: ReviewSettings; canMa
   const set = (k: keyof ReviewSettings, v: boolean, label: string) => {
     reviewSettingsStore.set((s) => ({ ...s, [k]: v }));
     logAction('marketing', { ar: `إعداد التقييمات: ${label} ${v ? 'تشغيل' : 'إيقاف'}`, en: `Review settings: ${label} ${v ? 'on' : 'off'}` }, { before: String(!v), after: String(v) });
-    toast({ tone: 'ok', text: tx('حُفظ ويظهر في المتجر فورًا', 'Saved; shows in the store now') });
+    toast({ tone: 'ok', text: tx('حُفظ الإعداد', 'Setting saved') });
   };
   const rows: { k: keyof ReviewSettings; label: string; hint: string }[] = [
     { k: 'products', label: tx('تقييمات المنتجات', 'Product reviews'), hint: tx('قسم «آراء العملاء» في صفحة المنتج.', 'The “Customer reviews” block on product pages.') },
     { k: 'moderation', label: tx('مراجعة قبل النشر', 'Review before publishing'), hint: tx('عند الإيقاف تُنشر التقييمات فور وصولها.', 'When off, reviews publish as soon as they arrive.') },
     { k: 'maskNames', label: tx('إخفاء اسم العائلة', 'Hide family names'), hint: tx(`يظهر «${publicName({ ar: 'سارة العتيبي', en: 'Sarah Alotaibi' }, true)[lang]}» بدل الاسم الكامل.`, `Shows “${publicName({ ar: 'سارة العتيبي', en: 'Sarah Alotaibi' }, true)[lang]}” instead of the full name.`) },
     { k: 'questions', label: tx('أسئلة المنتجات', 'Product questions'), hint: tx('الأسئلة المُجاب عنها فقط تظهر.', 'Only answered questions are shown.') },
-    { k: 'questionsSignedIn', label: tx('الأسئلة للمسجّلين فقط', 'Questions from signed-in shoppers only'), hint: tx('يقلل الرسائل المزعجة.', 'Reduces spam.') },
-    { k: 'showOnCategory', label: tx('النجوم في صفحة التصنيف', 'Stars on category pages'), hint: tx('متوسط التقييم تحت اسم المنتج.', 'Average rating under the product name.') },
+    { k: 'questionsSignedIn', label: tx('الأسئلة للمسجّلين فقط', 'Questions from signed-in shoppers only'), hint: tx('يقلل الرسائل المزعجة. يُطبَّق عند تفعيل الأسئلة في المتجر.', 'Reduces spam. Applies once the store takes questions.') },
+    { k: 'showOnCategory', label: tx('النجوم في صفحة التصنيف', 'Stars on category pages'), hint: tx('متوسط التقييم تحت اسم المنتج. لا يظهر في المتجر التجريبي بعد.', 'Average rating under the product name. Not shown in the demo store yet.') },
   ];
   return (
     <Card aria-labelledby="h-rset">
-      <CardHeader id="h-rset" title={tx('إعدادات التقييمات', 'Review settings')} hint={tx('تُحفظ كل مفتاح فور تغييره وتظهر في المتجر.', 'Each switch saves when changed and shows in the store.')} />
+      <CardHeader id="h-rset" title={tx('إعدادات التقييمات', 'Review settings')} hint={tx('كل مفتاح يُحفظ فور تغييره. التقييمات والأسئلة المنشورة وإخفاء الأسماء تظهر في صفحة المنتج.', 'Each switch saves when changed. Published reviews, questions and name masking show on product pages.')} />
       <ul className="divide-y divide-border border-t border-border">
         {rows.map((r) => (
           <li key={r.k} className={cn('flex items-center justify-between gap-4 px-5 py-3')}>

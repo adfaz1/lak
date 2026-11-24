@@ -311,10 +311,10 @@ export function parseImport(text: string, existing: Customer[]): { rows: ImportR
     if (!email && !phone) problems.push('contact');
     if (ce === null || cs === null) problems.push('consent');
     const hit = existing.find((c) => (pk.length === 9 && phoneKey9(c.phone) === pk) || (email && c.email.toLowerCase() === email));
-    const key = pk || email;
+    const keys = [pk.length === 9 ? `p:${pk}` : '', email ? `e:${email}` : ''].filter(Boolean);
     if (hit) problems.push('duplicate');
-    else if (key && seen.has(key)) problems.push('repeated');
-    if (key) seen.add(key);
+    else if (keys.some((k) => seen.has(k))) problems.push('repeated');
+    keys.forEach((k) => seen.add(k));
     return { line: i + 2, name, email, phone, city, consentEmail: !!ce, consentSms: !!cs, problems, existing: hit?.id };
   });
   return { rows, missingColumns: [] };

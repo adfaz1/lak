@@ -7,7 +7,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Users, Lock, Mail, MessageSquare, StickyNote, Send, ShieldCheck, SearchX, UserX, Ban, Download, Upload, Plus, ShieldOff, Pencil } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, type Route } from '../../../core/router';
-import { customersStore, ordersStore, notesStore, segmentsStore, testStore } from '../../merchant/stores';
+import { customersStore, logAction, ordersStore, notesStore, segmentsStore, testStore } from '../../merchant/stores';
 import { can, canSee } from '../../merchant/perms';
 import type { Customer, Segment } from '../../merchant/workspace';
 import type { Order } from '../../merchant/domain';
@@ -292,6 +292,7 @@ function NotesCard({ id }: { id: string }) {
   const add = () => {
     if (!text.trim()) { setErr(true); return; }
     notesStore.set((all) => ({ ...all, [id]: [{ id: `N${Date.now()}`, kind: 'internal', text: text.trim(), by: tx('أنت', 'You') }, ...(all[id] ?? [])] }));
+    logAction('marketing', { ar: `أضاف ملاحظة داخلية للعميل ${id}`, en: `Added an internal note to ${id}` }, { target: id });
     setText('');
     toast({ tone: 'ok', text: tx('أُضيفت الملاحظة الداخلية', 'Internal note added') });
   };
@@ -340,6 +341,7 @@ function MessageCard({ c, history }: { c: Customer; history: Order[] }) {
   };
   const send = () => {
     notesStore.set((all) => ({ ...all, [c.id]: [{ id: `M${Date.now()}`, kind: 'message', text: text.trim(), channel, by: tx('أنت', 'You') }, ...(all[c.id] ?? [])] }));
+    logAction('marketing', { ar: `أرسل رسالة ${channel === 'email' ? 'بريد' : 'نصية'} للعميل ${c.id} (محاكاة)`, en: `Sent an ${channel} message to ${c.id} (simulated)` }, { target: c.id });
     setPreview(false); setText(''); setTried(false);
     toast({ tone: 'ok', text: tx('سُلّمت الرسالة لمزود الإرسال (محاكاة)', 'Message handed to the sending provider (simulated)') });
   };

@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { AlertTriangle, Pause, Play, Sparkles, TicketPercent } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, type Route } from '../../../core/router';
-import { couponsStore, logAction, ordersStore } from '../../merchant/stores';
+import { couponsStore, logAction, ordersStore, productsStore } from '../../merchant/stores';
 import type { Coupon, CouponStatus } from '../../merchant/growth';
 import { Badge, Button, Card, EmptyState, InfoHint, LinkButton, Money, Ref, cn, useTx, type Tone } from '../../../ds/ui';
 import { DataTable, FilterChip, Modal, SearchInput, Tabs, useToast, type Column } from '../../../ds/kit';
@@ -35,8 +35,11 @@ export function CouponValue({ c }: { c: Coupon }) {
 /** Scope in a few words: all items, or how many categories / products. */
 export function ScopeText({ c }: { c: Coupon }) {
   const tx = useTx();
+  const { lang } = useLang();
+  const products = productsStore.use();
   if (!c.scope || c.scope.kind === 'all') return <>{tx('كل المنتجات', 'All items')}</>;
-  if (c.scope.kind === 'category') return <>{tx(`تصنيف: ${c.scope.ids.join('، ')}`, `Category: ${c.scope.ids.join(', ')}`)}</>;
+  const cat = (id: string) => products.find((p) => p.category.en === id)?.category[lang] ?? id;
+  if (c.scope.kind === 'category') return <>{tx(`تصنيف: ${c.scope.ids.map(cat).join('، ')}`, `Category: ${c.scope.ids.map(cat).join(', ')}`)}</>;
   return <>{tx(`${c.scope.ids.length} منتجات محددة`, `${c.scope.ids.length} selected products`)}</>;
 }
 

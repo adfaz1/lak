@@ -71,7 +71,7 @@ export function BulkModal({ action, orders, allMatching, onClose }: { action: Op
   const note: Record<OpsBulk, ReactNode> = {
     slips: tx('تُفتح صفحة طباعة فيها القوائم (بلا أسعار للهدايا)، ويُسجّل الطبع في كل طلب.', 'Opens a print page with the slips (no prices on gifts); printing is logged on each order.'),
     confirm: tx('بلا تكلفة. لا يُصدر شحنة ولا يرسل رسالة للعميل. يمكن التراجع.', 'No cost. Issues no shipment and sends no message. Can be undone.'),
-    labels: <>{tx('من المستودع الذي يحجز الطلب، بالناقل العادي ووزن 1.2 كجم. التكلفة التقديرية ', 'From the warehouse holding the order, standard carrier, 1.2 kg. Estimated cost ')}<Money v={labelsCost(n)} className="font-semibold text-fg" />{tx('. يخرج المخزون ويُطلق الحجز.', '. Stock leaves the shelf and the hold is released.')}</>,
+    labels: <>{tx('من المستودع الذي يحجز الطلب، بالناقل العادي ووزن 1.2 كجم. التكلفة التقديرية ', 'From the warehouse holding the order, standard carrier, 1.2 kg. Estimated cost ')}<Money v={labelsCost(n)} className="inline-flex font-semibold text-fg" />{tx('. يخرج المخزون ويُطلق الحجز.', '. Stock leaves the shelf and the hold is released.')}</>,
     shipped: tx('للناقلين غير المربوطين. يرى العميل «في الطريق». لا رسالة تُرسل من هنا.', 'For carriers that are not connected. Customers see “in transit”. No message is sent from here.'),
     invoices: tx('تُفتح صفحة طباعة فيها كل الفواتير، ويُسجّل الطبع في كل طلب.', 'Opens a print page with every invoice; printing is logged on each order.'),
     export: tx('ملف CSV بترميز UTF-8. لا يتغير شيء في الطلبات.', 'A UTF-8 CSV file. Nothing changes on the orders.'),
@@ -128,7 +128,7 @@ export function BulkModal({ action, orders, allMatching, onClose }: { action: Op
               )}
             </div>
           </div>
-          <p className="flex flex-wrap items-center gap-2 text-sm text-muted">{note[action]}{action !== 'export' && <Simulated />}</p>
+          <p className="flex flex-wrap items-center gap-2 text-sm text-muted"><span>{note[action]}</span>{action !== 'export' && <Simulated />}</p>
           {!instant && (
             <ReviewOnly>
               <label className="flex items-center justify-between gap-3 text-sm text-fg">

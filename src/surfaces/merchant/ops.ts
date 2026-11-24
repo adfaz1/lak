@@ -17,7 +17,7 @@ export type OpKind =
   | 'shipped' | 'delivered' | 'codCollected' | 'noteAdded' | 'messageCopied' | 'invoicePrinted' | 'labelPrinted' | 'exported'
   | 'tagAdded' | 'tagRemoved' | 'assigned' | 'stockReserved' | 'stockReleased' | 'stockShipped'
   | 'returnRequested' | 'returnApproved' | 'returnRejected' | 'returnReceived' | 'returnInspected' | 'returnRefunded'
-  | 'exchangeReserved' | 'exchangeShipped' | 'exchangeCollect';
+  | 'exchangeReserved' | 'exchangeShipped' | 'exchangeCollect' | 'transferConfirmed';
 
 export interface Activity {
   kind: OpKind; at: number; actor: string; role: string;
@@ -54,12 +54,13 @@ export function entries(o: Order, now: number): Entry[] {
 /* ---------- Payment as the merchant should read it ---------- */
 
 /** `pay` is the money state the rest of the domain uses; this adds what it hides: verification, COD and payment links. */
-export type PayView = 'paid' | 'failed' | 'verifying' | 'cod_due' | 'cod_collected' | 'link' | 'partially_refunded' | 'refunded';
+export type PayView = 'paid' | 'failed' | 'verifying' | 'bank_due' | 'cod_due' | 'cod_collected' | 'link' | 'partially_refunded' | 'refunded';
 
 export function payView(o: Order): PayView {
   if (o.pay === 'refunded' || o.pay === 'partially_refunded') return o.pay;
   const cod = o.payment?.method === 'cod' || o.manual?.pay === 'cod';
   if (cod && o.pay !== 'failed') return o.payment?.state === 'cod_collected' || o.ship === 'delivered' ? 'cod_collected' : 'cod_due';
+  if (o.pay === 'failed' && o.payment?.method === 'bank' && o.payment.state === 'verifying') return 'bank_due';
   if (o.pay === 'failed') return o.payment?.state === 'verifying' ? 'verifying' : o.manual?.pay === 'link' ? 'link' : 'failed';
   return 'paid';
 }
@@ -72,6 +73,16 @@ export function collected(o: Order): number {
 
 /** What can still go back to the customer: collected minus live refunds. Zero before money is taken. */
 export const refundableNow = (o: Order) => (collected(o) ? refundable(o) : 0);
+
+/**
+ * The merchant saw the bank transfer arrive: the order becomes paid and is logged. Holding stock is the caller's
+ * step (the store holds stock only once an order is paid). Does nothing unless a transfer is awaited.
+ */
+export function confirmTransfer(o: Order, who: Actor, now: number, note = ''): Order {
+  if (payView(o) !== 'bank_due' || o.cancelled) return o;
+  const next: Order = { ...o, pay: 'paid', payment: { method: 'bank', state: 'paid' }, log: [...o.log, { when: 'now', who: 'you', kind: 'created', actor: who.name, role: who.role, at: now }] };
+  return act(next, 'transferConfirmed', who, now, { amount: total(o), text: note.trim() || undefined });
+}
 
 /* ---------- Stock effects ---------- */
 

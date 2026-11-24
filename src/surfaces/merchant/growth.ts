@@ -140,7 +140,7 @@ export function applyOffer(c: Coupon, lines: OfferLine[], s: { shipping: number;
 export function bestAutoOffer(list: Coupon[], lines: OfferLine[], s: { shipping: number; customerUses?: number }, today = '2026-11-24') {
   let best: { coupon: Coupon; saving: number; r: ReturnType<typeof applyOffer> } | null = null;
   for (const c of list) {
-    if (!c.auto) continue;
+    if (!c.auto || c.status === 'draft') continue;
     const r = applyOffer(c, lines, { shipping: s.shipping, customerUses: s.customerUses ?? 0 }, today);
     const saving = r.discount + r.shippingOff;
     if (!r.block && saving > 0 && (!best || saving > best.saving)) best = { coupon: c, saving, r };

@@ -137,7 +137,8 @@ export interface Order {
   discount?: number;
   coupon?: string;
   /** How the shopper paid in the online store, and the provider's last word on it. */
-  payment?: { method: 'card' | 'applepay' | 'bnpl' | 'cod'; state: 'paid' | 'declined' | 'verifying' | 'cod_due' | 'cod_collected' };
+  /** `bank` = bank transfer: until the merchant confirms it, its state is 'verifying' (awaiting transfer). */
+  payment?: { method: 'card' | 'applepay' | 'bnpl' | 'cod' | 'bank'; state: 'paid' | 'declined' | 'verifying' | 'cod_due' | 'cod_collected' };
   /** Epoch ms when the order was placed in this session (online-store orders). */
   placedAt?: number;
   /* Operations (group 1, merchant/ops.ts). All optional: fixture orders may have none of them. */

@@ -1,7 +1,7 @@
 // Checkout: one clear column on phones, sticky order summary on desktop. Everything typed is kept in the session store,
 // so a failed payment, a reload or a trip back to the bag never loses it. Payment and delivery are simulated.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Banknote, Check, ChevronDown, Clock, CreditCard, FlaskConical, Lock, RefreshCw, ShoppingBag, Smartphone, User } from 'lucide-react';
+import { Banknote, Check, ChevronDown, Clock, CreditCard, Landmark, FlaskConical, Lock, RefreshCw, ShoppingBag, Smartphone, User } from 'lucide-react';
 import { navigate } from '../../../core/router';
 import { Alert, Field, Input, Modal, Select, Textarea } from '../../../ds/kit';
 import { Button, EmptyState, LinkButton, Money, Segmented, cn, useTx } from '../../../ds/ui';
@@ -89,8 +89,8 @@ export default function Checkout() {
   const run = (order: Order) => {
     const method = checkoutStore.get().method;
     setTimeout(() => {
-      if (method === 'cod') {
-        payEvent(order.ref, { type: 'cod' }, 'cod');
+      if (method === 'cod' || method === 'bank') {
+        payEvent(order.ref, method === 'bank' ? { type: 'bank' } : { type: 'cod' }, method);
         lock.current = false;
         navigate(to(`/order/${order.ref}`, { new: '1' }));
         return;
@@ -171,6 +171,7 @@ export default function Checkout() {
     { id: 'applepay', label: t.apple, note: t.appleNote2, icon: <Smartphone className="size-5" aria-hidden="true" /> },
     { id: 'bnpl', label: t.bnpl, note: t.bnplNote(cfg.bnplNames.map(l).join(t.listSep)), icon: <Clock className="size-5" aria-hidden="true" /> },
     { id: 'cod', label: t.cod, note: t.codNote(cfg.codFee ? m(cfg.codFee) : ''), icon: <Banknote className="size-5" aria-hidden="true" /> },
+    { id: 'bank', label: t.bankT, note: t.bankNote, icon: <Landmark className="size-5" aria-hidden="true" /> },
   ];
   const methods = allMethods.filter((x) => offered.includes(x.id));
   const whyText = (why: NonNullable<ReturnType<typeof elig>>) =>
@@ -183,7 +184,7 @@ export default function Checkout() {
   };
   const cityObj = cityById(city);
   const saved = signed ? acc.addresses : [];
-  const payLabel = co.method === 'cod' ? t.placeCod : t.pay(m(totals.total));
+  const payLabel = co.method === 'cod' || co.method === 'bank' ? t.placeCod : t.pay(m(totals.total));
   const anyErr = Object.keys(errs).length > 0 || !shipOk || !methodOk;
 
   const notice = co.notice && (() => {
@@ -409,14 +410,14 @@ export default function Checkout() {
             <Button size="lg" className="h-13 w-full py-3.5 text-base" onClick={start} disabled={busy || !!pending || issues.length > 0 || !canOrder || !methods.length} aria-busy={busy || undefined}>
               {busy ? <><RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t.processing}</> : <><Lock className="size-4" aria-hidden="true" />{payLabel}</>}
             </Button>
-            <SimNote className="justify-center text-center">{co.method === 'cod' ? t.codSim : t.paySim}</SimNote>
+            <SimNote className="justify-center text-center">{co.method === 'cod' ? t.codSim : co.method === 'bank' ? t.bankSim : t.paySim}</SimNote>
             <p className="text-center text-xs text-muted">{t.terms} <a className="underline underline-offset-2" href={to('/page/terms')}>{t.pTerms}</a> · <a className="underline underline-offset-2" href={to('/page/returns')}>{t.pReturns}</a></p>
           </div>
 
           {sim.review && (
             <div className="space-y-2 rounded-2xl border border-dashed border-border p-4 text-sm">
               <p className="flex items-center gap-2 font-semibold"><FlaskConical className="size-4 text-muted" aria-hidden="true" />{tx('وضع المراجعة', 'Review mode')}</p>
-              {co.method !== 'cod' && <p className="text-[13px] text-muted">{t.tpOutcome}: {t.outcomes[simNow(true).outcome]}</p>}
+              {co.method !== 'cod' && co.method !== 'bank' && <p className="text-[13px] text-muted">{t.tpOutcome}: {t.outcomes[simNow(true).outcome]}</p>}
               <Button size="sm" variant="secondary" onClick={doubleSubmit} disabled={busy || !!pending || issues.length > 0}>{t.tpDouble}</Button>
               {double && <p className="text-[13px]" role="status">{double}</p>}
             </div>

@@ -99,7 +99,8 @@ export function ReturnDetail({ id }: { id: string }) {
   const needsRefundRole = primary?.[1] === 'refund';
   const allowed = needsRefundRole ? perms.refund : canAct && (primary?.[1] === 'shipEx' || primary?.[1] === 'receive' || primary?.[1] === 'inspect' ? perms.fulfil : true);
   const flow: ReturnStage[] = r.stage === 'rejected' ? ['requested', 'rejected'] : r.stage === 'exchanged' ? ['requested', 'approved', 'received', 'inspected', 'exchanged'] : ['requested', 'approved', 'received', 'inspected', 'refunded'];
-  const at = flow.indexOf(r.stage);
+  const terminal = r.stage === 'refunded' || r.stage === 'exchanged';
+  const at = flow.indexOf(r.stage) + (terminal ? 1 : 0);
   const refundRow = o.refunds.find((x) => x.id === (r.refundId ?? r.exchange?.refundId));
 
   return (
@@ -115,7 +116,7 @@ export function ReturnDetail({ id }: { id: string }) {
       <Card className="px-5 py-4">
         <ol className="flex flex-wrap items-center gap-x-2 gap-y-2" aria-label={tx('المراحل', 'Stages')}>
           {flow.map((s, i) => (
-            <li key={s} aria-current={i === at ? 'step' : undefined} className="flex items-center gap-2 text-xs font-medium">
+            <li key={s} aria-current={i === Math.min(at, flow.length - 1) ? 'step' : undefined} className="flex items-center gap-2 text-xs font-medium">
               <span className={cn('grid size-6 place-items-center rounded-full text-[11px] tabular-nums', i < at ? 'bg-emerald-500 text-white' : i === at ? (s === 'rejected' ? 'bg-surface-2 text-fg ring-2 ring-border' : 'bg-brand-600 text-white') : 'bg-surface-2 text-muted')}>{i < at ? <Check className="size-3.5" aria-hidden="true" /> : i + 1}</span>
               <span className={i <= at ? 'text-fg' : 'text-muted'}>{L.stage(s)}</span>
               {i < flow.length - 1 && <span className="h-px w-6 bg-border" aria-hidden="true" />}

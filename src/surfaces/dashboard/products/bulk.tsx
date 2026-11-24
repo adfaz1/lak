@@ -47,7 +47,7 @@ export function UndoBanner() {
   const run = useUndo();
   if (!u) return null;
   return (
-    <Alert tone="info" title={tx(`آخر تعديل جماعي: ${u.n} منتجات`, `Last bulk edit: ${u.n} products`)}
+    <Alert tone="info" title={`${tx('آخر تعديل جماعي', 'Last bulk edit')}: ${productCount(tx, u.n)}`}
       action={<span className="flex items-center gap-1"><Button size="sm" variant="secondary" onClick={run}><Undo2 className="size-3.5" aria-hidden="true" />{tx('تراجع', 'Undo')}</Button>
         <button type="button" onClick={() => undoStore.set(null)} aria-label={tx('إخفاء', 'Dismiss')} className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2"><X className="size-4" aria-hidden="true" /></button></span>}>
       {tx('يعيد القيم السابقة لما لم يتغير بعده.', 'Puts back the previous values of anything not changed since.')} <span className="font-mono text-xs">{u.id}</span>
@@ -127,11 +127,11 @@ export function BulkOpModal({ ids, onClose, onDone }: { ids: string[]; onClose: 
   };
 
   return (
-    <Modal size="lg" title={tx(`تعديل جماعي · ${ids.length} منتجات`, `Bulk edit · ${ids.length} products`)} onClose={onClose}
+    <Modal size="lg" title={`${tx('تعديل جماعي', 'Bulk edit')} · ${productCount(tx, ids.length)}`} onClose={onClose}
       description={<span className="inline-flex items-center gap-1">{step === 'edit' ? tx('اختر الحقل والعملية، ثم راجع قبل الحفظ.', 'Choose a field and an operation, then review before saving.') : tx('راجع القيم قبل وبعد.', 'Review values before and after.')}<InfoHint>{tx('الأسطر التي فيها خطأ لا تُحفظ. يمكنك التراجع بعد الحفظ ما لم يتغير المنتج بعدها.', 'Rows with an error are not saved. You can undo after saving unless a product changed since.')}</InfoHint></span>}
       footer={step === 'edit'
         ? <><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => setStep('preview')} disabled={!!opErr}>{tx('عاين التغيير', 'Preview change')}</Button></>
-        : <><Button variant="ghost" onClick={() => setStep('edit')}>{tx('رجوع', 'Back')}</Button><Button onClick={save} disabled={changing.length === 0}>{changing.length ? tx(`احفظ ${changing.length} منتجات`, `Save ${changing.length} products`) : tx('لا تغييرات', 'No changes')}</Button></>}>
+        : <><Button variant="ghost" onClick={() => setStep('edit')}>{tx('رجوع', 'Back')}</Button><Button onClick={save} disabled={changing.length === 0}>{changing.length ? `${tx('احفظ', 'Save')} · ${productCount(tx, changing.length)}` : tx('لا تغييرات', 'No changes')}</Button></>}>
       {step === 'edit' ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label={tx('الحقل', 'Field')}>{(p) => (

@@ -185,3 +185,23 @@ describe('orders into the merchant book', () => {
     expect(validateCart({ lines: [{ vid: 'p1~ABY-LIN-BLA-M', qty: 5 }] }, store)).toEqual([{ vid: 'p1~ABY-LIN-BLA-M', kind: 'reduced', available: 4 }]);
   });
 });
+
+/* Group 1: shopper returns and cancellation reach the merchant */
+import { mirrorReturns as mirrorR, withMerchant as withM } from './bridge';
+import { allOrders as allM } from '../merchant/domain';
+import { approveReturn as approveR } from '../merchant/ops';
+import type { Order as SOrder } from './domain';
+
+describe('store return requests become merchant returns', () => {
+  it('mirrors once with the same RMA id, and the merchant stage flows back', () => {
+    const m = allM().find((o) => o.ref === '10476')!;
+    const s = { ref: '10476', returns: [{ id: 'RMA-10476-1', lines: [{ vid: 'p~BAG-LTH-01', qty: 1, reason: 'damaged' }], method: 'pickup', refundTo: 'original', state: 'requested', refund: 'not_started', at: 1, amount: 42000 }],
+      lines: [{ vid: 'p~BAG-LTH-01', productId: 'p', qty: 1, unit: 42000, amount: 42000, sku: 'BAG-LTH-01' }], pay: { method: 'card', state: 'paid', attempts: [] }, at: 0 } as unknown as SOrder;
+    const a = mirrorR(m, s);
+    expect(a.returns).toHaveLength(1);
+    expect(a.returns![0]).toMatchObject({ id: 'RMA-10476-1', source: 'store', stage: 'requested' });
+    expect(mirrorR(a, s)).toBe(a);
+    const b = approveR(a, 'RMA-10476-1', { name: 'x', role: 'owner' }, 2);
+    expect(withM(s, b, 3).returns[0].state).toBe('approved');
+  });
+});

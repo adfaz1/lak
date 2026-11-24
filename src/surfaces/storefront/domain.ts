@@ -354,7 +354,8 @@ export function computeTotals(lines: { amount: number }[], o: { discount?: numbe
 
 /* ───────────── Payment methods & eligibility ───────────── */
 
-export type PayMethod = 'card' | 'applepay' | 'bnpl' | 'cod';
+/** `bank` = bank transfer to the merchant's IBAN: the order is placed and waits for the transfer to be confirmed. */
+export type PayMethod = 'card' | 'applepay' | 'bnpl' | 'cod' | 'bank';
 export type Ineligible = 'no_device' | 'cod_over_limit' | 'cod_under_min' | 'cod_open_limit' | 'bnpl_range' | 'pickup_cod';
 
 /** Limits default to the rule fixtures (MERCHANT); the live store passes the merchant's settings. `codOpenLimit: null` = no limit. */
@@ -375,11 +376,12 @@ export function payEligibility(m: PayMethod, ctx: { total: number; applePayDevic
 /* ───────────── Payment state machine ───────────── */
 
 /** Payment state of one order. Separate from fulfilment and shipment. */
-export type PayState = 'awaiting' | 'challenge' | 'verifying' | 'paid' | 'declined' | 'cod_due' | 'cod_collected' | 'refunded_part' | 'refunded';
+export type PayState = 'awaiting' | 'challenge' | 'verifying' | 'paid' | 'declined' | 'cod_due' | 'cod_collected' | 'refunded_part' | 'refunded' | 'transfer_due';
 export type Outcome = 'success' | 'declined' | '3ds' | 'timeout';
 export type PayEvent =
   | { type: 'attempt'; outcome: Outcome }
   | { type: 'cod' }
+  | { type: 'bank' }
   | { type: 'challenge'; pass: boolean }
   | { type: 'verify'; result: 'paid' | 'failed' | 'unknown' }
   | { type: 'collect' };
@@ -395,13 +397,15 @@ export function payTransition(s: PayState, e: PayEvent): PayState {
       return e.outcome === 'success' ? 'paid' : e.outcome === 'declined' ? 'declined' : e.outcome === '3ds' ? 'challenge' : 'verifying';
     case 'cod':
       return canPay(s) ? 'cod_due' : s;
+    case 'bank':
+      return canPay(s) ? 'transfer_due' : s;
     case 'challenge':
       return s === 'challenge' ? (e.pass ? 'paid' : 'declined') : s;
     case 'verify':
       if (s !== 'verifying') return s;
       return e.result === 'paid' ? 'paid' : e.result === 'failed' ? 'declined' : 'verifying';
     case 'collect':
-      return s === 'cod_due' ? 'cod_collected' : s;
+      return s === 'cod_due' ? 'cod_collected' : s === 'transfer_due' ? 'paid' : s;
   }
 }
 
@@ -415,7 +419,7 @@ export type ReturnReason = 'size' | 'not_as_described' | 'damaged' | 'changed_mi
 
 export interface Address { name: string; phone: string; city: CityId; district: string; street: string; building: string; nationalCode?: string; notes?: string }
 export interface OrderLine { vid: string; productId: string; qty: number; unit: number; amount: number; sku?: string; name?: L }
-export interface Attempt { n: number; method: PayMethod; outcome: Outcome | 'cod' | 'challenge_pass' | 'challenge_fail' | 'verify_paid' | 'verify_failed' | 'verify_unknown'; at: number }
+export interface Attempt { n: number; method: PayMethod; outcome: Outcome | 'cod' | 'bank' | 'challenge_pass' | 'challenge_fail' | 'verify_paid' | 'verify_failed' | 'verify_unknown'; at: number }
 export interface ReturnRequest { id: string; lines: { vid: string; qty: number; reason: ReturnReason }[]; method: 'pickup' | 'dropoff'; refundTo: 'original' | 'bank'; iban?: string; state: ReturnState; refund: RefundState; at: number; amount: number }
 export interface Order {
   ref: string;
@@ -500,9 +504,9 @@ export function applyPayment(order: Order, e: PayEvent, method: PayMethod, now: 
   const next = payTransition(order.pay.state, e);
   if (next === order.pay.state && !(e.type === 'verify' && order.pay.state === 'verifying')) return { order, applied: false };
   const outcome: Attempt['outcome'] =
-    e.type === 'attempt' ? e.outcome : e.type === 'cod' ? 'cod' : e.type === 'challenge' ? (e.pass ? 'challenge_pass' : 'challenge_fail')
+    e.type === 'attempt' ? e.outcome : e.type === 'cod' ? 'cod' : e.type === 'bank' ? 'bank' : e.type === 'challenge' ? (e.pass ? 'challenge_pass' : 'challenge_fail')
       : e.type === 'verify' ? (e.result === 'paid' ? 'verify_paid' : e.result === 'failed' ? 'verify_failed' : 'verify_unknown') : 'cod';
-  const switching = e.type === 'attempt' || e.type === 'cod';
+  const switching = e.type === 'attempt' || e.type === 'cod' || e.type === 'bank';
   const m = switching ? method : order.pay.method;
   // Changing the method changes the COD fee, so totals are recomputed only when a new attempt starts.
   const totals = switching && m !== order.pay.method

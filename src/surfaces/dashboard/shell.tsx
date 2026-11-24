@@ -9,7 +9,7 @@ import { link } from '../../core/router';
 import { cn, IconButton, useTx } from '../../ds/ui';
 import { BUILT } from './pages';
 import { SearchDialog } from './search';
-import { testStore } from '../merchant/stores';
+import { teamStore, testStore } from '../merchant/stores';
 import { canSee, type Page, type Role } from '../merchant/perms';
 import { canUseTool, toolById, type Tool } from './model/tools';
 import { useFavourites } from './prefs';
@@ -60,6 +60,9 @@ export function Shell({ active, counts, store, children }: { active: string; cou
   const { lang, setLang } = useLang();
   const tx = useTx();
   const role = testStore.use().role;
+  // The signed-in person is the team member holding the current role.
+  const team = teamStore.use().members;
+  const me = team.find((m) => m.role === role && m.status === 'active')?.name ?? ROLE_LABEL[role]?.[lang] ?? role;
   const [collapsed, setCollapsed] = useState(() => readPref('lak.nav', '0') === '1');
   const [mobile, setMobile] = useState(false);
   const [dark, setDark] = useState(() => readPref('lak.theme', 'light') === 'dark');
@@ -154,7 +157,7 @@ export function Shell({ active, counts, store, children }: { active: string; cou
               <IconButton label={lang === 'ar' ? 'English' : 'العربية'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}><Languages className="size-5" aria-hidden="true" /></IconButton>
               <IconButton label={dark ? tx('الوضع الفاتح', 'Light mode') : tx('الوضع الداكن', 'Dark mode')} onClick={() => setDark((d) => !d)}>{dark ? <Sun className="size-5" aria-hidden="true" /> : <Moon className="size-5" aria-hidden="true" />}</IconButton>
               <IconButton label={tx('الإشعارات: لا جديد', 'Notifications: none new')}><Bell className="size-5" aria-hidden="true" /></IconButton>
-              <span className="ms-1 grid size-9 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white" title={`${tx('سارة', 'Sara')} · ${ROLE_LABEL[role][lang]}`} aria-label={`${tx('سارة', 'Sara')} · ${ROLE_LABEL[role][lang]}`}>{tx('س', 'S')}</span>
+              <span className="ms-1 grid size-9 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white" title={`${me} · ${ROLE_LABEL[role]?.[lang] ?? role}`} aria-label={`${me} · ${ROLE_LABEL[role]?.[lang] ?? role}`}>{me.slice(0, 1)}</span>
             </div>
           </header>
           <main id="lak-main" className="mx-auto w-full max-w-[1320px] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
