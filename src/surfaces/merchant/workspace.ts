@@ -170,7 +170,7 @@ export function themeFixture(): ThemeState {
     { id: 's1', kind: 'announcement', visible: true, heading: 'توصيل مجاني للطلبات من 300 ر.س داخل المملكة' },
     { id: 's2', kind: 'hero', visible: true, heading: 'تشكيلة العبايات المطرّزة' },
     { id: 's3', kind: 'featured', visible: true, heading: 'الأكثر مبيعًا' },
-    { id: 's4', kind: 'categories', visible: true, heading: 'تسوّقي حسب الفئة' },
+    { id: 's4', kind: 'categories', visible: true, heading: 'تسوّق حسب الفئة' },
     { id: 's5', kind: 'offers', visible: false, heading: 'عروض هذا الأسبوع' },
     { id: 's6', kind: 'video', visible: false, heading: 'كيف نصنع عباياتنا' },
     { id: 's7', kind: 'newsletter', visible: true, heading: 'كوني أول من يعرف بالجديد' },

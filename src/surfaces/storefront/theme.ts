@@ -78,7 +78,7 @@ const KNOWN: Record<string, L> = {
   'تشكيلة العبايات المطرّزة': { ar: 'تشكيلة العبايات المطرّزة', en: 'The embroidered abaya edit' },
   'وصل حديثًا لموسم الخريف': { ar: 'وصل حديثًا لموسم الخريف', en: 'New in for autumn' },
   'الأكثر مبيعًا': { ar: 'الأكثر مبيعًا', en: 'Best sellers' },
-  'تسوّقي حسب الفئة': { ar: 'تسوّقي حسب الفئة', en: 'Shop by category' },
+  'تسوّق حسب الفئة': { ar: 'تسوّق حسب الفئة', en: 'Shop by category' },
   'عروض هذا الأسبوع': { ar: 'عروض هذا الأسبوع', en: 'This week’s offers' },
   'كيف نصنع عباياتنا': { ar: 'كيف نصنع عباياتنا', en: 'How we make our abayas' },
   'كوني أول من يعرف بالجديد': { ar: 'كوني أول من يعرف بالجديد', en: 'Be the first to hear what’s new' },
