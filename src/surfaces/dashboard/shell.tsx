@@ -2,7 +2,7 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import {
   LayoutDashboard, ShoppingBag, Package, Warehouse, Users, BarChart3, Wallet, Megaphone,
-  Settings, LifeBuoy, LayoutGrid, Star, ListChecks, Sparkles, Search, Bell, Menu, X, Moon, Sun, Languages, ChevronsLeft, ChevronsRight, ArrowUpLeft, ExternalLink,
+  Settings, LifeBuoy, LayoutGrid, Star, ListChecks, Sparkles, Inbox, Search, Bell, Menu, X, Moon, Sun, Languages, ChevronsLeft, ChevronsRight, ArrowUpLeft, ExternalLink,
 } from 'lucide-react';
 import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
@@ -32,11 +32,12 @@ export function navGroups(counts: { orders: number }, role: Role, fav: Tool[]): 
     { key: 'products', label: { ar: 'المنتجات', en: 'Products' }, icon: Package, href: to('products'), built: BUILT.has('products') },
     { key: 'inventory', label: { ar: 'المخزون', en: 'Inventory' }, icon: Warehouse, href: to('inventory'), built: BUILT.has('inventory') },
     { key: 'customers', label: { ar: 'العملاء', en: 'Customers' }, icon: Users, href: to('customers'), built: BUILT.has('customers') },
+    { key: 'inbox', label: { ar: 'خدمة العملاء', en: 'Customer service' }, icon: Inbox, href: dhref('inbox'), built: true },
     { key: 'marketing', label: { ar: 'التسويق والعروض', en: 'Marketing' }, icon: Megaphone, href: to('marketing'), built: BUILT.has('marketing') },
     { key: 'finance', label: { ar: 'المالية', en: 'Finance' }, icon: Wallet, href: to('finance'), built: BUILT.has('finance') },
     { key: 'analytics', label: { ar: 'التقارير', en: 'Reports' }, icon: BarChart3, href: to('analytics'), built: BUILT.has('analytics') },
     { key: 'assistant', label: { ar: 'المساعد', en: 'Assistant' }, icon: Sparkles, href: dhref('assistant'), built: true },
-  ].filter((i) => canSee(role, (i.key === 'work' || i.key === 'assistant' ? 'home' : i.key) as Page));
+  ].filter((i) => canSee(role, (i.key === 'work' || i.key === 'assistant' ? 'home' : i.key === 'inbox' ? 'orders' : i.key) as Page));
   const pinned: Item[] = fav.map((t) => ({ key: `fav:${t.id}`, label: t.label, icon: Star, href: dhref(t.path, t.query), built: true }));
   return [
     { label: { ar: 'اليومي', en: 'Daily' }, items: daily },

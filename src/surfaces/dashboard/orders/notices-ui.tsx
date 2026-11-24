@@ -20,7 +20,7 @@ export function useNoticeName() {
     returnRequested: tx('استلام طلب الإرجاع', 'Return requested'), returnApproved: tx('الموافقة على الإرجاع', 'Return approved'),
     returnRejected: tx('رفض الإرجاع', 'Return rejected'), returnReceived: tx('وصول المرتجع', 'Return received'),
     payLink: tx('رابط دفع', 'Payment link'), payReminder: tx('تمديد مهلة الدفع', 'More time to pay'), invoice: tx('الفاتورة للعميل', 'Invoice to customer'),
-    subStatus: tx('تحديث بالحالة الفرعية', 'Sub-status update'),
+    subStatus: tx('تحديث بالحالة الفرعية', 'Sub-status update'), caseReply: tx('رد خدمة العملاء', 'Customer service reply'),
   } as Record<string, string>)[e] ?? e;
 }
 export function useChannelName() {

@@ -17,6 +17,8 @@ import { couponsStore } from '../../merchant/stores';
 import { rank } from './model';
 import { verificationStore } from '../../merchant/verification-store';
 import { verificationWorkItem } from '../settings/verification-work';
+import { inboxWorkItems } from '../inbox/model';
+import { inboxStore } from '../../merchant/stores';
 import type { L } from '../../merchant/domain';
 
 /** Wraps a work item produced by another section so the queue can rank and render it. */
@@ -41,13 +43,18 @@ export function useWork(empty = false): { all: WorkItem[]; mine: WorkItem[]; rol
   const autos = automationsStore.use();
   const role = testStore.use().role;
   // Cart and reorder reminders report only steps that need the merchant (provider down, coupon broken).
+  const cases = inboxStore.use();
   const v = verificationStore.use(); const ver = useMemo(() => verificationWorkItem(v), [v]);
   const seq = sequenceStore.use(); const rules = reorderStore.use(); const deliveries = deliveriesStore.use(); const coupons = couponsStore.use();
   const all = useMemo(() => (empty ? [] : rank([
     ...workQueue({ orders, levels, history: HISTORY, payouts: fin.payouts, txs: fin.txs, apps, providers: settings.providers, domain: settings.domain, runs, automations: autos }),
     ...reminderWorkItems({ seq, rules, deliveries, coupons }),
     ...(ver ? [external(ver)] : []),
-  ])), [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos, seq, rules, deliveries, coupons, ver]);
+    ...inboxWorkItems(cases, orders).map((x) => external({ ...x,
+      title: x.subject ?? { ar: 'خدمة العملاء', en: 'Customer service' },
+      why: { ar: `${x.facts.count} حالة${x.facts.overdueHours ? ` · أقدمها متأخر ${x.facts.overdueHours} ساعة` : ''} · ${x.facts.ids}`, en: `${x.facts.count} cases${x.facts.overdueHours ? ` · worst ${x.facts.overdueHours} h overdue` : ''} · ${x.facts.ids}` },
+      cta: { ar: 'افتح الصندوق', en: 'Open inbox' }, moneyLabel: { ar: 'قيمة الطلبات المرتبطة', en: 'Linked order value' } })),
+  ])), [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos, seq, rules, deliveries, coupons, ver, cases]);
   return { all, mine: useMemo(() => forRole(role, all), [role, all]), role };
 }
 
