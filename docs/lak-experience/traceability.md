@@ -87,7 +87,7 @@ ID format: `BP-<project>-<group>-<seq>`. Status is `not started` for every row u
 
 ## P01 — Public Website — lak.sa
 
-Declared: 27 features. PDF pages 02–06. No ACCESS column in source (public marketing site).
+Declared: 27 features. PDF pages 02–06. No ACCESS column in source (public marketing site). Sum of declared group counts = 26, not 27.
 
 ### P01-HOM — Marketing Homepage (declared 6)
 
@@ -1114,7 +1114,7 @@ Tiers: Basic (FREE), Plus, Pro, Special (ENTERPRISE). Values copied as shown (�
 
 | # | Area | Observation |
 |---|---|---|
-| 1 | Totals | Declared 27+47+244+64+36+49 = 467; registered rows = see Summary. P06 declares 49 but its four groups declare 21 |
+| 1 | Totals | Declared 27+47+244+64+36+49 = 467; registered feature rows = 411. P06 declares 49 but its four groups declare 21 |
 | 2 | Duplicates | Assign Order to Staff (P03-ORD) and Assign Orders to Staff (P03-STF); Abandoned Cart Reminders (P03-ORD) and Abandoned Cart Email / SMS (P03-EMS); Customer Back-in-Stock Subscribe (P03-INV) and Back-in-Stock Alert (P03-EMS); Pickup Location Setup (P03-STP) and Pickup Locations (P03-SHP); P03 Marketing — Ads and P06 Lak Ads; P05 App Features — Customer and P05 In-App Shopping |
 | 3 | BNPL | P04 Payment row names "Tabby or Tamara" only; P03 Payment Setup also has Madfu, Emkan, MIS Pay |
 | 4 | Cross-store data | Flag Non-Serious Customer (Lak-wide warning) and Unified Account (Cross-Store) share customer data between merchants; Privacy Policy row claims GDPR/PDPL compliance |
