@@ -220,3 +220,6 @@ select.input { padding-inline-end: 28px; }
   .topbar-tools .tag { padding: 2px 8px; font-size: 12px; }
   .surfaces { order: 3; flex-basis: 100%; }
 }
+
+/* The redesign preview needs the full phone screen: the surface switcher is reachable from the logo (hub). */
+@media (max-width: 600px) { [data-surface='v2'] .surfaces { display: none; } }

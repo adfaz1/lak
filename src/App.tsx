@@ -10,6 +10,7 @@ const Merchant = lazy(() => import('./surfaces/merchant'));
 const Storefront = lazy(() => import('./surfaces/storefront'));
 const AppMaker = lazy(() => import('./surfaces/appmaker'));
 const Market = lazy(() => import('./surfaces/market'));
+const V2 = lazy(() => import('./surfaces/v2'));
 
 /** The six surfaces of the platform blueprint, in dependency order. */
 const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }> }[] = [
@@ -19,6 +20,7 @@ const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }
   { id: 'store', name: { ar: 'متجر التاجر', en: 'Storefront' }, who: { ar: 'عميل يتسوق من متجر', en: 'A shopper in one store' }, C: Storefront },
   { id: 'appmaker', name: { ar: 'صانع التطبيقات', en: 'App Maker' }, who: { ar: 'تاجر يبني تطبيق متجره', en: 'A merchant building their app' }, C: AppMaker },
   { id: 'market', name: { ar: 'سوق لك', en: 'LAK marketplace' }, who: { ar: 'عميل يتسوق عبر المتاجر', en: 'A shopper across stores' }, C: Market },
+  { id: 'v2', name: { ar: 'التصميم الجديد · للاعتماد', en: 'New design · for approval' }, who: { ar: 'ثلاث شاشات لاعتماد المستوى البصري قبل تعميمه', en: 'Three screens to approve the visual standard before rollout' }, C: V2 },
 ];
 
 const S = {
@@ -36,6 +38,7 @@ export function App() {
   const [direction, setDirection] = useState<'a' | 'b'>(() => {
     try { return localStorage.getItem('lak.direction') === 'b' ? 'b' : 'a'; } catch { return 'a'; }
   });
+  useEffect(() => { document.documentElement.dataset.surface = current?.id ?? 'hub'; }, [current?.id]);
   useEffect(() => {
     document.documentElement.dataset.direction = direction;
     try { localStorage.setItem('lak.direction', direction); } catch { /* preference only */ }

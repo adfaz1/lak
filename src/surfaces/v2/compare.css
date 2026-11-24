@@ -1,0 +1,15 @@
+.cmp-shots { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; background: var(--lk-sunken); }
+.cmp-shots.phone { grid-template-columns: repeat(2, minmax(0, 300px)); justify-content: center; }
+.cmp-shots figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.cmp-shots img { width: 100%; height: auto; border-radius: var(--lk-r); box-shadow: var(--lk-shadow-1); background: #fff; }
+.cmp-shots .after { color: var(--lk-indigo); }
+.cmp-points { display: flex; flex-direction: column; }
+.cmp-points li { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px 20px; border-top: 1px solid var(--lk-line); font-size: 13px; }
+.cmp-points span { display: flex; gap: 8px; align-items: flex-start; }
+.cmp-points .lk-icon { margin-top: 3px; }
+.cmp-before { color: var(--lk-text-2); }
+.cmp-before .lk-icon { color: var(--lk-bad); }
+.cmp-after .lk-icon { color: var(--lk-ok); }
+@media (max-width: 800px) {
+  .cmp-shots, .cmp-shots.phone, .cmp-points li { grid-template-columns: 1fr; }
+}
