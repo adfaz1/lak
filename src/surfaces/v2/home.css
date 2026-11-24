@@ -64,7 +64,7 @@
 .home-spark polyline { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .t-cyan .home-spark polyline { stroke: #0a9fd0; }
 .t-green .home-spark polyline { stroke: #18946a; }
-.home-a { grid-template-columns: minmax(0, 1fr) 360px; }
+@media (min-width: 1180px) { .home-a { grid-template-columns: minmax(0, 1fr) 360px; } }
 .home-b-grid.even { grid-template-columns: 1fr 1fr; }
 @media (max-width: 1179px) { .home-b-grid.even { grid-template-columns: 1fr; } }
 
