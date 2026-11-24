@@ -438,6 +438,9 @@ export interface Order {
   deliveredAt?: number;
   received?: boolean;
   returns: ReturnRequest[];
+  /** Set from the merchant's order: cancelled by the shopper (self-cancel) or by the store; a pending cancel request. */
+  cancelled?: { at: number; by: 'customer' | 'store' };
+  cancelRequest?: 'open' | 'declined';
 }
 
 export interface Draft {

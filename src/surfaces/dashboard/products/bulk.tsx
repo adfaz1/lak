@@ -16,7 +16,7 @@ import {
   BULK_FIELDS, CHANNELS, STATUSES, applyBulk, bulkOpError, listPhoto, previewBulk, undoBulk, type BulkField, type BulkMode, type BulkOp, type BulkOpError,
   type BulkUndo, type BulkVal,
 } from './model';
-import { useNames } from './common';
+import { productCount, useNames } from './common';
 
 /** The last bulk edit that can still be undone in this session. */
 export const undoStore = createStore.key('dashboard.productsBulkUndo')<(BulkUndo & { n: number }) | null>(() => null);
@@ -109,7 +109,7 @@ export function BulkOpModal({ ids, onClose, onDone }: { ids: string[]; onClose: 
     levelsStore.set(r.levels);
     if (r.log.length) stockLogStore.set((lg) => [...r.log, ...lg]);
     rememberUndo(r.undo, r.changed);
-    toast({ tone: 'ok', text: tx(`حُفظ ${fieldName[op.field]} لـ ${r.changed} منتجات`, `${fieldName[op.field]} saved for ${r.changed} products`), action: { label: tx('تراجع', 'Undo'), run } });
+    toast({ tone: 'ok', text: `${tx('حُفظ', 'Saved')}: ${fieldName[op.field]} · ${productCount(tx, r.changed)}`, action: { label: tx('تراجع', 'Undo'), run } });
     onDone();
   };
   const tree = categoryTree(cats);

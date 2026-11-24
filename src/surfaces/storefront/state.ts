@@ -3,7 +3,11 @@
    checkout form, the account (saved addresses, wishlist) and the checkout record of each order placed here (payment
    attempts, address, returns). Simulated state for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
-import { couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { couponsStore, customersStore, financeStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { CUSTOMER as CUSTOMER_ACTOR, cancelBlock, cancelOrder, requestCancel } from '../merchant/ops';
+import { applyStockEffects } from '../merchant/inventory';
+import { refundTx } from '../merchant/finance';
+import { canSelfCancel } from '../dashboard/settings/model';
 import { customerFixtures } from '../merchant/workspace';
 import { checkoutStore as checkoutSettingsStore } from '../dashboard/settings/stores';
 import {
@@ -12,7 +16,7 @@ import {
 } from './domain';
 import {
   autoOfferResult, cartWeight, couponUses, matchCustomer, scopedResult, nextStoreRef, phoneKey, standardFor, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
-  withMerchant, type StoreConfig,
+  mirrorReturns, withMerchant, type StoreConfig,
 } from './bridge';
 
 const sid = () => Math.random().toString(36).slice(2, 10);
@@ -125,6 +129,43 @@ export function getOrder(ref: string): Order | undefined {
  */
 export function updateOrder(ref: string, fn: (o: Order) => Order, seed?: Order): void {
   ordersStore.set((all) => (all.some((o) => o.ref === ref) ? all.map((o) => (o.ref === ref ? fn(o) : o)) : seed ? [...all, fn(seed)] : all));
+  // A return request reaches the merchant's order as a return to handle (same RMA id).
+  const o = ordersStore.get().find((x) => x.ref === ref);
+  const m = merchantOrders.get().find((x) => x.ref === ref);
+  if (o && m && o.returns.length) {
+    const next = mirrorReturns(m, o);
+    if (next !== m) merchantOrders.set((list) => list.map((x) => (x.ref === ref ? next : x)));
+  }
+}
+
+/**
+ * The shopper cancels: inside the merchant's self-cancel window and before anything ships, the order is cancelled at
+ * once (refund requested, stock released); after it, the merchant receives a cancel request to approve or decline.
+ */
+export function cancelFromStore(ref: string, reason: string): 'cancelled' | 'requested' | 'blocked' {
+  const m = merchantOrders.get().find((x) => x.ref === ref);
+  if (!m || cancelBlock(m) || m.cancelRequest?.state === 'open') return 'blocked';
+  const now = Date.now();
+  const mins = (now - (m.placedAt ?? now - m.hoursAgo * 3_600_000)) / 60_000;
+  const why = reason.trim() || 'إلغاء من العميل · Cancelled by the customer';
+  if (canSelfCancel(checkoutSettingsStore.get(), mins, m.ful !== 'none' || m.ship !== 'none')) {
+    const r = cancelOrder(m, why, CUSTOMER_ACTOR, now);
+    if (r.order === m) return 'blocked';
+    merchantOrders.set((list) => list.map((x) => (x.ref === ref ? r.order : x)));
+    if (r.effects.length) levelsStore.set((ls) => applyStockEffects(ls, r.effects, 'customer', ref, `CX-${ref}`).levels);
+    const rf = r.order.refunds.length > m.refunds.length ? r.order.refunds[r.order.refunds.length - 1] : undefined;
+    if (rf) financeStore.set((f) => ({ ...f, txs: [...f.txs, refundTx(r.order, rf, `TX-${rf.id}`, undefined, false)] }));
+    return 'cancelled';
+  }
+  merchantOrders.set((list) => list.map((x) => (x.ref === ref ? requestCancel(x, reason, now) : x)));
+  return 'requested';
+}
+
+/** Whether the shopper can still cancel by themself (window open, nothing shipped or fulfilled). */
+export function selfCancelOpen(ref: string, now = Date.now()): boolean {
+  const m = merchantOrders.get().find((x) => x.ref === ref);
+  if (!m || cancelBlock(m)) return false;
+  return canSelfCancel(checkoutSettingsStore.get(), (now - (m.placedAt ?? now - m.hoursAgo * 3_600_000)) / 60_000, m.ful !== 'none' || m.ship !== 'none');
 }
 
 /**
@@ -139,7 +180,7 @@ export function payEvent(ref: string, e: PayEvent, method: PayMethod): Order | u
   updateOrder(ref, () => order);
   const book = syncOrder(
     { orders: merchantOrders.get(), levels: levelsStore.get(), customers: customersStore.get(), coupons: couponsStore.get() },
-    before, order, { products: liveCatalog(), now: Date.now() },
+    before, order, { products: liveCatalog(), now: Date.now(), gift: order.key.startsWith(checkoutStore.get().sessionId) && checkoutStore.get().gift ? { message: checkoutStore.get().giftMsg.trim() || undefined } : undefined },
   );
   if (book.customers !== customersStore.get()) customersStore.set(book.customers);
   if (book.levels !== levelsStore.get()) levelsStore.set(book.levels);

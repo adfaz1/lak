@@ -5,6 +5,7 @@ import type { L } from '../../core/lang';
 import type { Product as MProduct } from '../merchant/catalog';
 import { LOC_IDS, nextOrderRef, total as mTotal, type LocId, type Order as MOrder, type Pay as MPay } from '../merchant/domain';
 import { available, type Level } from '../merchant/inventory';
+import { CUSTOMER, openReturn, storeReturnState } from '../merchant/ops';
 import { bestAutoOffer, offerDiscount, type Coupon as MCoupon, type OfferLine } from '../merchant/growth';
 import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type SocialId, type StoreDetails, type Zone } from '../merchant/workspace';
 import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
@@ -277,7 +278,7 @@ export interface Book { orders: MOrder[]; levels: Level[]; customers: Customer[]
  * challenge creates nothing. The merchant order is created once (same reference), its payment follows the shopper's;
  * when it becomes paid (or COD is confirmed) stock is reserved, the coupon use is recorded, and the log says so.
  */
-export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number }): Book {
+export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number; gift?: { message?: string } }): Book {
   const existing = book.orders.find((o) => o.ref === after.ref);
   if (!existing && (after.pay.state === 'awaiting' || after.pay.state === 'challenge')) return book;
   const wasPaid = !!before && isSettled(before.pay.state);
@@ -317,6 +318,8 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
       name: p?.name ?? line.name ?? prev?.name ?? { ar: line.sku ?? '', en: line.sku ?? '' }, qty: line.qty, unit: line.unit, sku: line.sku ?? '',
       // Stock per warehouse is only listed when the line was split, so the dashboard offers per-location fulfilment.
       ...(pk && Object.keys(pk).length > 1 ? { stock: pk } : prev?.stock ? { stock: prev.stock } : {}),
+      // What was held for this line, per warehouse: released when it ships or the order is cancelled (merchant/ops.ts).
+      ...(pk ? { reserved: pk } : prev?.reserved ? { reserved: prev.reserved } : {}),
     };
   });
   const pay = merchantPay(after.pay.state);
@@ -330,6 +333,10 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
     ...base, pay, items, log, customerId,
     fee: after.totals.shipping + after.totals.codFee, discount: after.totals.discount || undefined, coupon: after.coupon,
     payment: { method: after.pay.method, state: paymentState(after.pay.state) },
+    // Contact, address and notes for the dashboard (shown by role there).
+    contact: { phone: after.contact.phone ? `+966 ${after.contact.phone}` : existing?.contact?.phone, email: after.contact.email ?? existing?.contact?.email },
+    ...(after.address ? { address: { name: after.address.name, line: [districtL(after.address.city, after.address.district).ar, after.address.street, after.address.building].filter(Boolean).join('، '), city: cityL, notes: after.address.notes?.trim() || undefined } } : {}),
+    ...(ctx.gift || existing?.gift ? { gift: ctx.gift ?? existing?.gift } : {}),
   };
   const orders = existing ? book.orders.map((o) => (o === existing ? order : o)) : [order, ...book.orders];
   return { orders, levels, customers, coupons };
@@ -357,11 +364,33 @@ export function withMerchant(o: Order, m: MOrder | undefined, now: number): Orde
   else if (m.pay === 'partially_refunded') state = 'refunded_part';
   else if (state === 'cod_due' && shipment === 'delivered') state = 'cod_collected';
   const delivered = shipment === 'delivered';
+  // Return stages and refund progress come from the merchant's handling of each request (same RMA id).
+  const returns = o.returns.map((r) => {
+    const mr = m.returns?.find((x) => x.id === r.id);
+    return mr ? { ...r, ...storeReturnState(mr, m.refunds) } : r;
+  });
   return {
-    ...o, ful, shipment, pay: { ...o.pay, state },
-    trackingNo: m.fulfilments.at(-1)?.ref ?? o.trackingNo,
+    ...o, ful, shipment, pay: { ...o.pay, state }, returns,
+    trackingNo: m.fulfilments.at(-1)?.tracking ?? m.fulfilments.at(-1)?.ref ?? o.trackingNo,
     deliveredAt: delivered ? o.deliveredAt ?? Math.min(now, Math.max(o.at, o.eta?.to ?? o.at)) : undefined,
+    cancelled: m.cancelled ? { at: m.cancelled.at, by: m.cancelled.by === 'customer' ? 'customer' : 'store' } : undefined,
+    cancelRequest: m.cancelRequest?.state,
   };
+}
+
+const RETURN_REASON: Record<string, string> = { size: 'مقاس غير مناسب · Wrong size', not_as_described: 'غير مطابق للوصف · Not as described', damaged: 'تالف · Damaged', changed_mind: 'غيّر رأيه · Changed mind' };
+/** Return requests the shopper sent from the store become merchant returns with the same RMA id (once each). */
+export function mirrorReturns(m: MOrder, o: Order): MOrder {
+  let next = m;
+  for (const r of o.returns) {
+    if ((next.returns ?? []).some((x) => x.id === r.id)) continue;
+    const lines = r.lines.map((l) => {
+      const sku = o.lines.find((x) => x.vid === l.vid)?.sku ?? l.vid.split('~')[1];
+      return { idx: next.items.findIndex((it) => it.sku === sku), qty: l.qty, reason: RETURN_REASON[l.reason] ?? l.reason };
+    }).filter((l) => l.idx >= 0);
+    next = openReturn(next, lines, CUSTOMER, r.at, { id: r.id, source: 'store', method: r.method, refundTo: r.refundTo, iban: r.iban }).order;
+  }
+  return next;
 }
 
 /** A merchant order the shopper did not place in this session (history, other customers), seen from the store. */

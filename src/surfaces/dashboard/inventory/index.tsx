@@ -97,7 +97,7 @@ function InventoryHome({ route }: { route: Route }) {
   const toolbar = (
     <div className="flex flex-wrap items-center gap-2 p-4 sm:px-5">
       <div className="flex w-full sm:w-auto sm:flex-1 sm:max-w-xs"><SearchInput value={q} onChange={(v) => go({ q: v || undefined })} placeholder={tx('ابحث بالمنتج أو SKU', 'Search product or SKU')} /></div>
-      <FilterChip label={tx('المستودع', 'Warehouse')} value={loc} onChange={(v) => go({ loc: v || undefined })} options={LOC_IDS.map((l) => ({ value: l, label: LOCATIONS[l][lang] }))} />
+      <FilterChip label={tx('الموقع', 'Location')} value={loc} onChange={(v) => go({ loc: v || undefined })} options={LOC_IDS.map((l) => ({ value: l, label: LOCATIONS[l][lang] }))} />
       {(q || loc) && <a href={ihref('', { tab: query.tab })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
     </div>
   );
@@ -168,7 +168,7 @@ function LevelTable({ rows, onAdjust, onThreshold, selected, onSelect, bulk }: {
     : <span className="tabular-nums">{r.threshold}</span>;
   const columns: Column<LevelRow>[] = [
     { key: 'p', header: tx('المنتج', 'Product'), cell: (r) => <SkuCell sku={r.sku} info={r.info} />, className: 'max-w-80' },
-    { key: 'loc', header: tx('المستودع', 'Warehouse'), cell: (r) => <span className="text-muted">{LOCATIONS[r.loc][lang]}</span> },
+    { key: 'loc', header: tx('الموقع', 'Location'), cell: (r) => <span className="text-muted">{LOCATIONS[r.loc][lang]}</span> },
     { key: 'oh', header: h(tx('الموجود', 'On hand'), 'onHand'), align: 'end', cell: (r) => <span className="tabular-nums">{r.onHand}</span> },
     { key: 'rs', header: h(tx('المحجوز', 'Reserved'), 'reserved'), align: 'end', cell: (r) => <span className="tabular-nums text-muted">{r.reserved}</span>, hideBelow: 'lg' },
     { key: 'av', header: h(tx('المتاح', 'Available'), 'available'), align: 'end', cell: avail },
@@ -379,7 +379,7 @@ function AlertLog({ info }: { info: Map<string, SkuInfo> }) {
           );
         })}
       </ul>
-      {alerts.length > shown.length && <p className="px-4 pb-3 text-xs text-muted sm:px-5">{tx(`و${alerts.length - shown.length} تنبيهًا أقدم`, `and ${alerts.length - shown.length} older alerts`)}</p>}
+      {alerts.length > shown.length && <p className="px-4 pb-3 text-xs text-muted sm:px-5">{tx(`تنبيهات أقدم: ${alerts.length - shown.length}`, `Older alerts: ${alerts.length - shown.length}`)}</p>}
     </section>
   );
 }

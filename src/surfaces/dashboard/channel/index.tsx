@@ -24,6 +24,7 @@ import {
   submitForReview, submittable, toggleImpact, type Check, type CheckId, type Row, type RowState, type Tab,
 } from './model';
 import { channelStore } from './state';
+import ChannelsOverview from './overview';
 
 const STATE_TONE: Record<RowState, Tone> = {
   listed: 'green', in_review: 'sky', not_submitted: 'brand', needs_fix: 'amber', rejected: 'red', out_of_stock: 'gray', paused: 'gray',
@@ -72,7 +73,11 @@ const checkHref = (c: CheckId) => ({
 
 type Dialog = { kind: 'toggle' } | { kind: 'submit'; rows: Row[] } | { kind: 'include'; row: Row } | { kind: 'withhold'; row: Row };
 
-export default function Channel({ route }: { route: Route }) {
+export default function ChannelSection({ route }: { route: Route }) {
+  return route.path[0] === 'all' ? <ChannelsOverview route={route} /> : <Channel route={route} />;
+}
+
+function Channel({ route }: { route: Route }) {
   const tx = useTx();
   const { lang } = useLang();
   const L = useLabels();
@@ -125,6 +130,7 @@ export default function Channel({ route }: { route: Route }) {
       <PageHeader title={tx('سوق لك', 'LAK marketplace')} description={tx('أي منتجاتك يراها المتسوقون عبر المتاجر، ولماذا.', 'Which of your products shoppers see across stores, and why.')}
         meta={state === 'live' || empty ? <><Badge tone={CH[ch].tone} icon={<span className={cn('size-1.5 rounded-full', ch === 'live' ? 'bg-emerald-500' : ch === 'blocked' ? 'bg-red-500' : 'bg-subtle')} aria-hidden="true" />}>{CH[ch].label}</Badge><Badge tone="amber">{tx('القواعد والرسوم بانتظار الاعتماد', 'Rules and fees awaiting approval')}</Badge></> : undefined}
         actions={<>
+          <LinkButton variant="ghost" href={link('/dashboard/channel/all')}>{tx('كل القنوات', 'All channels')}</LinkButton>
           <LinkButton variant="secondary" href={sectionHref('orders', '', { ch: 'market' })}><ShoppingBag className="size-4" aria-hidden="true" />{tx('طلبات السوق', 'Marketplace orders')}</LinkButton>
           {state === 'live' && primary}
         </>} />

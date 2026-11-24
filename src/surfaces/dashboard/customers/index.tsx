@@ -1,30 +1,36 @@
-// Customers (blueprint pp. 21–22, skill ch. 03 "العميل والنمو"): list with search and segments, and a profile with
-// consented contact channels, order history, lifetime value, internal notes and a separate message-to-customer flow.
-// View only: rules live in ./model.ts.
+// Customers (blueprint pp. 21–22, skill ch. 03 "العميل والنمو"): list with search, built-in and saved segments,
+// export and import; a profile with one activity timeline (orders, refunds, every message, carts, automations,
+// notes, account actions), consented contact channels, addresses, loyalty and gift cards, block / unblock,
+// internal notes and a separate message-to-customer flow. Saved segments: `customers/segments/<id|new>`;
+// import: `customers/import`. View only: rules live in ./model.ts.
 import { useMemo, useState, type ReactNode } from 'react';
-import { Users, Lock, Mail, MessageSquare, StickyNote, Send, ShieldCheck, SearchX, UserX, ShoppingBag } from 'lucide-react';
+import { Users, Lock, Mail, MessageSquare, StickyNote, Send, ShieldCheck, SearchX, UserX, Ban, Download, Upload, Plus, ShieldOff, Pencil } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, type Route } from '../../../core/router';
-import { customersStore, ordersStore, notesStore, testStore } from '../../merchant/stores';
+import { customersStore, ordersStore, notesStore, segmentsStore, testStore } from '../../merchant/stores';
 import { can, canSee } from '../../merchant/perms';
 import type { Customer, Segment } from '../../merchant/workspace';
 import type { Order } from '../../merchant/domain';
-import { Avatar, Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
+import { Avatar, Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, LinkButton, Money, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { Alert, DataTable, Field, FilterChip, Modal, PageHeader, Pagination, SearchInput, Select, Simulated, Tabs, Textarea, useToast, type Column } from '../../../ds/kit';
-import { skuPhoto } from '../model/media';
 import { useDashState, setDashState } from '../review';
-import { sectionHref } from '../pages';
+import { downloadCsv } from '../finance/download';
 import {
-  SEGMENTS, SMS_MAX_PARTS, channels, customerRows, filterCustomers, lifetime, mask, messageProblems, orderTotal, paginate, parseSegment, parseSort, segmentCounts, smsParts,
+  SEGMENTS, SMS_MAX_PARTS, channels, customerRows, customersCsv, filterCustomers, inSaved, lifetime, mask, messageProblems, paginate, parseSegment, parseSort, savedId, segmentCounts, smsParts,
   type CustomerRow, type MsgChannel, type MsgProblem, type Purpose,
 } from './model';
+import { Activity, AddressesCard, BlockModal, RewardsCard, WithdrawConsent } from './activity';
+import SegmentEditor from './segments';
+import ImportCustomers from './import';
 
 const href = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard/customers${path ? `/${path}` : ''}`, q);
 
 export default function Customers({ route }: { route: Route }) {
   const role = testStore.use().role;
   if (!canSee(role, 'customers')) return <NoAccess />;
-  return route.path[0] ? <Profile id={route.path[0]} /> : <List route={route} />;
+  if (route.path[0] === 'segments') return <SegmentEditor key={route.path[1] ?? 'new'} id={route.path[1] ?? 'new'} canManage={can(role, 'marketing.manage')} />;
+  if (route.path[0] === 'import') return can(role, 'marketing.manage') ? <ImportCustomers /> : <NoAccess />;
+  return route.path[0] ? <Profile id={route.path[0]} route={route} /> : <List route={route} />;
 }
 
 /* ---------- Shared bits ---------- */
@@ -64,18 +70,30 @@ function List({ route }: { route: Route }) {
   const customers = customersStore.use();
   const role = testStore.use().role;
   const contact = can(role, 'customer.contact');
+  const saved = segmentsStore.use();
+  const manage = can(role, 'marketing.manage');
   const q = route.query.get('q') ?? '';
   const seg = parseSegment(route.query.get('seg'));
+  const custom = saved.find((x) => x.id === savedId(route.query.get('seg')));
+  const blocked = route.query.get('blocked') === '1';
   const sort = parseSort(route.query.get('sort'));
   const empty = state === 'empty';
 
   const all = useMemo(() => customerRows(empty ? [] : customers, orders), [customers, orders, empty]);
   const counts = segmentCounts(all);
-  const filtered = filterCustomers(all, { q, seg, sort, contact });
+  const savedCounts = useMemo(() => Object.fromEntries(saved.map((x) => [x.id, inSaved(all, orders, x).length])), [saved, all, orders]);
+  const base = custom ? inSaved(all, orders, custom) : all;
+  const filtered = filterCustomers(base, { q, seg: custom ? null : seg, sort, contact }).filter((r) => !blocked || r.c.blocked);
   const pg = paginate(filtered, Number(route.query.get('page')) || 1);
-  const qs = (o: Record<string, string | undefined>) => ({ q: q || undefined, seg: seg ?? undefined, sort: sort === 'recent' ? undefined : sort, ...o });
+  const segParam = custom ? `custom:${custom.id}` : seg ?? undefined;
+  const qs = (o: Record<string, string | undefined>) => ({ q: q || undefined, seg: segParam, sort: sort === 'recent' ? undefined : sort, blocked: blocked ? '1' : undefined, ...o });
+  const exportCsv = () => downloadCsv(`customers-${custom?.id ?? seg ?? 'all'}.csv`, customersCsv(filtered, contact, lang));
 
-  const header = <PageHeader title={tx('العملاء', 'Customers')} description={empty || state !== 'live' ? undefined : tx(`${all.length} عميلًا`, `${all.length} customers`)} />;
+  const header = <PageHeader title={tx('العملاء', 'Customers')} description={empty || state !== 'live' ? undefined : tx(`${all.length} عميلًا`, `${all.length} customers`)}
+    actions={state === 'live' && !empty ? <div className="flex flex-wrap gap-2">
+      {manage && <LinkButton variant="secondary" href={href('import')}><Upload className="size-4" aria-hidden="true" />{tx('استيراد', 'Import')}</LinkButton>}
+      <Button variant="secondary" onClick={exportCsv}><Download className="size-4" aria-hidden="true" />{tx(`تصدير ${filtered.length}`, `Export ${filtered.length}`)}</Button>
+    </div> : undefined} />;
   if (state === 'loading') return <div className="space-y-6" aria-busy="true">{header}<ListSkeleton /></div>;
   if (state === 'error') return (
     <div className="space-y-6">{header}
@@ -96,7 +114,7 @@ function List({ route }: { route: Route }) {
   type R = CustomerRow;
   const columns: Column<R>[] = [
     { key: 'name', header: tx('العميل', 'Customer'), cell: (r) => (
-      <span className="flex items-center gap-3"><Avatar name={r.c.name[lang]} /><span className="min-w-0"><span className="block truncate font-semibold text-fg">{r.c.name[lang]}</span><span className="block text-xs font-normal text-muted"><Ref>{r.c.id}</Ref></span></span></span>
+      <span className="flex items-center gap-3"><Avatar name={r.c.name[lang]} /><span className="min-w-0"><span className="flex items-center gap-1.5 truncate font-semibold text-fg">{r.c.name[lang]}{r.c.blocked && <Badge tone="red" icon={<Ban className="size-3" aria-hidden="true" />}>{tx('محظور', 'Blocked')}</Badge>}</span><span className="block text-xs font-normal text-muted"><Ref>{r.c.id}</Ref></span></span></span>
     ) },
     { key: 'city', header: tx('المدينة', 'City'), hideBelow: 'lg', cell: (r) => <span className="text-muted">{r.c.city[lang]}</span> },
     { key: 'segs', header: tx('الشرائح', 'Segments'), hideBelow: 'lg', cell: (r) => <SegBadges segs={r.segs} /> },
@@ -111,8 +129,10 @@ function List({ route }: { route: Route }) {
       <Card>
         <div className="px-4 pt-2 sm:px-5">
           <Tabs label={tx('الشرائح', 'Segments')} items={[
-            { href: href('', qs({ seg: undefined, page: undefined })), label: tx('الكل', 'All'), current: !seg, count: counts.all },
-            ...SEGMENTS.map((s) => ({ href: href('', qs({ seg: s, page: undefined })), label: n.seg(s), current: seg === s, count: counts[s] })),
+            { href: href('', qs({ seg: undefined, page: undefined })), label: tx('الكل', 'All'), current: !seg && !custom, count: counts.all },
+            ...SEGMENTS.map((s) => ({ href: href('', qs({ seg: s, page: undefined })), label: n.seg(s), current: !custom && seg === s, count: counts[s] })),
+            ...saved.map((x) => ({ href: href('', qs({ seg: `custom:${x.id}`, page: undefined })), label: x.name[lang], current: custom?.id === x.id, count: savedCounts[x.id] })),
+            ...(manage ? [{ href: href('segments/new'), label: <span className="inline-flex items-center gap-1"><Plus className="size-3.5" aria-hidden="true" />{tx('شريحة', 'Segment')}</span>, current: false }] : []),
           ]} />
         </div>
         <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
@@ -120,7 +140,9 @@ function List({ route }: { route: Route }) {
             placeholder={contact ? tx('ابحث بالاسم أو المدينة أو البريد أو الجوال', 'Search name, city, email or mobile') : tx('ابحث بالاسم أو المعرف أو المدينة', 'Search name, id or city')} />
           <FilterChip label={tx('الترتيب', 'Sort')} value={sort === 'recent' ? '' : sort} onChange={(v) => replace(href('', qs({ sort: v || undefined, page: undefined })))}
             options={[{ value: 'spent', label: tx('الأعلى إنفاقًا', 'Highest spend') }, { value: 'orders', label: tx('الأكثر طلبات', 'Most orders') }]} />
-          {seg && <span className="flex items-center gap-1 text-xs text-muted">{n.segHint(seg)}<InfoHint>{tx('الشرائح قواعد على سجل الطلبات والموافقات فقط، ولا نستنتج عمرًا أو جنسًا أو ملاءة.', 'Segments are rules over order history and consent only; nothing is inferred about age, gender or credit.')}</InfoHint></span>}
+          <FilterChip label={tx('الحالة', 'Status')} value={blocked ? '1' : ''} onChange={(v) => replace(href('', qs({ blocked: v || undefined, page: undefined })))} options={[{ value: '1', label: tx('محظورون', 'Blocked') }]} />
+          {custom && <span className="flex items-center gap-1.5 text-xs text-muted">{tx('شريحة محفوظة بقواعد', 'Saved rule-based segment')}{manage && <a href={href(`segments/${custom.id}`)} className="inline-flex items-center gap-1 font-semibold text-brand-700 hover:underline dark:text-brand-300"><Pencil className="size-3" aria-hidden="true" />{tx('عدّل القواعد', 'Edit rules')}</a>}</span>}
+          {!custom && seg && <span className="flex items-center gap-1 text-xs text-muted">{n.segHint(seg)}<InfoHint>{tx('الشرائح قواعد على سجل الطلبات والموافقات فقط، ولا نستنتج عمرًا أو جنسًا أو ملاءة.', 'Segments are rules over order history and consent only; nothing is inferred about age, gender or credit.')}</InfoHint></span>}
         </div>
         {pg.total === 0 ? (
           <EmptyState icon={<SearchX className="size-6" aria-hidden="true" />} title={tx('لا عملاء يطابقون البحث', 'No customers match')}
@@ -168,7 +190,7 @@ function ListSkeleton() {
 
 /* ---------- Profile ---------- */
 
-function Profile({ id }: { id: string }) {
+function Profile({ id, route }: { id: string; route: Route }) {
   const tx = useTx();
   const { lang } = useLang();
   const n = useNames();
@@ -177,6 +199,7 @@ function Profile({ id }: { id: string }) {
   const role = testStore.use().role;
   const c = customersStore.use().find((x) => x.id === id);
   const back = { href: href(), label: tx('العملاء', 'Customers') };
+  const [modal, setModal] = useState<'block' | 'consent' | null>(null);
 
   if (state === 'loading') return <div className="space-y-6" aria-busy="true"><PageHeader back={back} title={<Skeleton className="h-8 w-56" />} /><ProfileSkeleton /></div>;
   if (state === 'error') return (
@@ -194,12 +217,18 @@ function Profile({ id }: { id: string }) {
   const lt = lifetime(c, state === 'empty' ? [] : orders);
   const seeOrders = canSee(role, 'orders');
   const contact = can(role, 'customer.contact');
+  const canBlock = can(role, 'settings.manage');
+  const tl = route.query.get('tl') ?? '';
 
   return (
     <div className="space-y-6">
       <PageHeader back={back} title={c.name[lang]}
-        meta={<><span className="text-sm text-muted"><Ref>{c.id}</Ref> · {c.city[lang]} · {tx('عميل منذ', 'Customer since')} <Ref>{c.since}</Ref></span><SegBadges segs={lt.segs} /></>}
-        actions={can(role, 'customer.message') ? <Button variant="secondary" onClick={() => { const el = document.getElementById('c-message'); el?.scrollIntoView({ behavior: 'smooth', block: 'start' }); el?.querySelector<HTMLElement>('select, textarea')?.focus({ preventScroll: true }); }}>{tx('راسل العميل', 'Message customer')}<Send className="size-4 rtl:-scale-x-100" aria-hidden="true" /></Button> : undefined} />
+        meta={<><span className="text-sm text-muted"><Ref>{c.id}</Ref> · {c.city[lang]} · {tx('عميل منذ', 'Customer since')} <Ref>{c.since}</Ref></span><SegBadges segs={lt.segs} />{c.blocked && <Badge tone="red" icon={<Ban className="size-3" aria-hidden="true" />}>{tx('محظور', 'Blocked')}</Badge>}</>}
+        actions={<div className="flex flex-wrap gap-2">
+          {canBlock && <Button variant="secondary" onClick={() => setModal('block')}>{c.blocked ? <><ShieldOff className="size-4" aria-hidden="true" />{tx('فك الحظر', 'Unblock')}</> : <><Ban className="size-4" aria-hidden="true" />{tx('حظر', 'Block')}</>}</Button>}
+          {can(role, 'customer.message') && <Button variant="secondary" onClick={() => { const el = document.getElementById('c-message'); el?.scrollIntoView({ behavior: 'smooth', block: 'start' }); el?.querySelector<HTMLElement>('select, textarea')?.focus({ preventScroll: true }); }}>{tx('راسل العميل', 'Message customer')}<Send className="size-4 rtl:-scale-x-100" aria-hidden="true" /></Button>}
+        </div>} />
+      {c.blocked && <Alert tone="bad" title={tx('العميل محظور من الطلبات الجديدة', 'This customer is blocked from new orders')}>{tx(`السبب: ${c.blocked.reason} · ${c.blocked.by} · ${c.blocked.at}`, `Reason: ${c.blocked.reason} · ${c.blocked.by} · ${c.blocked.at}`)}</Alert>}
 
       <section aria-label={tx('قيمة العميل', 'Customer value')} className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
         <Stat label={tx('القيمة الدائمة', 'Lifetime value')} hint={tx('الطلبات المدفوعة شاملة الشحن والضريبة، بعد الاستردادات المؤكدة. ليست ربحًا.', 'Paid orders incl. shipping and VAT, after confirmed refunds. Not profit.')} value={<Money v={lt.spent} />} sub={lt.refundPending ? <>{tx('استرداد معلّق', 'Refund pending')} <Money v={lt.refundPending} /></> : undefined} />
@@ -210,7 +239,7 @@ function Profile({ id }: { id: string }) {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-6 lg:col-span-2">
-          <OrderHistory lt={lt} seeOrders={seeOrders} />
+          <Activity c={c} filter={tl} onFilter={(v) => replace(href(c.id, { tl: v || undefined }))} seeOrders={seeOrders} />
           <MessageCard c={c} history={lt.history} />
         </div>
         <div className="min-w-0 space-y-6">
@@ -229,11 +258,16 @@ function Profile({ id }: { id: string }) {
               ))}
             </ul>
             {!contact && <p className="flex items-center gap-1.5 px-5 pb-4 text-xs text-muted"><Lock className="size-3.5" aria-hidden="true" />{tx('بيانات التواصل مخفية لدورك.', 'Contact details are hidden for your role.')}</p>}
+            {can(role, 'customer.note') && (c.consent.email || c.consent.sms) && <div className="border-t border-border px-5 py-3"><Button variant="ghost" size="sm" onClick={() => setModal('consent')}>{tx('سجّل سحب موافقة', 'Record a consent withdrawal')}</Button></div>}
             <p className="flex items-center gap-1 border-t border-border px-5 py-3 text-xs text-muted"><ShieldCheck className="size-3.5" aria-hidden="true" />{tx('طلبات كشف البيانات أو حذفها', 'Data access or deletion requests')}<InfoHint>{tx('تُعالج عبر الدعم وفق سياسة الخصوصية المعتمدة، ولا تُنفذ من هذه الصفحة.', 'Handled through support under the approved privacy policy, not from this page.')}</InfoHint></p>
           </Card>
+          <AddressesCard c={c} />
+          <RewardsCard c={c} />
           <NotesCard id={c.id} />
         </div>
       </div>
+      {modal === 'block' && <BlockModal c={c} onClose={() => setModal(null)} />}
+      {modal === 'consent' && <WithdrawConsent c={c} onClose={() => setModal(null)} />}
     </div>
   );
 }
@@ -246,62 +280,6 @@ function Stat({ label, hint, value, sub }: { label: string; hint?: string; value
       {sub && <p className="mt-1.5 flex flex-wrap items-center gap-1 text-xs text-muted">{sub}</p>}
     </div>
   );
-}
-
-function OrderHistory({ lt, seeOrders }: { lt: ReturnType<typeof lifetime>; seeOrders: boolean }) {
-  const tx = useTx();
-  const { lang } = useLang();
-  const n = useNames();
-  const [more, setMore] = useState(false);
-  const list = more ? lt.history : lt.history.slice(0, 8);
-  return (
-    <Card aria-labelledby="h-orders">
-      <CardHeader id="h-orders" title={tx('سجل الطلبات', 'Order history')} hint={tx('الدفع والتجهيز والاسترداد حالات منفصلة.', 'Payment, fulfilment and refund are separate states.')}
-        action={<span className="text-xs text-muted tabular-nums">{tx(`${lt.orderCount} طلبًا`, `${lt.orderCount} orders`)}</span>} />
-      {lt.history.length === 0 ? (
-        <EmptyState icon={<ShoppingBag className="size-6" aria-hidden="true" />} title={tx('لا طلبات بعد', 'No orders yet')}>{tx('تظهر طلبات العميل هنا عند إنشائها.', 'This customer’s orders appear here when placed.')}</EmptyState>
-      ) : (
-        <>
-          <ul className="divide-y divide-border border-t border-border">
-            {list.map((o) => {
-              const body = (
-                <>
-                  <ProductImage src={skuPhoto(o.items[0].sku)} alt={o.items[0].name[lang]} size={40} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-fg"><Ref>#{o.ref}</Ref> <span className="font-normal text-muted">· {o.items[0].name[lang]}{o.items.length > 1 && <> <bdi dir="ltr">+{o.items.length - 1}</bdi></>}</span></p>
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5"><OrderBadges o={o} /><span className="text-xs text-subtle">{n.ago(o.hoursAgo)}</span></div>
-                  </div>
-                  <Money v={orderTotal(o)} className="text-sm font-semibold text-fg" />
-                </>
-              );
-              return (
-                <li key={o.ref}>
-                  {seeOrders ? <a href={sectionHref('orders', o.ref)} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-surface-2/60">{body}</a>
-                    : <div className="flex items-center gap-3 px-5 py-3">{body}</div>}
-                </li>
-              );
-            })}
-          </ul>
-          {lt.history.length > 8 && (
-            <div className="border-t border-border px-5 py-3"><Button variant="ghost" size="sm" onClick={() => setMore((m) => !m)}>{more ? tx('اعرض أقل', 'Show fewer') : tx(`اعرض كل ${lt.history.length}`, `Show all ${lt.history.length}`)}</Button></div>
-          )}
-          {!seeOrders && <p className="flex items-center gap-1.5 border-t border-border px-5 py-3 text-xs text-muted"><Lock className="size-3.5" aria-hidden="true" />{tx('فتح الطلبات خارج صلاحية دورك.', 'Opening orders is outside your role.')}</p>}
-        </>
-      )}
-    </Card>
-  );
-}
-
-function OrderBadges({ o }: { o: Order }) {
-  const tx = useTx();
-  const pay: [Tone, string] = o.pay === 'failed' ? ['red', tx('فشل الدفع', 'Payment failed')] : o.pay === 'refunded' ? ['gray', tx('مسترد', 'Refunded')] : o.pay === 'partially_refunded' ? ['amber', tx('مسترد جزئيًا', 'Partly refunded')] : ['green', tx('مدفوع', 'Paid')];
-  const ship: [Tone, string] | null = o.pay === 'failed' ? null : o.ship === 'delivered' ? ['green', tx('تم التسليم', 'Delivered')] : o.ship === 'transit' ? ['sky', tx('في الطريق', 'In transit')] : o.ship === 'label' ? ['sky', tx('بوليصة صادرة', 'Label issued')] : o.ful === 'partial' ? ['amber', tx('مجهّز جزئيًا', 'Partly fulfilled')] : ['brand', tx('للتجهيز', 'To fulfil')];
-  const pending = o.refunds.some((r) => r.status === 'pending');
-  return <>
-    <Badge tone={pay[0]}>{pay[1]}</Badge>
-    {ship && <Badge tone={ship[0]}>{ship[1]}</Badge>}
-    {pending && <Badge tone="amber">{tx('استرداد معلّق', 'Refund pending')}</Badge>}
-  </>;
 }
 
 function NotesCard({ id }: { id: string }) {

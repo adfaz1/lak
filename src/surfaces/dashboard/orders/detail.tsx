@@ -458,7 +458,7 @@ function Timeline({ o }: { o: Order }) {
   const actText = (a: Activity): [Tone, ReactNode] => {
     const ref = a.ref ? <> · <Ref>{a.ref}</Ref></> : null;
     switch (a.kind) {
-      case 'manualCreated': return ['green', tx('أُنشئ الطلب يدويًا', 'Order created by hand')];
+      case 'manualCreated': return ['gray', <>{tx('الدفع المسجّل: ', 'Payment recorded as: ')}{({ cash: tx('نقدًا', 'cash'), transfer: tx('تحويل', 'bank transfer'), cod: tx('عند الاستلام', 'cash on delivery'), link: tx('رابط دفع (بانتظار الدفع)', 'payment link (awaiting payment)') } as Record<string, string>)[a.text ?? ''] ?? a.text}</>];
       case 'confirmUndone': return ['gray', tx('تراجع عن التأكيد', 'Confirmation undone')];
       case 'cancelled': return ['red', <>{tx('أُلغي الطلب', 'Order cancelled')} · {a.text}</>];
       case 'cancelRequested': return ['amber', <>{tx('طلب العميل الإلغاء', 'Customer asked to cancel')}{a.text && ` · «${a.text}»`}</>];

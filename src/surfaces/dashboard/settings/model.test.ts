@@ -213,3 +213,24 @@ describe('role change preview', () => {
     expect(roleDiff('finance', 'finance')).toEqual({ gains: [], loses: [] });
   });
 });
+
+describe('social links and custom roles', () => {
+  it('accepts links or handles for the right platform only', async () => {
+    const { parseSocial } = await import('./model');
+    expect(parseSocial('instagram', '@darnuwa')).toEqual({ ok: true, url: 'https://instagram.com/darnuwa' });
+    expect(parseSocial('instagram', 'tiktok.com/@darnuwa')).toEqual({ ok: false, error: 'host' });
+    expect(parseSocial('x', 'http://twitter.com/darnuwa')).toEqual({ ok: true, url: 'https://twitter.com/darnuwa' });
+    expect(parseSocial('youtube', '')).toEqual({ ok: true, url: '' });
+  });
+  it('builds a custom role from a fixed one and keeps actions tied to their page', async () => {
+    const { roleFrom, togglePerm, customRoleErrors, customAllows } = await import('./model');
+    const r = roleFrom('fulfilment', 'x');
+    expect(customAllows(r, 'order.fulfil')).toBe(true);
+    const noOrders = togglePerm(r, 'orders', false);
+    expect(customAllows(noOrders, 'order.fulfil')).toBe(false);
+    const refund = togglePerm(noOrders, 'order.refund', true);
+    expect(customAllows(refund, 'orders')).toBe(true);
+    expect(customRoleErrors({ ...r, name: { ar: 'المالية', en: '' } }, [])).toMatchObject({ name: 'taken' });
+    expect(customRoleErrors({ ...r, name: { ar: 'مراجع', en: '' }, pages: [] }, [])).toMatchObject({ pages: 'required' });
+  });
+});

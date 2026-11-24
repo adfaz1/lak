@@ -108,8 +108,10 @@ export function checkCode(input: string, secret: string): CodeError {
 /** Ten one-time backup codes (xxxx-xxxx), derived from the secret so they stay stable while the dialog is open. */
 export function backupCodes(secret: string): string[] {
   return Array.from({ length: 10 }, (_, i) => {
-    const n = [...`${secret}${i}`].reduce((h, c) => (Math.imul(h, 33) + c.charCodeAt(0)) >>> 0, 5381);
-    const s = n.toString(36).padStart(8, '0').slice(-8);
+    let h = 2166136261 ^ (i * 0x9e3779b1);
+    for (const c of `${i}:${secret}`) { h = Math.imul(h ^ c.charCodeAt(0), 16777619); h ^= h >>> 13; }
+    const n2 = Math.imul(h ^ (h >>> 16), 0x85ebca6b) >>> 0;
+    const s = `${(h >>> 0).toString(36)}${n2.toString(36)}`.padStart(8, '0').slice(-8);
     return `${s.slice(0, 4)}-${s.slice(4)}`;
   });
 }

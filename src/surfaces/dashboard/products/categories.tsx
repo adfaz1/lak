@@ -12,7 +12,7 @@ import { Alert, Field, Input, Modal, PageHeader, Select, Switch, Textarea, useTo
 import { useDashState, setDashState } from '../review';
 import { useUnsaved } from '../unsaved';
 import { deleteBlock, moveCategory, newCategoryId, productsIn, productsUnder, slugify } from './model';
-import { CatalogNav, ReviewTools, phref, roleBadge, useRole } from './common';
+import { CatalogNav, ReviewTools, phref, productCount, roleBadge, useRole } from './common';
 
 interface Draft { id: string | null; nameAr: string; nameEn: string; parent: string; slug: string; descAr: string; descEn: string; seoTitle: string; seoDesc: string; visible: boolean }
 const blank = (parent = ''): Draft => ({ id: null, nameAr: '', nameEn: '', parent, slug: '', descAr: '', descEn: '', seoTitle: '', seoDesc: '', visible: true });
@@ -67,7 +67,7 @@ export default function Categories() {
                     <p className="flex flex-wrap items-center gap-2 font-semibold text-fg">{depth ? <span className="text-subtle" aria-hidden="true">↳</span> : null}{cat.name[lang]}
                       {(!cat.visible || parentHidden) && <Badge tone="gray" icon={<EyeOff className="size-3" aria-hidden="true" />}>{tx('مخفية في المتجر', 'Hidden in store')}</Badge>}
                     </p>
-                    <p className="text-xs text-muted"><bdi dir="ltr">/c/{cat.slug || slugify(cat.name.en)}</bdi> · <a className="font-medium text-brand-700 hover:underline dark:text-brand-300" href={phref('', { cat: cat.name.en.toLowerCase() })}>{tx(`${n} منتجات`, `${n} products`)}</a></p>
+                    <p className="text-xs text-muted"><bdi dir="ltr">/c/{cat.slug || slugify(cat.name.en)}</bdi> · <a className="font-medium text-brand-700 hover:underline dark:text-brand-300" href={phref('', { cat: cat.name.en.toLowerCase() })}>{productCount(tx, n)}</a></p>
                   </div>
                   {canEdit && (
                     <div className="flex items-center gap-1">

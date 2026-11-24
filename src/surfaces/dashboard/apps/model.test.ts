@@ -48,3 +48,27 @@ describe('connection changes', () => {
     expect(needsAttention(b).map((x) => x.id)).toEqual(['rev']);
   });
 });
+
+describe('sync log and integration issues', () => {
+  it('explains each failing app with its cause and the fixing action', async () => {
+    const { appFixtures } = await import('../../merchant/workspace');
+    const { integrationIssues, syncFixtures } = await import('./model');
+    const issues = integrationIssues(appFixtures(), syncFixtures(Date.parse('2026-11-24T12:00:00Z')));
+    expect(issues.map((i) => i.appId)).toEqual(['rev', 'wa']);
+    expect(issues[0]).toMatchObject({ level: 'error', ref: 'SYNC-4471', fix: { action: 'retry', href: '#/dashboard/apps/rev' } });
+    expect(issues[1].fix.action).toBe('reauth');
+    expect(issues[0].since).toBeDefined();
+  });
+  it('records every action; a simulated failure keeps the app failing with the new cause', async () => {
+    const { appFixtures } = await import('../../merchant/workspace');
+    const { runAction, syncFixtures, currentCause, lastOk } = await import('./model');
+    const log = syncFixtures(Date.parse('2026-11-24T12:00:00Z'));
+    const ok = runAction(appFixtures(), log, 'rev', 'retry', '2026-11-24T13:00:00Z');
+    expect(ok.apps.find((a) => a.id === 'rev')!.state).toBe('connected');
+    expect(ok.entry).toMatchObject({ ok: true, kind: 'retry' });
+    expect(lastOk([ok.entry, ...log], 'rev')!.at).toBe('2026-11-24T13:00:00Z');
+    const bad = runAction(appFixtures(), log, 'acc', 'sync', '2026-11-24T13:00:00Z', 'timeout');
+    expect(bad.apps.find((a) => a.id === 'acc')!.state).toBe('error');
+    expect(currentCause([bad.entry, ...log], 'acc')!.cause).toBe('timeout');
+  });
+});

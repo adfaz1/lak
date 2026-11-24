@@ -1,19 +1,20 @@
 // Automation builder: event → conditions → wait → actions. Saving creates a version; activation needs a dry run
 // of the saved version on sample data. Pausing is explained before it happens. Nothing is ever sent or created.
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { FlaskConical, Pause, Play, Plus, Trash2, SearchX, CheckCircle2, CircleDashed } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { FlaskConical, Pause, Play, Plus, Trash2, SearchX, CheckCircle2, CircleDashed, ArrowLeft, Mail } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { navigate } from '../../../core/router';
 import { can } from '../../merchant/perms';
-import { automationsStore, runsStore } from '../../merchant/stores';
+import { automationsStore, logAction, runsStore } from '../../merchant/stores';
 import type { ActionKind, Automation, CondField, Trigger } from '../../merchant/growth';
-import { Badge, Button, Card, CardHeader, EmptyState, IconButton, InfoHint, LinkButton, cn, useTx } from '../../../ds/ui';
+import { Badge, Button, Card, CardHeader, EmptyState, IconButton, InfoHint, LinkButton, Money, cn, useTx } from '../../../ds/ui';
 import { Alert, Checkbox, Field, Input, Modal, PageHeader, SaveBar, Select, Simulated, useToast } from '../../../ds/kit';
 import { Locked, useRole } from '../marketing/access';
 import {
-  TRIGGER_ACTIONS, TRIGGER_FIELDS, activationBlock, addCondition, canAddCondition, changeTrigger, dryRun, dryRunSummary, filterRuns,
-  fromTemplate, isMessaging, markDryRun, sameFlow, saveVersion, validate, type DryRow,
+  TRIGGER_ACTIONS, TRIGGER_FIELDS, activationBlock, addCondition, canAddCondition, changeTrigger, costPerRun, dryRun, dryRunCost, dryRunSummary, filterRuns,
+  flowCost, fromTemplate, isMessaging, markDryRun, runCounts, sameFlow, saveVersion, validate, type DryRow,
 } from './model';
+import { useUnsaved } from '../unsaved';
 import { A_TONE, OutcomeIcon, R_TONE, ahref, useNames } from './names';
 
 export default function Builder({ id, tpl }: { id: string; tpl: string | null }) {
@@ -34,12 +35,7 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
   const cur = autos.find((x) => x.id === a.id);
   const dirty = isNew ? !cur : !!cur && !sameFlow(a, cur);
 
-  useEffect(() => {
-    if (!dirty) return;
-    const on = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', on);
-    return () => window.removeEventListener('beforeunload', on);
-  }, [dirty]);
+  useUnsaved(dirty, { ar: 'تعديلات الأتمتة', en: 'Automation edits' });
 
   if (!isNew && !stored) return (
     <Card><EmptyState as="h1" icon={<SearchX className="size-6" aria-hidden="true" />} title={tx('لا توجد أتمتة بهذا المعرف', 'No automation with this id')}
@@ -64,6 +60,7 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
     automationsStore.set(r.list);
     setA(r.saved);
     setTried(false);
+    logAction('marketing', { ar: `حفظ الأتمتة «${r.saved.name.ar}» الإصدار ${r.saved.version}`, en: `Saved automation “${r.saved.name.en}” version ${r.saved.version}` }, { target: r.saved.id });
     toast({ tone: 'ok', text: tx(`حُفظ الإصدار ${r.saved.version}. جرّبه قبل التفعيل.`, `Version ${r.saved.version} saved. Dry-run it before activating.`) });
     if (isNew) navigate(ahref(r.saved.id));
   };
@@ -75,11 +72,12 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
   };
   const setStatus = (s: Automation['status']) => {
     automationsStore.set((list) => list.map((x) => (x.id === a.id ? { ...x, status: s } : x)));
+    logAction('marketing', s === 'active' ? { ar: `فعّل الأتمتة ${a.id} الإصدار ${version}`, en: `Activated automation ${a.id} version ${version}` } : { ar: `أوقف الأتمتة ${a.id}`, en: `Paused automation ${a.id}` }, { target: a.id });
     setConfirm(null);
     toast({ tone: 'ok', text: s === 'active' ? tx(`فُعّل الإصدار ${version}`, `Version ${version} activated`) : tx('أُوقفت الأتمتة', 'Automation paused') });
   };
 
-  const fieldName = (f: CondField) => ({ cartValue: tx('قيمة السلة ≥ (ر.س)', 'Cart value ≥ (SAR)'), stockBelow: tx('المتاح ≤ (قطعة)', 'Available ≤ (units)'), hoursLate: tx('ساعات التأخير ≥', 'Hours late ≥'), channel: tx('القناة', 'Channel') })[f];
+  const fieldName = (f: CondField) => n.field(f);
   const blockText = block === 'unsaved' ? tx('احفظ التغييرات أولًا', 'Save your changes first')
     : block === 'noActions' ? tx('اختر إجراءً واحدًا على الأقل', 'Choose at least one action')
       : block === 'invalid' ? tx('صحّح الحقول أولًا', 'Fix the fields first')
@@ -97,6 +95,8 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
       {!canManage && <Locked>{tx('دورك يعرض الأتمتة فقط.', 'Your role can only view this automation.')}</Locked>}
       {canManage && status === 'active' && <Alert tone="info" title={tx('المسار نشط', 'This flow is active')}>{tx('أوقفه لتعديله. كل تعديل يُنشئ إصدارًا جديدًا يحتاج تجربة آمنة قبل إعادة التفعيل.', 'Pause it to edit. Each edit creates a new version that needs a dry run before reactivation.')}</Alert>}
       {canManage && status !== 'active' && blockText && <p className="flex items-center gap-1.5 text-[13px] text-muted"><CircleDashed className="size-4" aria-hidden="true" />{tx('قبل التفعيل: ', 'Before activating: ')}{blockText}</p>}
+
+      <PlainWords a={a} cost={flowCost(runs, a.id)} counts={runCounts(runs, a.id)} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <fieldset disabled={!editable} className="min-w-0 space-y-4 lg:col-span-2">
@@ -165,7 +165,7 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
                   ? <><CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" /><span className="text-fg">{tx(`الإصدار ${version} جُرّب`, `Version ${version} tested`)}</span></>
                   : <><CircleDashed className="size-4 text-muted" aria-hidden="true" /><span className="text-muted">{dirty ? tx('غير محفوظ: التجربة لن تُحتسب للتفعيل', 'Unsaved: a run will not count toward activation') : tx(`الإصدار ${version} لم يُجرّب`, `Version ${version} not tested`)}</span></>}
               </p>
-              {results && <DryResults rows={results.rows} actions={a.actions} counted={results.version !== null} />}
+              {results && <DryResults a={a} rows={results.rows} counted={results.version !== null} />}
             </div>
           </Card>
 
@@ -175,7 +175,7 @@ export default function Builder({ id, tpl }: { id: string; tpl: string | null })
               <ul className="divide-y divide-border">
                 {myRuns.map((r) => (
                   <li key={r.id} className="space-y-1 px-5 py-3">
-                    <div className="flex items-center justify-between gap-2"><span className="text-[13px] font-medium text-fg">{r.subject[lang]}</span><Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge></div>
+                    <div className="flex items-center justify-between gap-2"><a href={ahref('', { tab: 'runs', run: r.id })} className="text-[13px] font-medium text-fg hover:text-brand-700">{r.subject[lang]}</a><Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge></div>
                     <p className="text-xs text-muted">{r.reason[lang]}</p>
                     <p className="text-[11px] text-subtle">{r.when[lang]}</p>
                   </li>
@@ -233,10 +233,39 @@ function PauseList({ title, tone, items }: { title: string; tone: 'ok' | 'warn';
   );
 }
 
-function DryResults({ rows, actions, counted }: { rows: DryRow[]; actions: ActionKind[]; counted: boolean }) {
+/** The flow in one sentence (condition → action → result), with what it has cost and done so far. */
+function PlainWords({ a, cost, counts }: { a: Automation; cost: number; counts: { succeeded: number; failed: number; skipped: number } }) {
+  const tx = useTx();
+  const n = useNames();
+  const conds = a.conditions.map((c) => `${n.field(c.field)} ${c.field === 'channel' ? ({ online: tx('المتجر', 'Store'), market: tx('سوق لك', 'Marketplace'), app: tx('التطبيق', 'App') } as Record<string, string>)[c.value] ?? c.value : c.value}`);
+  const chip = 'rounded-lg bg-surface px-2 py-0.5 font-semibold text-fg shadow-card';
+  return (
+    <Card aria-labelledby="h-plain">
+      <div className="space-y-3 p-5">
+        <h2 id="h-plain" className="flex items-center gap-1.5 text-[13px] font-semibold text-muted">{tx('بكلمات بسيطة', 'In plain words')}<InfoHint>{tx('ما يفعله هذا الإصدار المحرَّر الآن، قبل الحفظ أيضًا.', 'What this edited version does, even before saving.')}</InfoHint></h2>
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-2 text-[15px] leading-relaxed text-fg">
+          <span>{tx('عندما', 'When')}</span><span className={chip}>{n.trigger(a.trigger)}</span>
+          {conds.length > 0 && <><span>{tx('و', 'and')}</span>{conds.map((c, i) => <span key={i} className={chip}>{c}</span>)}</>}
+          <ArrowLeft className="size-4 text-subtle ltr:rotate-180" aria-hidden="true" />
+          {a.waitHours > 0 && <><span>{tx('انتظر', 'wait')}</span><span className={chip}>{tx(`${a.waitHours} ساعة`, `${a.waitHours}h`)}</span><span>{tx('ثم', 'then')}</span></>}
+          {a.actions.length ? a.actions.map((x, i) => <span key={x} className="contents">{i > 0 && <span>{tx('و', 'and')}</span>}<span className={chip}>{n.action(x)}</span></span>) : <span className="text-muted">{tx('بلا إجراء بعد', 'no action yet')}</span>}
+        </p>
+        <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-muted">
+          <span>{tx('النتيجة: كل تشغيل يُسجَّل بنتيجته وسببه', 'Result: every run is logged with its outcome and reason')}</span>
+          <span className="tabular-nums">{tx(`نجح ${counts.succeeded} · فشل ${counts.failed} · تُخطّي ${counts.skipped}`, `${counts.succeeded} ok · ${counts.failed} failed · ${counts.skipped} skipped`)}</span>
+          <span className="inline-flex items-center gap-1">{tx('التكلفة حتى الآن', 'Cost so far')} <Money v={cost} /></span>
+          <span className="inline-flex items-center gap-1">{tx('لكل تشغيل', 'Per run')} <Money v={costPerRun(a)} /><Badge tone="amber">{tx('سعر اختبار', 'Test rate')}</Badge></span>
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+function DryResults({ a, rows, counted }: { a: Automation; rows: DryRow[]; counted: boolean }) {
   const tx = useTx();
   const { lang } = useLang();
   const n = useNames();
+  const actions: ActionKind[] = a.actions;
   const s = dryRunSummary(rows);
   const skip = (k: NonNullable<DryRow['skip']>) => ({ condition: tx('شرط غير متحقق', 'Condition not met'), noConsent: tx('لا موافقة', 'No consent'), dedup: tx('رسالة سابقة للسلة نفسها', 'Already messaged for this cart') })[k];
   if (!rows.length) return <p className="text-sm text-muted">{tx('لا عيّنات لهذا الحدث.', 'No samples for this event.')}</p>;
@@ -253,6 +282,13 @@ function DryResults({ rows, actions, counted }: { rows: DryRow[]; actions: Actio
           </li>
         ))}
       </ul>
+      <p className="flex items-center justify-between gap-2 border-t border-border pt-2 text-[13px]"><span className="flex items-center gap-1 text-muted">{tx('تكلفة هذه العيّنات لو كانت حقيقية', 'Cost of these samples if real')}<Badge tone="amber">{tx('سعر اختبار', 'Test rate')}</Badge></span><Money v={dryRunCost(a, rows)} className="font-semibold" /></p>
+      {isMessaging(a) && n.template(a.trigger) && (
+        <div className="rounded-xl bg-surface-2 p-3">
+          <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-muted"><Mail className="size-3.5" aria-hidden="true" />{tx('ما يصل للعميل (القالب الافتراضي)', 'What the customer receives (default template)')}</p>
+          <p className="rounded-2xl rounded-ss-sm bg-surface px-3 py-2 text-sm text-fg shadow-card" dir="auto">{n.template(a.trigger)}</p>
+        </div>
+      )}
       {!counted && <p className="text-xs text-amber-700 dark:text-amber-300">{tx('احفظ ثم جرّب لتُحتسب للتفعيل.', 'Save, then run again for it to count.')}</p>}
     </>
   );

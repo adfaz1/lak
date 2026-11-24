@@ -109,3 +109,68 @@ describe('plan change impact (QA18)', () => {
     expect(planImpact('plus', 'pro', 30).seatsOver).toBe(0);
   });
 });
+
+import { checkIban } from '../../merchant/finance';
+import { allOrders } from '../../merchant/domain';
+import * as M from './model';
+describe('money states, issues and resolution (owner 4)', () => {
+  const fd = financeFixtures();
+  it('held is part of pending, and gross = collected + pending', () => {
+    const c = M.moneyStates(fd);
+    expect(c.held).toBeGreaterThan(0);
+    expect(c.held).toBeLessThanOrEqual(c.pending);
+    expect(c.gross).toBe(c.collected + c.pending);
+  });
+  it('every money state drills down to the transactions behind it', () => {
+    const q = new URLSearchParams(Object.entries(M.drillDown('held').query).filter(([, v]) => v) as [string, string][]);
+    const rows = M.filterLedger(fd, M.readLedgerFilter(q, fd.payouts));
+    expect(rows.reduce((s, t) => s + t.amount, 0)).toBe(M.moneyStates(fd).held);
+    const fq = new URLSearchParams(Object.entries(M.drillDown('fees').query).filter(([, v]) => v) as [string, string][]);
+    expect(M.filterLedger(fd, M.readLedgerFilter(fq, fd.payouts)).reduce((s, t) => s + t.amount, 0)).toBe(M.moneyStates(fd).fees);
+  });
+  it('reports held funds; a mismatch is detected, opened as a case and settled in the next payout', () => {
+    expect(M.settlementIssues(fd).map((i) => i.kind)).toEqual(['held']);
+    const p = fd.payouts.find((x) => x.status === 'paid')!;
+    const bad = { ...fd, payouts: fd.payouts.map((x) => (x.id === p.id ? { ...x, amount: x.amount! - 1000 } : x)) };
+    const issues = M.settlementIssues(bad);
+    expect(issues[0]).toMatchObject({ kind: 'mismatch', severity: 'bad', amount: 1000 });
+    let ops = M.openCase({ cases: [], log: [] }, p, -1000, 'owner', '2026-11-24T10:00:00Z');
+    expect(M.settlementIssues(bad, ops).find((i) => i.kind === 'mismatch')!.severity).toBe('warn');
+    const r = M.resolveCase(bad, ops, ops.cases[0].id, 'TX-ADJ-1', '2026-11-24T11:00:00Z')!;
+    ops = r.ops;
+    expect(r.fin.txs.at(-1)).toMatchObject({ type: 'adjustment', amount: 1000, payoutId: 'PO-2611-04' });
+    expect(M.settlementIssues(r.fin, ops).some((i) => i.kind === 'mismatch')).toBe(false);
+    expect(ops.log.length).toBe(2);
+  });
+  it('a returned payout moves to available and can be retried', () => {
+    const p = fd.payouts.find((x) => x.status === 'in_transit')!;
+    const ret = { ...fd, payouts: fd.payouts.map((x) => (x.id === p.id ? { ...x, problem: { reason: { ar: 'x', en: 'x' }, day: '2026-11-24' } } : x)) };
+    const before = M.moneyStates(fd), after = M.moneyStates(ret);
+    expect(after.available - before.available).toBe(p.amount);
+    expect(after.inTransit).toBe(before.inTransit - p.amount!);
+    expect(M.settlementIssues(ret)[0].kind).toBe('returned');
+    const r = M.retryPayout(ret, { cases: [], log: [] }, p.id, 'owner', 'now', '2026-11-30')!;
+    expect(M.payoutView(r.fin.payouts.find((x) => x.id === p.id)!)).toBe('scheduled');
+  });
+  it('releasing a hold settles the sale into the next payout', () => {
+    const h = fd.holds[0];
+    const r = M.releaseHold(fd, h.id, '2026-11-24');
+    expect(r.txs.find((t) => t.id === h.txId)).toMatchObject({ status: 'available', payoutId: 'PO-2611-04' });
+    expect(M.moneyStates(r).held).toBe(0);
+  });
+  it('invoices: VAT 15% on top for LAK invoices, one sales invoice per paid order', () => {
+    const inv = M.lakInvoices()[0];
+    const t = M.invoiceTotals(inv);
+    expect(t.total).toBe(t.subtotal + Math.round(t.subtotal * 0.15));
+    expect(M.salesInvoices(allOrders()).length).toBe(allOrders().filter((o) => o.pay !== 'failed').length);
+  });
+  it('IBAN: Saudi format, mod-97 check, Arabic digits, bank must match', () => {
+    expect(checkIban('SA03 8000 0000 6080 1016 7519')).toMatchObject({ ok: true });
+    expect(checkIban('SA٠٣٨٠٠٠٠٠٠٠٦٠٨٠١٠١٦٧٥١٩')).toMatchObject({ ok: true });
+    expect(checkIban('SA03 8000 0000 6080 1016 7518')).toEqual({ ok: false, error: 'checksum' });
+    expect(checkIban('AE07 0331 2345 6789 0123 456')).toEqual({ ok: false, error: 'country' });
+    expect(M.checkBankDraft({ bankCode: '10', beneficiary: 'مؤسسة دار نوى', iban: 'SA0380000000608010167519' })).toMatchObject({ ok: false, errors: { bank: 'mismatch' } });
+    expect(M.checkBankDraft({ bankCode: '80', beneficiary: 'مؤسسة دار نوى', iban: 'SA0380000000608010167519' }).ok).toBe(true);
+    expect(M.checkBankDraft({ bankCode: '80', beneficiary: 'x1', iban: 'SA0380000000608010167519' })).toMatchObject({ ok: false });
+  });
+});

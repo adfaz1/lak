@@ -1,17 +1,18 @@
 // Orders list (`#/dashboard/orders`): saved views, search, filters, sort and page in the URL; selection and bulk actions.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlarmClock, CheckCheck, Lock, PackageCheck, Printer, RotateCcw, SearchX, ShoppingBag, SlidersHorizontal, ArrowUpDown } from 'lucide-react';
+import { AlarmClock, Ban, CheckCheck, Download, FileText, Hourglass, Lock, PackageCheck, Plus, Printer, RotateCcw, SearchX, ShoppingBag, SlidersHorizontal, ArrowUpDown, Tag, Truck, UserRound } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, navigate, type Route } from '../../../core/router';
 import { formatInt } from '../../../core/format';
-import { ordersStore, testStore } from '../../merchant/stores';
-import { VIEW_IDS, total, type BulkAction, type Order } from '../../merchant/domain';
-import { BulkBar, DataTable, Drawer, FilterChip, PageHeader, Pagination, SearchInput, Select, Field, Tabs, useToast, type Column } from '../../../ds/kit';
+import { ordersStore, teamStore, testStore } from '../../merchant/stores';
+import { LOCATIONS, LOC_IDS, total, type Order } from '../../merchant/domain';
+import { openReturns, payView } from '../../merchant/ops';
+import { BulkBar, DataTable, Drawer, FilterChip, Input, PageHeader, Pagination, SearchInput, Select, Field, Tabs, useToast, type Column } from '../../../ds/kit';
 import { Badge, Button, Card, EmptyState, ErrorState, LinkButton, Money, ProductImage, Ref, Skeleton, InfoHint, useTx, cn } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { setDashState, useDashState } from '../review';
-import { CHANNELS, FULS, PAYS, SHIPS, SORTS, activeFilters, exceptions, listOrders, orderPerms, readQuery, selectionRefs, toParams, undoConfirm, type ListQuery } from './model';
-import { FulBadge, PayBadge, ShipBadge, ohref, useAge, useLabels } from './ui';
+import { CHANNELS, FULS, LIST_VIEWS, NO_FILTERS, PAYS, PAY_METHODS, SHIPS, SORTS, activeFilters, exceptions, listOrders, orderPerms, readQuery, selectionRefs, toParams, undoConfirm, type ListQuery, type OpsBulk } from './model';
+import { FulBadge, PayBadge, ShipBadge, ohref, useActor, useAge, useLabels } from './ui';
 import { BulkModal, type BulkOutcome } from './bulk';
 
 /** Scroll position per list URL, restored when coming back from an order. */
@@ -41,7 +42,10 @@ export default function OrdersList({ route }: { route: Route }) {
   const scope = JSON.stringify(toParams(lq, { page: r.page }));
   const last = useRef(scope);
   useEffect(() => { if (last.current !== scope) { last.current = scope; setSel(new Set()); setAllMatching(false); } }, [scope]);
-  const [bulk, setBulk] = useState<BulkAction | null>(null);
+  const [bulk, setBulk] = useState<OpsBulk | null>(null);
+  const who = useActor();
+  const members = teamStore.use().members.filter((m) => m.status === 'active');
+  const tags = useMemo(() => [...new Set(stored.flatMap((o) => o.tags ?? []))].sort(), [stored]);
   const [drawer, setDrawer] = useState(false);
 
   useLayoutEffect(() => {
@@ -56,8 +60,11 @@ export default function OrdersList({ route }: { route: Route }) {
   const header = (
     <PageHeader title={tx('الطلبات', 'Orders')}
       description={state === 'live' && all.length ? tx(`${formatInt(all.length)} طلب · ${r.counts.needs} يحتاج تجهيزًا`, `${formatInt(all.length)} orders · ${r.counts.needs} to fulfil`) : undefined}
-      actions={state === 'live' && perms.see && all.length > 0 && lq.view !== 'needs' && perms.fulfil
-        ? <LinkButton href={ohref('', { view: 'needs' })} className="bg-brand-gradient hover:opacity-95"><PackageCheck className="size-4" aria-hidden="true" />{tx('جهّز الطلبات', 'Fulfil orders')}</LinkButton> : undefined} />
+      actions={state === 'live' && perms.see ? <div className="flex flex-wrap gap-2">
+        <LinkButton variant="ghost" href={ohref('returns')}><RotateCcw className="size-4" aria-hidden="true" />{tx('المرتجعات', 'Returns')}</LinkButton>
+        {perms.fulfil && <LinkButton variant="secondary" href={ohref('new')}><Plus className="size-4" aria-hidden="true" />{tx('طلب يدوي', 'Manual order')}</LinkButton>}
+        {all.length > 0 && lq.view !== 'needs' && perms.fulfil && <LinkButton href={ohref('', { view: 'needs' })} className="bg-brand-gradient hover:opacity-95"><PackageCheck className="size-4" aria-hidden="true" />{tx('جهّز الطلبات', 'Fulfil orders')}</LinkButton>}
+      </div> : undefined} />
   );
 
   if (!perms.see) return (
@@ -90,8 +97,9 @@ export default function OrdersList({ route }: { route: Route }) {
     if (!o) return;
     clear();
     if (o.action === 'confirm' && o.ok.length) {
-      toast({ tone: 'ok', text: tx(`أُكّد ${formatInt(o.ok.length)} طلبًا`, `${formatInt(o.ok.length)} orders confirmed`), action: { label: tx('تراجع', 'Undo'), run: () => ordersStore.set((a) => undoConfirm(a, o.ok)) } });
-    }
+      toast({ tone: 'ok', text: tx(`أُكّد ${formatInt(o.ok.length)} طلبًا`, `${formatInt(o.ok.length)} orders confirmed`), action: { label: tx('تراجع', 'Undo'), run: () => ordersStore.set((a) => undoConfirm(a, o.ok, who, Date.now())) } });
+    } else if (o.action === 'export' && o.ok.length) toast({ tone: 'ok', text: tx(`نُزّل ملف فيه ${formatInt(o.ok.length)} طلبًا`, `Downloaded a file with ${formatInt(o.ok.length)} orders`) });
+    else if ((o.action === 'labels' || o.action === 'shipped') && o.ok.length) toast({ tone: 'ok', text: o.action === 'labels' ? tx(`صدر ${formatInt(o.ok.length)} ملصقًا`, `${formatInt(o.ok.length)} labels issued`) : tx(`سُجّل ${formatInt(o.ok.length)} كمشحون`, `${formatInt(o.ok.length)} marked shipped`) });
   };
 
   const chips = [
@@ -99,8 +107,19 @@ export default function OrdersList({ route }: { route: Route }) {
     { key: 'pay' as const, label: tx('الدفع', 'Payment'), options: PAYS.map((v) => ({ value: v, label: L.pay(v) })) },
     { key: 'ful' as const, label: tx('التجهيز', 'Fulfilment'), options: FULS.map((v) => ({ value: v, label: L.ful(v) })) },
     { key: 'ship' as const, label: tx('الشحن', 'Shipment'), options: SHIPS.map((v) => ({ value: v, label: L.ship(v) })) },
+    { key: 'method' as const, label: tx('وسيلة الدفع', 'Pay method'), options: PAY_METHODS.map((v) => ({ value: v, label: L.method(v) })) },
+    { key: 'loc' as const, label: tx('الموقع', 'Location'), options: LOC_IDS.map((v) => ({ value: v, label: LOCATIONS[v][lang] })) },
+    { key: 'who' as const, label: tx('المسؤول', 'Assignee'), options: [...members.map((m) => ({ value: m.name, label: m.name === who.name ? tx(`${m.name} (أنا)`, `${m.name} (me)`) : m.name })), { value: '-', label: tx('غير مسند', 'Unassigned') }] },
+    ...(tags.length ? [{ key: 'tag' as const, label: tx('الوسم', 'Tag'), options: tags.map((v) => ({ value: v, label: v })) }] : []),
   ];
+  const dateRange = (
+    <span className="grid grid-cols-2 gap-2">
+      <Input type="date" dir="ltr" aria-label={tx('من تاريخ', 'From date')} value={lq.from ?? ''} max={lq.to} onChange={(e) => go({ from: e.target.value || undefined }, 'replace')} />
+      <Input type="date" dir="ltr" aria-label={tx('إلى تاريخ', 'To date')} value={lq.to ?? ''} min={lq.from} onChange={(e) => go({ to: e.target.value || undefined }, 'replace')} />
+    </span>
+  );
   const nf = activeFilters(lq);
+  const extra = [lq.method, lq.loc, lq.who, lq.tag, lq.from || lq.to].filter(Boolean).length;
   const sortSelect = (
     <label className="relative inline-flex h-10 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-[13px] font-medium text-muted hover:text-fg">
       <ArrowUpDown className="size-3.5" aria-hidden="true" /><span>{L.sort(lq.sort)}</span>
@@ -118,14 +137,21 @@ export default function OrdersList({ route }: { route: Route }) {
         {allMatching && <button type="button" className="font-semibold text-brand-700 hover:underline dark:text-brand-300" onClick={() => { setAllMatching(false); setSel(new Set(r.pageRows.map((o) => o.ref))); }}>{tx('هذه الصفحة فقط', 'This page only')}</button>}
       </span>}>
       <Button size="sm" variant="secondary" onClick={() => setBulk('confirm')}><CheckCheck className="size-4" aria-hidden="true" />{tx('تأكيد', 'Confirm')}</Button>
+      <Button size="sm" variant="secondary" onClick={() => setBulk('labels')}><Printer className="size-4" aria-hidden="true" />{tx('ملصقات', 'Labels')}</Button>
+      <Button size="sm" variant="secondary" onClick={() => setBulk('shipped')}><Truck className="size-4" aria-hidden="true" />{tx('شُحن', 'Shipped')}</Button>
+      <Button size="sm" variant="secondary" onClick={() => setBulk('invoices')}><FileText className="size-4" aria-hidden="true" />{tx('فواتير', 'Invoices')}</Button>
       <Button size="sm" variant="secondary" onClick={() => setBulk('slips')}><Printer className="size-4" aria-hidden="true" />{tx('قوائم التعبئة', 'Packing slips')}</Button>
+      <Button size="sm" variant="secondary" onClick={() => setBulk('export')}><Download className="size-4" aria-hidden="true" />CSV</Button>
     </BulkBar>
   ) : (
     <div className="flex flex-wrap items-center gap-2">
       <div className="flex w-full md:w-auto md:flex-1 md:max-w-xs"><SearchInput value={lq.q} onChange={(v) => go({ q: v }, 'replace')} placeholder={tx('رقم الطلب أو اسم العميل', 'Order number or customer')} autoFocus={route.query.get('focus') === 'search'} /></div>
       <div className="hidden flex-wrap items-center gap-2 md:flex">
-        {chips.map((c) => <FilterChip key={c.key} label={c.label} value={lq[c.key] ?? ''} options={c.options} onChange={(v) => go({ [c.key]: v || undefined })} />)}
-        {nf > 0 && <Button variant="ghost" size="sm" onClick={() => go({ ch: undefined, pay: undefined, ful: undefined, ship: undefined })}>{tx('مسح المرشحات', 'Clear filters')}</Button>}
+        {chips.slice(0, 4).map((c) => <FilterChip key={c.key} label={c.label} value={lq[c.key] ?? ''} options={c.options} onChange={(v) => go({ [c.key]: v || undefined })} />)}
+        <Button variant="secondary" className={cn(extra > 0 && 'border-brand-300 text-brand-700 dark:text-brand-300')} onClick={() => setDrawer(true)} aria-haspopup="dialog">
+          <SlidersHorizontal className="size-4" aria-hidden="true" />{tx('مرشحات أخرى', 'More filters')}{extra > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white tabular-nums">{extra}</span>}
+        </Button>
+        {nf > 0 && <Button variant="ghost" size="sm" onClick={() => go(NO_FILTERS)}>{tx('مسح المرشحات', 'Clear filters')}</Button>}
       </div>
       <Button variant="secondary" className={cn('md:hidden', nf > 0 && 'border-brand-300 text-brand-700 dark:text-brand-300')} onClick={() => setDrawer(true)} aria-haspopup="dialog">
         <SlidersHorizontal className="size-4" aria-hidden="true" />{tx('تصفية', 'Filter')}{nf > 0 && <span className="rounded-full bg-brand-600 px-1.5 text-[11px] text-white tabular-nums">{nf}</span>}
@@ -146,6 +172,7 @@ export default function OrdersList({ route }: { route: Route }) {
     { key: 'ful', header: tx('التجهيز', 'Fulfilment'), cell: (o) => <FulBadge o={o} /> },
     { key: 'ship', header: tx('الشحن', 'Shipment'), cell: (o) => <ShipBadge o={o} />, hideBelow: 'lg' },
     { key: 'flags', header: <span className="sr-only">{tx('تنبيهات', 'Flags')}</span>, cell: (o) => <Flags o={o} /> },
+    { key: 'who', header: tx('المسؤول', 'Assignee'), cell: (o) => (o.assignee ? <span className="inline-flex items-center gap-1 text-xs text-muted"><UserRound className="size-3.5" aria-hidden="true" />{o.assignee}</span> : null), hideBelow: 'lg' },
     { key: 'total', header: tx('الإجمالي', 'Total'), align: 'end', cell: (o) => <Money v={total(o)} className="font-semibold text-fg" /> },
   ];
 
@@ -168,7 +195,7 @@ export default function OrdersList({ route }: { route: Route }) {
       {header}
       <Card>
         <div className="px-4 pt-2 sm:px-5">
-          <Tabs label={tx('العروض المحفوظة', 'Saved views')} items={VIEW_IDS.map((v) => ({ href: ohref('', toParams(lq, { view: v, page: 1 })), label: L.view(v), current: lq.view === v, count: r.counts[v] }))} />
+          <Tabs label={tx('العروض المحفوظة', 'Saved views')} items={LIST_VIEWS.map((v) => ({ href: ohref('', toParams(lq, { view: v, page: 1 })), label: L.view(v), current: lq.view === v, count: r.counts[v] }))} />
         </div>
         <div className="space-y-3 p-4 sm:px-5">
           {toolbar}
@@ -176,7 +203,7 @@ export default function OrdersList({ route }: { route: Route }) {
         </div>
         {r.rows.length === 0 ? (
           <EmptyState icon={<SearchX className="size-6" aria-hidden="true" />} title={hasFilters ? tx('لا طلبات تطابق البحث والمرشحات', 'No orders match your search and filters') : tx(`لا طلبات في «${L.view(lq.view)}»`, `No orders in “${L.view(lq.view)}”`)}
-            action={hasFilters ? <Button variant="secondary" onClick={() => go({ q: '', ch: undefined, pay: undefined, ful: undefined, ship: undefined })}>{tx('امسح البحث والمرشحات', 'Clear search and filters')}</Button>
+            action={hasFilters ? <Button variant="secondary" onClick={() => go({ q: '', ...NO_FILTERS })}>{tx('امسح البحث والمرشحات', 'Clear search and filters')}</Button>
               : <LinkButton variant="secondary" href={ohref()}>{tx('كل الطلبات', 'All orders')}</LinkButton>} />
         ) : (
           <>
@@ -193,7 +220,7 @@ export default function OrdersList({ route }: { route: Route }) {
       {drawer && (
         <Drawer title={tx('تصفية الطلبات', 'Filter orders')} onClose={() => setDrawer(false)}
           footer={<>
-            <Button variant="secondary" className="flex-1" onClick={() => go({ ch: undefined, pay: undefined, ful: undefined, ship: undefined }, 'replace')}>{tx('مسح', 'Clear')}</Button>
+            <Button variant="secondary" className="flex-1" onClick={() => go(NO_FILTERS, 'replace')}>{tx('مسح', 'Clear')}</Button>
             <Button className="flex-1" onClick={() => setDrawer(false)}>{tx(`اعرض ${formatInt(r.rows.length)} نتيجة`, `Show ${formatInt(r.rows.length)} results`)}</Button>
           </>}>
           {chips.map((c) => (
@@ -203,6 +230,7 @@ export default function OrdersList({ route }: { route: Route }) {
               </Select>}
             </Field>
           ))}
+          <Field label={tx('تاريخ الطلب (من – إلى)', 'Order date (from – to)')}>{() => dateRange}</Field>
         </Drawer>
       )}
       {bulk && <BulkModal action={bulk} orders={selectedOrders} allMatching={allMatching} onClose={onBulkDone} />}
@@ -213,9 +241,17 @@ export default function OrdersList({ route }: { route: Route }) {
 function Flags({ o }: { o: Order }) {
   const tx = useTx();
   const ex = exceptions(o);
-  if (!ex.length) return null;
+  const cancelReq = o.cancelRequest?.state === 'open';
+  const ret = openReturns(o).length > 0;
+  const verifying = payView(o) === 'verifying';
+  if (!ex.length && !cancelReq && !ret && !o.cancelled && !(o.tags ?? []).length && !verifying) return null;
   return (
     <span className="inline-flex flex-wrap gap-1.5">
+      {o.cancelled && <Badge tone="gray" icon={<Ban className="size-3.5" aria-hidden="true" />}>{tx('ملغى', 'Cancelled')}</Badge>}
+      {cancelReq && <Badge tone="amber" icon={<Ban className="size-3.5" aria-hidden="true" />}>{tx('طلب إلغاء', 'Cancel request')}</Badge>}
+      {ret && <Badge tone="amber" icon={<RotateCcw className="size-3.5" aria-hidden="true" />}>{tx('مرتجع مفتوح', 'Open return')}</Badge>}
+      {verifying && <Badge tone="amber" icon={<Hourglass className="size-3.5" aria-hidden="true" />}>{tx('تحقق', 'Verifying')}</Badge>}
+      {(o.tags ?? []).slice(0, 2).map((t) => <Badge key={t} tone="gray" icon={<Tag className="size-3" aria-hidden="true" />}>{t}</Badge>)}
       {ex.includes('late') && <Badge tone="red" icon={<AlarmClock className="size-3.5" aria-hidden="true" />}>{tx('متأخر', 'Late')}</Badge>}
       {ex.includes('refundPending') && <Badge tone="amber" icon={<RotateCcw className="size-3.5" aria-hidden="true" />}>{tx('استرداد معلّق', 'Refund pending')}</Badge>}
     </span>

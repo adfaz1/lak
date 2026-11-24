@@ -14,7 +14,12 @@ import { Alert, FilterChip, Modal, PageHeader, SearchInput, Simulated, Tabs, use
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
 import { NoAccess, ReviewRole, roleName, useRole } from '../marketing/access';
-import { APP_VIEWS, actionsFor, applyAction, categories, filterApps, isPersonal, isWrite, limits, needsAttention, personalScopes, viewCounts, type AppAction, type AppView } from './model';
+import { CAUSES, currentCause, failingSince, lastOk, logFor, runAction, type Cause, type SyncEntry } from './model';
+import { appsSimStore, syncLogStore } from './state';
+import { useReviewMode } from '../../../core/review';
+import { logAction } from '../../merchant/stores';
+import { Select } from '../../../ds/kit';
+import { APP_VIEWS, actionsFor, categories, filterApps, isPersonal, isWrite, limits, needsAttention, personalScopes, viewCounts, type AppAction, type AppView } from './model';
 
 const S_TONE: Record<AppState, Tone> = { not_connected: 'gray', connected: 'green', reauth: 'amber', error: 'red' };
 const hrefA = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard/apps${path ? `/${path}` : ''}`, q);
@@ -58,6 +63,7 @@ function Catalogue({ route }: { route: Route }) {
   const shown = filterApps(apps, { view, q, category: cat });
   const counts = viewCounts(apps);
   const attention = needsAttention(apps);
+  const log = syncLogStore.use();
 
   const header = (
     <>
@@ -108,6 +114,7 @@ function Catalogue({ route }: { route: Route }) {
                         <span className="min-w-0 flex-1"><span className="block text-[15px] font-semibold text-fg">{a.name[lang]}</span><span className="block text-xs text-muted">{a.category[lang]}</span></span>
                       </span>
                       <span className="mt-3 flex-1 text-[13px] leading-relaxed text-muted">{a.desc[lang]}</span>
+                      <SyncLine a={a} log={log} />
                       <span className="mt-4 flex flex-wrap gap-1.5">
                         <Badge tone={S_TONE[a.state]}>{n.state(a.state)}</Badge>
                         {personal > 0 && <Badge tone="amber" icon={<ShieldAlert className="size-3" aria-hidden="true" />}>{tx('بيانات شخصية', 'Personal data')}</Badge>}
@@ -134,6 +141,10 @@ function Detail({ id }: { id: string }) {
   const apps = appsStore.use();
   const plan = settingsStore.use().plan;
   const [dlg, setDlg] = useState<AppAction | null>(null);
+  const [busy, setBusy] = useState<AppAction | null>(null);
+  const log = syncLogStore.use();
+  const sim = appsSimStore.use();
+  const review = useReviewMode();
   const a = apps.find((x) => x.id === id);
   const back = { href: hrefA(), label: tx('التطبيقات', 'Apps') };
   if (!a) return (
@@ -143,23 +154,50 @@ function Detail({ id }: { id: string }) {
   );
   const lim = limits(a, plan, role);
   const acts = actionsFor(a);
+  const when = (iso: string) => new Date(iso).toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   const personal = personalScopes(a);
+  const cause = currentCause(log, a.id);
+  const since = failingSince(log, a.id);
+  const ok = lastOk(log, a.id);
   const run = (act: AppAction) => {
-    appsStore.set((list) => applyAction(list, a.id, act));
     setDlg(null);
-    toast({ tone: 'ok', text: act === 'disconnect' ? tx(`فُصل ${a.name.ar}`, `${a.name.en} disconnected`) : tx(`${a.name.ar} مربوط (محاكاة)`, `${a.name.en} connected (simulated)`) });
+    setBusy(act);
+    window.setTimeout(() => {
+      const fail = act === 'disconnect' ? null : sim.failNext;
+      const r = runAction(appsStore.get(), syncLogStore.get(), a.id, act, new Date().toISOString(), fail);
+      appsStore.set(r.apps);
+      syncLogStore.set((l) => [r.entry, ...l]);
+      if (fail) appsSimStore.set({ failNext: null });
+      setBusy(null);
+      logAction('apps', { ar: `${label[act]}: ${a.name.ar}${r.entry.ok ? '' : ' (فشل)'}`, en: `${label[act]}: ${a.name.en}${r.entry.ok ? '' : ' (failed)'}` }, { target: a.id, ...(r.entry.ref ? { after: r.entry.ref } : {}) });
+      if (!r.entry.ok) toast({ tone: 'bad', text: tx(`فشل: ${CAUSES[r.entry.cause!].text.ar}`, `Failed: ${CAUSES[r.entry.cause!].text.en}`) });
+      else toast({ tone: 'ok', text: act === 'disconnect' ? tx(`فُصل ${a.name.ar}`, `${a.name.en} disconnected`) : act === 'sync' || act === 'retry' ? tx(`تمت المزامنة: ${r.entry.records} سجل (محاكاة)`, `Synced ${r.entry.records} records (simulated)`) : tx(`${a.name.ar} مربوط (محاكاة)`, `${a.name.en} connected (simulated)`) });
+    }, 700);
   };
-  const label: Record<AppAction, string> = { connect: tx('اربط', 'Connect'), reauth: tx('جدّد التفويض', 'Re-authorise'), retry: tx('أعد المزامنة', 'Retry sync'), disconnect: tx('افصل', 'Disconnect') };
-  const icon: Record<AppAction, ReactNode> = { connect: <Plug className="size-4" aria-hidden="true" />, reauth: <KeyRound className="size-4" aria-hidden="true" />, retry: <RefreshCw className="size-4" aria-hidden="true" />, disconnect: <Unplug className="size-4" aria-hidden="true" /> };
+  const label: Record<AppAction, string> = { connect: tx('اربط', 'Connect'), reauth: tx('جدّد التفويض', 'Re-authorise'), retry: tx('أعد المزامنة', 'Retry sync'), disconnect: tx('افصل', 'Disconnect'), sync: tx('زامن الآن', 'Sync now') };
+  const icon: Record<AppAction, ReactNode> = { connect: <Plug className="size-4" aria-hidden="true" />, reauth: <KeyRound className="size-4" aria-hidden="true" />, retry: <RefreshCw className="size-4" aria-hidden="true" />, disconnect: <Unplug className="size-4" aria-hidden="true" />, sync: <RefreshCw className="size-4" aria-hidden="true" /> };
+  const fixAct = cause?.cause ? CAUSES[cause.cause].fix : null;
 
   return (
     <div className="space-y-6">
       <PageHeader back={back} title={<span className="flex items-center gap-3"><AppMark a={a} size="lg" />{a.name[lang]}</span>} description={a.desc[lang]}
         meta={<><Badge tone={S_TONE[a.state]}>{n.state(a.state)}</Badge><Badge tone="gray">{a.category[lang]}</Badge><Simulated /></>}
-        actions={!lim.blockedBy ? acts.map((x, i) => <Button key={x} variant={i === 0 && x !== 'disconnect' ? 'primary' : 'secondary'} onClick={() => setDlg(x)}>{icon[x]}{label[x]}</Button>) : undefined} />
+        actions={!lim.blockedBy ? <>{a.state === 'connected' && <Button variant="secondary" disabled={!!busy} onClick={() => run('sync')}>{icon.sync}{busy === 'sync' ? tx('جارٍ المزامنة…', 'Syncing…') : label.sync}</Button>}{acts.map((x, i) => <Button key={x} disabled={!!busy} variant={i === 0 && x !== 'disconnect' && !fixAct ? 'primary' : 'secondary'} onClick={() => setDlg(x)}>{icon[x]}{busy === x ? tx('جارٍ…', 'Working…') : label[x]}</Button>)}</> : undefined} />
 
-      {a.state === 'error' && <Alert tone="bad" title={tx('المزامنة تفشل منذ يومين', 'Sync has failed for two days')}>{tx('رفض المتجر ملف التطبيق: تنسيق غير صالح. لم تتغير بيانات متجرك. المرجع SYNC-4471.', 'The store rejected the app’s file: invalid format. Your store data did not change. Ref SYNC-4471.')}</Alert>}
-      {a.state === 'reauth' && <Alert tone="warn" title={tx('انتهى التفويض', 'Authorisation expired')}>{tx('توقف التطبيق عن العمل حتى تجدّده؛ لا يُرسل شيء الآن.', 'The app stopped working until you renew it; nothing is being sent now.')}</Alert>}
+      {(a.state === 'error' || a.state === 'reauth') && (
+        <Alert tone={a.state === 'error' ? 'bad' : 'warn'} title={a.state === 'error' ? tx(`المزامنة تفشل${since ? ` منذ ${when(since)}` : ''}`, `Sync failing${since ? ` since ${when(since)}` : ''}`) : tx('انتهى التفويض', 'Authorisation expired')}
+          action={!lim.blockedBy && fixAct ? <Button size="sm" disabled={!!busy} onClick={() => setDlg(fixAct)}>{icon[fixAct]}{CAUSES[cause!.cause!].fixLabel[lang]}</Button> : undefined}>
+          {(cause?.cause ? CAUSES[cause.cause].text : CAUSES[a.state === 'reauth' ? 'auth_expired' : 'invalid_file'].text)[lang]}{cause?.ref && <> {tx('المرجع', 'Ref')} <bdi dir="ltr">{cause.ref}</bdi>.</>}
+        </Alert>
+      )}
+      {review && a.state !== 'not_connected' && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-border px-3 py-2 text-xs text-muted">
+          <span className="font-semibold">{tx('مراجعة: الإجراء التالي', 'Review: next action')}</span>
+          <Select aria-label={tx('نتيجة الإجراء التالي', 'Next action outcome')} className="h-8 w-auto" value={sim.failNext ?? ''} onChange={(e) => appsSimStore.set({ failNext: (e.target.value || null) as Cause | null })}>
+            <option value="">{tx('ينجح', 'Succeeds')}</option>{(Object.keys(CAUSES) as Cause[]).map((c) => <option key={c} value={c}>{tx('يفشل: ', 'Fails: ')}{c}</option>)}
+          </Select>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2" aria-labelledby="h-scopes">
@@ -181,7 +219,8 @@ function Detail({ id }: { id: string }) {
             <CardHeader id="h-conn" title={tx('الربط', 'Connection')} />
             <dl className="space-y-2 px-5 pb-5 text-sm">
               <div className="flex justify-between gap-3"><dt className="text-muted">{tx('الحالة', 'State')}</dt><dd><Badge tone={S_TONE[a.state]}>{n.state(a.state)}</Badge></dd></div>
-              <div className="flex justify-between gap-3"><dt className="text-muted">{tx('آخر مزامنة', 'Last sync')}</dt><dd className="text-fg">{a.lastSync ? a.lastSync[lang] : '—'}</dd></div>
+              <div className="flex justify-between gap-3"><dt className="text-muted">{tx('آخر مزامنة ناجحة', 'Last successful sync')}</dt><dd className="text-fg tabular-nums">{ok ? when(ok.at) : a.lastSync ? a.lastSync[lang] : '—'}</dd></div>
+              {cause && <div className="flex justify-between gap-3"><dt className="text-muted">{tx('آخر محاولة', 'Last attempt')}</dt><dd className="text-red-700 tabular-nums dark:text-red-400">{when(cause.at)}</dd></div>}
             </dl>
           </Card>
 
@@ -197,6 +236,8 @@ function Detail({ id }: { id: string }) {
           </Card>
         </div>
       </div>
+
+      <SyncLog entries={logFor(log, a.id)} label={label} />
 
       {dlg && <ImpactModal a={a} act={dlg} label={label[dlg]} icon={icon[dlg]} onClose={() => setDlg(null)} onConfirm={() => run(dlg)} />}
     </div>
@@ -243,5 +284,49 @@ function ImpactModal({ a, act, label, icon, onClose, onConfirm }: { a: App; act:
       )}
       <Simulated />
     </Modal>
+  );
+}
+
+function SyncLine({ a, log }: { a: App; log: SyncEntry[] }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  if (a.state === 'not_connected') return null;
+  const c = currentCause(log, a.id);
+  const ok = lastOk(log, a.id);
+  const ago = (iso: string) => { const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 60 ? tx(`قبل ${Math.max(1, m)} د`, `${Math.max(1, m)} min ago`) : m < 1440 ? tx(`قبل ${Math.round(m / 60)} س`, `${Math.round(m / 60)} h ago`) : tx(`قبل ${Math.round(m / 1440)} ي`, `${Math.round(m / 1440)} d ago`); };
+  return (
+    <span className="mt-3 block space-y-0.5 text-xs">
+      <span className="block text-muted tabular-nums">{tx('آخر مزامنة ناجحة: ', 'Last good sync: ')}{ok ? ago(ok.at) : '—'}</span>
+      {c?.cause && (a.state === 'error' || a.state === 'reauth') && <span className="line-clamp-2 block font-medium text-red-700 dark:text-red-400">{CAUSES[c.cause].text[lang]}</span>}
+    </span>
+  );
+}
+
+/** Every sync attempt for one connection: when, what, result, records or the failure cause and reference. */
+function SyncLog({ entries, label }: { entries: SyncEntry[]; label: Record<AppAction, string> }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const [only, setOnly] = useState(false);
+  const shown = only ? entries.filter((e) => !e.ok) : entries;
+  const when = (iso: string) => new Date(iso).toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return (
+    <Card aria-labelledby="h-synclog">
+      <CardHeader id="h-synclog" title={tx('سجل المزامنة', 'Sync log')} hint={tx('كل محاولة: متى، ونتيجتها، وعدد السجلات أو سبب الفشل.', 'Every attempt: when, the result, and the records or the failure cause.')}
+        action={<FilterChip label={tx('العرض', 'Show')} value={only ? 'fail' : ''} onChange={(v) => setOnly(v === 'fail')} options={[{ value: 'fail', label: tx('الفشل فقط', 'Failures only') }]} />} />
+      {shown.length === 0 ? <p className="border-t border-border px-5 py-6 text-sm text-muted">{only ? tx('لا محاولات فاشلة.', 'No failed attempts.') : tx('لا مزامنة بعد.', 'No syncs yet.')}</p> : (
+        <ol className="divide-y divide-border border-t border-border">
+          {shown.slice(0, 12).map((e) => (
+            <li key={e.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 px-5 py-3 text-sm">
+              <span className={cn('mt-1.5 size-2 shrink-0 rounded-full', e.ok ? 'bg-emerald-500' : 'bg-red-500')} aria-hidden="true" />
+              <div className="min-w-0 flex-1">
+                <p className="text-fg">{e.kind === 'sync' ? tx('مزامنة', 'Sync') : label[e.kind]} · <span className={e.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-700 dark:text-red-400'}>{e.ok ? tx('نجحت', 'Succeeded') : tx('فشلت', 'Failed')}</span>{e.ok && e.records !== undefined && e.kind !== 'disconnect' && <span className="text-muted tabular-nums"> · {tx(`${e.records} سجل`, `${e.records} records`)}</span>}</p>
+                {!e.ok && e.cause && <p className="text-xs text-muted">{CAUSES[e.cause].text[lang]}{e.ref && <> · <bdi dir="ltr">{e.ref}</bdi></>}</p>}
+              </div>
+              <time dateTime={e.at} className="text-xs text-subtle tabular-nums">{when(e.at)}</time>
+            </li>
+          ))}
+        </ol>
+      )}
+    </Card>
   );
 }

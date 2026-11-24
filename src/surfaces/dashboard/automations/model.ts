@@ -2,7 +2,7 @@
 // The engine (templates, dry run, activation rule, run fixtures) lives in merchant/growth.ts; this file adds
 // editing, versioning, validation and summaries the new screens need.
 import {
-  TEMPLATES, TRIGGER_ACTIONS, TRIGGER_FIELDS, canActivate, dryRun,
+  MAX_ATTEMPTS, TEMPLATES, TEST_RATE, TRIGGER_ACTIONS, TRIGGER_FIELDS, attemptsOf, canActivate, dryRun, needsFollowUp, retryBlock, retryRun, rootOf, runSteps,
   type Automation, type CondField, type Run, type RunOutcome, type SkipReason, type Trigger,
 } from '../../merchant/growth';
 
@@ -104,3 +104,23 @@ export function steps(a: Automation): { id: 'event' | 'conditions' | 'wait' | 'a
 export const isMessaging = (a: Automation) => a.actions.some((x) => x === 'sendEmail' || x === 'sendSms');
 export type { CondField };
 export { dryRun, TEMPLATES, TRIGGER_ACTIONS, TRIGGER_FIELDS };
+
+/* ---------- Cost, follow-up and retries ---------- */
+
+/** Message cost of one run that acts (test rate), 0 for team-only actions. */
+export function costPerRun(a: Pick<Automation, 'actions'>): number {
+  return (a.actions.includes('sendEmail') ? TEST_RATE.email : 0) + (a.actions.includes('sendSms') ? TEST_RATE.sms : 0);
+}
+/** Cost charged so far by a flow's runs (messages handed to the provider). */
+export const flowCost = (runs: Run[], id: string) => runs.reduce((s, r) => (r.automation === id ? s + (r.cost ?? 0) : s), 0);
+/** Estimated cost of the dry-run sample: runs that would act × cost per run. */
+export const dryRunCost = (a: Pick<Automation, 'actions'>, rows: DryRow[]) => rows.filter((r) => !r.skip).length * costPerRun(a);
+
+export type RunView = 'all' | RunOutcome | 'followup';
+export const RUN_VIEWS: RunView[] = ['all', 'succeeded', 'failed', 'skipped', 'followup'];
+export function filterRunView(runs: Run[], v: RunView, automation?: string | null): Run[] {
+  const base = automation ? runs.filter((r) => r.automation === automation) : runs;
+  if (v === 'followup') { const ids = new Set(needsFollowUp(base).map((r) => r.id)); return base.filter((r) => ids.has(r.id)); }
+  return v === 'all' ? base : base.filter((r) => r.outcome === v);
+}
+export { MAX_ATTEMPTS, attemptsOf, canActivate, needsFollowUp, retryBlock, retryRun, rootOf, runSteps };

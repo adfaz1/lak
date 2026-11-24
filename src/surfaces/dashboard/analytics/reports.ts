@@ -112,7 +112,7 @@ export function salesReport(x: Inputs, r: Range, c: Range | null): Report {
     }],
     notes: [
       ...(enough ? [] : [l(`الهامش التقديري غير معروض: التكلفة مسجلة لـ${a.costCoverage ?? 0}% من القطع فقط (المطلوب 80%). أضف التكلفة في المنتجات.`, `Estimated margin not shown: cost is recorded for only ${a.costCoverage ?? 0}% of units (80% needed). Add costs in Products.`)]),
-      ...(a.refunds === null ? [l('الاستردادات والرسوم: «لا بيانات» قبل بداية السجل المالي (1 نوفمبر).', 'Refunds and fees: no data before the ledger starts (1 Nov).')] : []),
+      ...(a.refunds === null ? [l('الاستردادات والرسوم: «لا بيانات» قبل بداية السجل المالي (1 نوفمبر)، فالصافي هنا قبل الاستردادات.', 'Refunds and fees: no data before the ledger starts (1 Nov), so net here is before refunds.')] : []),
     ],
     source: l('دفتر الطلبات والسجل المالي', 'Order book and ledger'),
   };
@@ -220,7 +220,7 @@ export function productsReport(x: Inputs, r: Range, c: Range | null, sort: Produ
       hint: l('الهامش = المبيعات − الكمية × التكلفة المسجلة. منتج بلا تكلفة: «—». ليس ربحًا: لا يشمل الشحن والرسوم والخصومات.', 'Margin = sales − units × recorded cost. Product without a cost: “—”. Not profit: excludes shipping, fees and discounts.'),
       cols: [
         { key: 'product', label: l('المنتج', 'Product'), unit: 'product' },
-        { key: 'units', label: l('القطع', 'Units'), unit: 'count', end: true },
+        { key: 'units', label: l('القطع', 'Units'), unit: 'count', end: true, hideOnPhone: true },
         { key: 'revenue', label: l('المبيعات', 'Sales'), unit: 'money', end: true },
         { key: 'share', label: l('الحصة', 'Share'), unit: 'percent', end: true, hideOnPhone: true },
         { key: 'margin', label: l('الهامش', 'Margin'), hint: l('تقديري، من التكلفة المسجلة في المنتج.', 'Estimated, from the cost recorded on the product.'), unit: 'money', end: true, hideOnPhone: true },
@@ -317,20 +317,21 @@ export function channelsReport(x: Inputs, r: Range, c: Range | null): Report {
     return { channel: CHANNEL_LABEL[ch], orders: os.length, revenue: rev, share: all ? Math.round((rev * 1000) / all) / 10 : 0, aov: os.length ? Math.round(rev / os.length) : null, prevOrders: ps?.length ?? null, prev, delta: pct(rev, prev) };
   }).sort((p, q) => q.revenue - p.revenue);
   const top = rows[0];
+  const topPrev = b && top ? (() => { const pAll = sum(b, total); return pAll ? Math.round((sum(b.filter((o) => CHANNEL_LABEL[o.channel] === top.channel), total) * 1000) / pAll) / 10 : null; })() : null;
   return {
     id: 'channels',
     metrics: [
       metric('revenue', l('قيمة الطلبات', 'Order value'), l('مجموع قيمة الطلبات المدفوعة شامل الشحن، كل القنوات.', 'Total paid order value incl. shipping, all channels.'), 'money', all, b ? sum(b, total) : null),
       metric('orders', l('الطلبات', 'Orders'), l('الطلبات المدفوعة في الفترة، كل القنوات.', 'Paid orders in the period, all channels.'), 'count', a.length, b?.length ?? null),
-      metric('topShare', l(`حصة ${top?.channel.ar ?? ''}`, `${top?.channel.en ?? ''} share`), l('حصة أكبر قناة من قيمة الطلبات.', 'Share of order value from the largest channel.'), 'percent', top?.share ?? null, null),
+      metric('topShare', l(`حصة ${top?.channel.ar ?? ''}`, `${top?.channel.en ?? ''} share`), l('حصة أكبر قناة من قيمة الطلبات.', 'Share of order value from the largest channel.'), 'percent', top?.share ?? null, topPrev),
     ],
     tables: [{
       id: 'channels', title: l('حسب القناة', 'By channel'), hint: l('الحصة من قيمة الطلبات. التحويل لكل قناة يحتاج زيارات مصنفة بالقناة: «لا بيانات».', 'Share of order value. Conversion per channel needs visits tagged by channel: no data.'),
       cols: [
         { key: 'channel', label: l('القناة', 'Channel'), unit: 'text' },
-        { key: 'orders', label: l('الطلبات', 'Orders'), unit: 'count', end: true },
+        { key: 'orders', label: l('الطلبات', 'Orders'), unit: 'count', end: true, hideOnPhone: true },
         { key: 'revenue', label: l('القيمة', 'Value'), unit: 'money', end: true },
-        { key: 'share', label: l('الحصة', 'Share'), unit: 'percent', end: true },
+        { key: 'share', label: l('الحصة', 'Share'), unit: 'percent', end: true, hideOnPhone: true },
         { key: 'aov', label: l('متوسط الطلب', 'Avg order'), unit: 'money', end: true, hideOnPhone: true },
         { key: 'prev', label: l('فترة المقارنة', 'Comparison'), unit: 'money', end: true, hideOnPhone: true },
         { key: 'delta', label: l('التغير', 'Change'), unit: 'delta', end: true },

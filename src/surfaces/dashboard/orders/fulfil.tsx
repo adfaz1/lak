@@ -2,13 +2,14 @@
 import { useState } from 'react';
 import { CheckCircle2, Copy } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { ordersStore } from '../../merchant/stores';
+import { levelsStore, ordersStore } from '../../merchant/stores';
+import { fulfilEffects, stamp, takeHeld } from '../../merchant/ops';
 import { CARRIERS, LOCATIONS, LOC_IDS, canFulfilPartial, isMultiLocation, parseWeight, remainingQty, validatePicks, type CarrierId, type LocId, type Order, type PickError } from '../../merchant/domain';
 import { Alert, Field, Input, Modal, Simulated, Switch } from '../../../ds/kit';
 import { Button, Money, ProductImage, Ref, cn, useTx } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
-import { canShipFrom, estimatedCost, fulfil, initialPlan, labelRef, maxPicks, type FulfilPlan } from './model';
-import { ChoiceCard, Qty, ReviewOnly, Row, saveOrder } from './ui';
+import { canShipFrom, estimatedCost, fulfil, initialPlan, labelRef, maxPicks, withLiveStock, withoutLiveStock, type FulfilPlan } from './model';
+import { ChoiceCard, Qty, ReviewOnly, Row, applyEffects, saveOrder, useActor } from './ui';
 
 type Step = 'form' | 'review' | 'done';
 
@@ -16,7 +17,11 @@ export function FulfilModal({ order, onClose }: { order: Order; onClose: (msg?: 
   const tx = useTx();
   const { lang } = useLang();
   // Read the live order so a second operation sees the first one's result.
-  const o = ordersStore.use().find((x) => x.ref === order.ref) ?? order;
+  const base = ordersStore.use().find((x) => x.ref === order.ref) ?? order;
+  // Every order can pick a location and split into parcels: lines get per-location stock from the inventory.
+  const levels = levelsStore.use();
+  const o = withLiveStock(base, levels, LOC_IDS);
+  const who = useActor();
   const multi = isMultiLocation(o);
   const [step, setStep] = useState<Step>('form');
   const [plan, setPlan] = useState<FulfilPlan>(() => initialPlan(o));
@@ -36,7 +41,12 @@ export function FulfilModal({ order, onClose }: { order: Order; onClose: (msg?: 
   const toReview = () => { if (parseWeight(plan.weight) === null) { setWeightErr(true); return; } setStep('review'); };
   const issue = () => {
     const r = fulfil(o, plan, outage);
-    saveOrder(r.order);
+    const now = Date.now();
+    if (r.ok) {
+      const fs = r.order.fulfilments.map((f, i) => (i === r.order.fulfilments.length - 1 ? { ...f, carrier: plan.carrier } : f));
+      saveOrder(stamp(base, withoutLiveStock(base, takeHeld({ ...r.order, fulfilments: fs }, plan.loc, plan.picks)), who, now));
+      applyEffects(fulfilEffects(base, plan.loc, plan.picks), who, base.ref, 'FL');
+    } else saveOrder(stamp(base, withoutLiveStock(base, r.order), who, now));
     if (r.ok) { setDone({ ref: r.ref, units, carrier: plan.carrier, loc: plan.loc }); setStep('done'); setFailures(0); setOutage(false); }
     else { setFailures((n) => n + 1); setOutage(false); }
   };

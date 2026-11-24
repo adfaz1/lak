@@ -37,7 +37,7 @@ function Entry({ e, showWho = true }: { e: AuditEntry; showWho?: boolean }) {
         <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-subtle">
           <time dateTime={e.at} className="tabular-nums">{when(e.at)}</time><span aria-hidden="true">·</span><span>{area(e.area)}</span>
           {e.target && <><span aria-hidden="true">·</span><bdi dir="ltr" className="truncate">{e.target}</bdi></>}
-          {e.before !== undefined && e.after !== undefined && <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5"><bdi>{e.before}</bdi><span aria-hidden="true">→</span><bdi>{e.after}</bdi></span>}
+          {e.before !== undefined && e.after !== undefined && <span dir="ltr" className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-0.5"><bdi>{e.before}</bdi><span aria-hidden="true">→</span><bdi>{e.after}</bdi></span>}
         </p>
       </div>
     </li>

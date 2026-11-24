@@ -194,3 +194,104 @@ describe('people and permissions', () => {
     expect(orderPerms('finance')).toMatchObject({ see: true, fulfil: false, refund: true, bulk: false });
   });
 });
+
+/* ---------- Group 1 additions ---------- */
+import { productFixtures as pf } from '../../merchant/catalog';
+import { customerFixtures } from '../../merchant/workspace';
+import { zoneFixtures } from '../../merchant/workspace';
+import { initialLevels as il } from '../../merchant/inventory';
+import { cancelOrder } from '../../merchant/ops';
+import {
+  createManual, emptyManual, invoiceOf, listOrders as lo, manualQuote, opsEligibility, ordersCsv, readQuery as rq, runOpsBulk, skuOptions, toParams as tp,
+} from './model';
+
+const ME = { name: 'سارة', role: 'owner' };
+const NOW = Date.parse('2026-11-24T12:00:00Z');
+
+describe('list filters: date, location, pay method, tag, assignee, cancelled view', () => {
+  it('reads and writes the new keys in the URL', () => {
+    const r = rq(new URLSearchParams('from=2026-11-01&to=2026-11-24&loc=jed&method=cod&tag=VIP&who=-&view=cancelled'));
+    expect(r).toMatchObject({ from: '2026-11-01', to: '2026-11-24', loc: 'jed', method: 'cod', tag: 'VIP', who: '-', view: 'cancelled' });
+    expect(tp(r)).toMatchObject({ from: '2026-11-01', loc: 'jed', method: 'cod', view: 'cancelled' });
+    expect(rq(new URLSearchParams('from=yesterday')).from).toBeUndefined();
+  });
+  it('applies them and keeps tab counts on the filtered set', () => {
+    const book = allOrders().map((o) => (o.ref === '10482' ? { ...o, tags: ['VIP'], placedAt: NOW - 3600_000 } : o.ref === '10481' ? cancelOrder(o, 'x', ME, NOW).order : o));
+    expect(lo(book, rq(new URLSearchParams('tag=VIP')), NOW).rows.map((o) => o.ref)).toEqual(['10482']);
+    const c = lo(book, rq(new URLSearchParams('view=cancelled')), NOW);
+    expect(c.rows.map((o) => o.ref)).toEqual(['10481']);
+    expect(c.counts.needs).toBe(book.filter((o) => VIEWS.needs(o)).length);
+    expect(book.filter((o) => VIEWS.needs(o)).some((o) => o.ref === '10481')).toBe(false);
+    const day = lo(book, rq(new URLSearchParams('from=2026-11-24&to=2026-11-24')), NOW);
+    expect(day.rows.every((o) => o.hoursAgo < 24 || o.ref === '10482')).toBe(true);
+  });
+});
+
+describe('bulk labels, shipped, invoices, export', () => {
+  it('issues each label once, even when retried; multi-location orders are skipped with a reason', () => {
+    const book = allOrders();
+    const refs = ['10482', '10481', '10483', '10479', '10478'];
+    const e = opsEligibility(book.filter((o) => refs.includes(o.ref)), 'labels');
+    expect(e.eligible.map((o) => o.ref).sort()).toEqual(['10481', '10482']);
+    expect(e.reasons).toMatchObject({ needsLocation: 1, payNotConfirmed: 1, alreadyFulfilled: 1 });
+    const a = runOpsBulk(book, refs, 'labels', () => false, ME, NOW);
+    expect(a.ok.sort()).toEqual(['10481', '10482']);
+    expect(a.effects.length).toBe(2);
+    const b = runOpsBulk(a.orders, refs, 'labels', () => false, ME, NOW);
+    expect(b.ok).toEqual([]);
+    expect(b.orders.find((o) => o.ref === '10482')!.fulfilments).toHaveLength(1);
+    const s = runOpsBulk(a.orders, ['10482', '10476'], 'shipped', () => false, ME, NOW);
+    expect(s.ok).toEqual(['10482']);
+    expect(s.orders.find((o) => o.ref === '10482')!.ship).toBe('transit');
+  });
+  it('exports a CSV row per order with Arabic text and money in riyals', () => {
+    const csv = ordersCsv([byRef('10482')], 'ar', NOW);
+    expect(csv.startsWith('﻿ref,')).toBe(true);
+    expect(csv).toContain('سارة العتيبي');
+    expect(csv).toContain('511.00');
+  });
+});
+
+describe('invoice', () => {
+  it('matches the money breakdown: VAT 15% included, discount shown', () => {
+    const o = { ...byRef('10482'), discount: 5000, coupon: 'NOUR10' };
+    const inv = invoiceOf(o);
+    const m = moneyBreakdown(o);
+    expect(inv.total).toBe(m.total);
+    expect(inv.vat).toBe(m.vat);
+    expect(inv.discount).toBe(5000);
+    expect(inv.excl + inv.vat).toBe(inv.total);
+    expect(inv.no).toBe('INV-10482');
+  });
+});
+
+describe('manual order', () => {
+  const products = pf();
+  const levels = il(products.flatMap((p) => (p.variants.length ? p.variants.map((v) => v.sku) : [p.sku])));
+  const opts = skuOptions(products, levels);
+  const customers = customerFixtures();
+  const zones = zoneFixtures();
+  const sku = opts.find((o) => o.total >= 2)!.sku;
+  it('validates the draft (customer, city, address, items, discount, stock)', () => {
+    const q = manualQuote(emptyManual(), opts, zones, customers);
+    expect(q.errors).toEqual(expect.arrayContaining(['customer', 'phone', 'city', 'address', 'lines']));
+    const big = manualQuote({ ...emptyManual(), lines: [{ sku, qty: '999' }], discount: 'abc' }, opts, zones, customers);
+    expect(big.errors).toEqual(expect.arrayContaining(['stock', 'discount']));
+  });
+  it('creates a COD order for a new customer with Arabic digits, holds stock and logs who', () => {
+    const d = { ...emptyManual(), newName: 'منى', newPhone: '٠٥٥١٢٣٤٥٦٧', city: 'Dammam', address: 'حي الشاطئ', lines: [{ sku, qty: '٢' }], discount: '١٠', pay: 'cod' as const };
+    const r = createManual(d, { orders: allOrders(), levels, customers }, opts, zones, ME, NOW);
+    expect(r.errors).toEqual([]);
+    const o = r.order!;
+    expect(o.ref).toBe('10484');
+    expect(o.payment).toEqual({ method: 'cod', state: 'cod_due' });
+    expect(o.discount).toBe(1000);
+    expect(o.items[0].qty).toBe(2);
+    expect(Object.values(o.items[0].reserved!).reduce((a, b) => a! + b!, 0)).toBe(2);
+    expect(r.customers.length).toBe(customers.length + 1);
+    const lvl = r.levels.filter((l) => l.sku === sku).reduce((s, l) => s + l.reserved, 0);
+    expect(lvl).toBe(levels.filter((l) => l.sku === sku).reduce((s, l) => s + l.reserved, 0) + 2);
+    expect(o.activity?.map((a) => a.kind)).toEqual(['manualCreated', 'stockReserved']);
+    expect(o.log[0]).toMatchObject({ actor: 'سارة', at: NOW });
+  });
+});

@@ -270,7 +270,7 @@ function Overview({ series, orders, range, cmp, compare: c, metric, empty, go, q
           action={<Button size="sm" variant="secondary" onClick={exportDays} disabled={!rows.length}><Download className="size-4" aria-hidden="true" />CSV</Button>} />
         {rows.length === 0 ? <EmptyState icon={<BarChart3 className="size-6" aria-hidden="true" />} title={tx('لا بيانات بعد', 'No data yet')} /> : (
           <div className="scrollbar-thin max-h-[420px] overflow-auto border-t border-border">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-0 text-sm">
               <caption className="sr-only">{tx('الأرقام اليومية للفترة', 'Daily figures for the period')}</caption>
               <thead className="sticky top-0 z-10 bg-surface text-xs text-muted shadow-[0_1px_0_var(--border)]">
                 <tr>

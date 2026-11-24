@@ -8,7 +8,7 @@ import {
   type FulState, type Order, type PayState, type ShipState,
 } from '../domain';
 import { Breakdown, Crumbs, H1, H3, PANEL, ProductPhoto, SimNote, WRAP, districtLabel, to, useS, variantLabel } from '../kit';
-import { CUSTOMER, accountStore, cartStore, checkStatus, updateOrder } from '../state';
+import { CUSTOMER, accountStore, cancelFromStore, cartStore, checkStatus, selfCancelOpen, updateOrder } from '../state';
 import { useCatalog, useConfig, useOrders } from '../data';
 import { simNow, useSim } from '../review';
 
@@ -301,6 +301,7 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
               {ret.ok && <LinkButton variant="secondary" href={to(`/returns/${o.ref}`, mobile ? { m: mobile } : undefined)}><RotateCcw className="size-4" aria-hidden="true" />{t.requestReturn}</LinkButton>}
               <Button variant="secondary" onClick={reorder}><ShoppingBag className="size-4" aria-hidden="true" />{t.reorder}</Button>
             </div>
+            <CancelBox o={o} />
             {o.received && <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400" role="status"><Check className="size-4" aria-hidden="true" />{t.received}</p>}
             {reordered && <p className="text-sm" role="status">{reordered} <a className="font-semibold underline underline-offset-2" href={to('/cart')}>{t.viewBag}</a></p>}
             {ret.ok && <p className="text-xs text-muted">{t.returnUntil(d(ret.until))}</p>}
@@ -336,6 +337,37 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
           <div className={cn(PANEL, 'p-5 sm:p-6')}><Details o={o} stack /></div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** Cancel by the shopper: at once inside the store's self-cancel window, otherwise a request the store approves or declines. */
+function CancelBox({ o }: { o: Order }) {
+  const tx = useTx();
+  const [open, setOpen] = useState(false);
+  const [why, setWhy] = useState('');
+  const [msg, setMsg] = useState<string | null>(null);
+  if (o.cancelled) return <Alert tone="info" title={tx('أُلغي الطلب', 'Order cancelled')}>{o.cancelled.by === 'customer' ? tx('ألغيت الطلب. إن كنت دفعت فسيُرد المبلغ لوسيلة الدفع خلال أيام عمل.', 'You cancelled this order. If you paid, the money goes back to your payment method within a few working days.') : tx('ألغى المتجر الطلب.', 'The store cancelled this order.')}</Alert>;
+  if (o.cancelRequest === 'open') return <p className="text-sm text-muted" role="status">{tx('طلب الإلغاء أُرسل للمتجر وينتظر الرد.', 'Your cancel request was sent to the store and awaits a reply.')}</p>;
+  if (o.shipment !== 'none' && o.shipment !== 'label') return null;
+  if (o.pay.state === 'awaiting' || o.pay.state === 'declined' || o.pay.state === 'challenge') return null;
+  const self = selfCancelOpen(o.ref);
+  return (
+    <div className="space-y-2 border-t border-border pt-3">
+      {msg && <p className="text-sm" role="status">{msg}</p>}
+      {o.cancelRequest === 'declined' && <p className="text-xs text-muted">{tx('رفض المتجر طلب الإلغاء السابق.', 'The store declined your earlier cancel request.')}</p>}
+      {!open ? (
+        <Button variant="ghost" onClick={() => setOpen(true)}>{self ? tx('ألغِ الطلب', 'Cancel order') : tx('اطلب إلغاء الطلب', 'Ask to cancel')}</Button>
+      ) : (
+        <div className="space-y-2 rounded-xl bg-surface-2 p-3">
+          <p className="text-sm">{self ? tx('يُلغى الطلب فورًا، ويُرد ما دفعته لوسيلة الدفع.', 'The order is cancelled at once and what you paid goes back to your payment method.') : tx('مضت مهلة الإلغاء الذاتي؛ يصل طلبك للمتجر ليوافق أو يرفض.', 'The self-cancel window has passed; your request goes to the store to approve or decline.')}</p>
+          <Field id="sf-cancel-why" label={tx('السبب (اختياري)', 'Reason (optional)')}>{(p) => <Input {...p} value={why} onChange={(e) => setWhy(e.target.value.slice(0, 160))} />}</Field>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={() => { const r = cancelFromStore(o.ref, why); setOpen(false); setMsg(r === 'cancelled' ? tx('أُلغي الطلب.', 'Order cancelled.') : r === 'requested' ? tx('أُرسل طلب الإلغاء للمتجر.', 'Cancel request sent to the store.') : tx('لا يمكن إلغاء الطلب الآن.', 'This order can no longer be cancelled.')); }}>{self ? tx('أكّد الإلغاء', 'Confirm cancel') : tx('أرسل الطلب', 'Send request')}</Button>
+            <Button variant="secondary" onClick={() => setOpen(false)}>{tx('تراجع', 'Keep order')}</Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

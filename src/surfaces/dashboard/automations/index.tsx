@@ -1,16 +1,18 @@
 // Automations (`#/dashboard/automations`): flows with status and last run, run log, templates.
 // `#/dashboard/automations/new` picks a template; `#/dashboard/automations/<id>` opens the builder.
-import { Plus, Workflow, ArrowLeft } from 'lucide-react';
+import { Plus, Workflow, ArrowLeft, RotateCw, Pause, Play } from 'lucide-react';
+import { useState } from 'react';
 import { useLang } from '../../../core/lang';
 import { replace, type Route } from '../../../core/router';
 import { can, canSee } from '../../merchant/perms';
-import { automationsStore, runsStore } from '../../merchant/stores';
+import { automationsStore, logAction, runsStore } from '../../merchant/stores';
 import type { Automation, Run } from '../../merchant/growth';
-import { Badge, Card, CardHeader, EmptyState, ErrorState, LinkButton, Skeleton, cn, useTx } from '../../../ds/ui';
-import { DataTable, FilterChip, PageHeader, Tabs, type Column } from '../../../ds/kit';
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, LinkButton, Money, Skeleton, cn, useTx } from '../../../ds/ui';
+import { DataTable, FilterChip, Modal, PageHeader, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { NoAccess, ReviewRole, useRole, Locked } from '../marketing/access';
-import { OUTCOMES, TEMPLATES, filterRuns, lastRun, runCounts } from './model';
+import { RUN_VIEWS, TEMPLATES, canActivate, filterRunView, flowCost, lastRun, needsFollowUp, runCounts, type RunView } from './model';
+import { RetryModal, RunDrawer } from './runs';
 import Builder from './builder';
 import { A_TONE, OutcomeIcon, R_TONE, T_ICON, ahref, useNames } from './names';
 
@@ -37,6 +39,9 @@ function List({ route }: { route: Route }) {
   const rlist = empty ? [] : runs;
   const tab = route.query.get('tab') === 'runs' ? 'runs' : 'flows';
   const manage = can(role, 'automation.manage');
+  const toast = useToast();
+  const [toggle, setToggle] = useState<Automation | null>(null);
+  const followups = needsFollowUp(rlist);
 
   const header = (
     <>
@@ -63,31 +68,31 @@ function List({ route }: { route: Route }) {
   );
 
   if (tab === 'runs') {
-    const oq = route.query.get('outcome');
-    const outcome = oq && (OUTCOMES as string[]).includes(oq) ? oq : '';
+    const oq = route.query.get('outcome') as RunView | null;
+    const outcome: RunView = oq && RUN_VIEWS.includes(oq) ? oq : 'all';
     const aq = route.query.get('automation') ?? '';
-    const shown = filterRuns(rlist, { outcome, automation: aq });
-    const counts = runCounts(filterRuns(rlist, { automation: aq }));
-    const href = (p: Record<string, string | undefined>) => ahref('', { tab: 'runs', outcome: outcome || undefined, automation: aq || undefined, ...p });
+    const shown = filterRunView(rlist, outcome, aq);
+    const href = (p: Record<string, string | undefined>) => ahref('', { tab: 'runs', outcome: outcome === 'all' ? undefined : outcome, automation: aq || undefined, ...p });
     const name = (r: Run) => autos.find((a) => a.id === r.automation)?.name[lang] ?? r.automation;
+    const open = rlist.find((r) => r.id === route.query.get('run'));
+    const retryOf = rlist.find((r) => r.id === route.query.get('retry'));
+    const viewName = (v: RunView) => (v === 'all' ? tx('الكل', 'All') : v === 'followup' ? tx('يحتاج متابعة', 'Needs follow-up') : n.outcome(v));
     const cols: Column<Run>[] = [
       { key: 'w', header: tx('الوقت', 'When'), cell: (r) => <span className="whitespace-nowrap text-muted">{r.when[lang]}</span> },
-      { key: 'a', header: tx('الأتمتة', 'Automation'), cell: (r) => <a href={ahref(r.automation)} className="font-medium text-fg hover:text-brand-700">{name(r)}</a> },
+      { key: 'a', header: tx('الأتمتة', 'Automation'), cell: (r) => <span className="font-medium text-fg">{name(r)}</span> },
       { key: 's', header: tx('العنصر', 'Subject'), hideBelow: 'lg', cell: (r) => r.subject[lang] },
-      { key: 'o', header: tx('النتيجة', 'Outcome'), cell: (r) => <Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge> },
+      { key: 'o', header: tx('النتيجة', 'Outcome'), cell: (r) => <span className="flex flex-wrap items-center gap-1.5"><Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge>{(r.attempt ?? 1) > 1 && <Badge tone="gray">{tx(`محاولة ${r.attempt}`, `Attempt ${r.attempt}`)}</Badge>}</span> },
       { key: 'r', header: tx('السبب', 'Reason'), cell: (r) => <span className="text-[13px] text-muted">{r.reason[lang]}</span> },
     ];
     return (
       <div className="space-y-6">{header}
         <Card>
           <div className="px-4 pt-2 sm:px-5">
-            <Tabs label={tx('النتيجة', 'Outcome')} items={[
-              { href: href({ outcome: undefined }), label: tx('الكل', 'All'), current: !outcome, count: counts.succeeded + counts.failed + counts.skipped },
-              ...OUTCOMES.map((o) => ({ href: href({ outcome: o }), label: n.outcome(o), current: outcome === o, count: counts[o] })),
-            ]} />
+            <Tabs label={tx('النتيجة', 'Outcome')} items={RUN_VIEWS.map((v) => ({ href: href({ outcome: v === 'all' ? undefined : v }), label: viewName(v), current: outcome === v, count: filterRunView(rlist, v, aq).length }))} />
           </div>
           <div className="flex flex-wrap items-center gap-2 p-4 sm:px-5">
             <FilterChip label={tx('الأتمتة', 'Automation')} value={aq} onChange={(v) => replace(href({ automation: v || undefined }))} options={autos.map((a) => ({ value: a.id, label: a.name[lang] }))} />
+            {outcome === 'followup' && <span className="flex items-center gap-1 text-xs text-muted">{tx('فشل لن ينجح بإعادة المحاولة، أو استنفد المحاولات', 'Failures a retry will not fix, or out of attempts')}<InfoHint>{tx('عالج السبب (مثل عنوان بريد غير صالح في ملف العميل) ثم أعد المحاولة أو تجاهله.', 'Fix the cause (e.g. an invalid email on the customer) then retry, or leave it.')}</InfoHint></span>}
           </div>
           {shown.length === 0 ? (
             rlist.length === 0
@@ -95,7 +100,7 @@ function List({ route }: { route: Route }) {
               : <EmptyState title={tx('لا تشغيلات مطابقة', 'No matching runs')} action={<LinkButton variant="secondary" href={ahref('', { tab: 'runs' })}>{tx('امسح الفلاتر', 'Clear filters')}</LinkButton>} />
           ) : (
             <div className="border-t border-border">
-              <DataTable label={tx('سجل التشغيل', 'Run log')} rows={shown} columns={cols} rowKey={(r) => r.id}
+              <DataTable label={tx('سجل التشغيل', 'Run log')} rows={shown} columns={cols} rowKey={(r) => r.id} href={(r) => href({ run: r.id })}
                 card={(r) => (
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-2"><span className="font-semibold text-fg">{r.subject[lang]}</span><Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge></div>
@@ -106,6 +111,8 @@ function List({ route }: { route: Route }) {
             </div>
           )}
         </Card>
+        {open && <RunDrawer run={open} runs={rlist} automation={autos.find((a) => a.id === open.automation)} canManage={manage} onClose={() => replace(href({ run: undefined }))} onRetry={(r) => replace(href({ run: undefined, retry: r.id }))} />}
+        {retryOf && manage && <RetryModal run={retryOf} automation={autos.find((a) => a.id === retryOf.automation)} onClose={(id) => replace(href({ retry: undefined, run: id }))} />}
       </div>
     );
   }
@@ -116,6 +123,8 @@ function List({ route }: { route: Route }) {
     { key: 'v', header: tx('الإصدار', 'Version'), hideBelow: 'lg', cell: (a) => <span className="tabular-nums text-muted">v{a.version}</span> },
     { key: 'l', header: tx('آخر تشغيل', 'Last run'), cell: (a) => { const r = lastRun(rlist, a.id); return r ? <span className="flex flex-wrap items-center gap-2"><Badge tone={R_TONE[r.outcome]} icon={<OutcomeIcon o={r.outcome} />}>{n.outcome(r.outcome)}</Badge><span className="text-xs text-muted">{r.when[lang]}</span></span> : <span className="text-xs text-muted">{tx('لم يعمل بعد', 'Not run yet')}</span>; } },
     { key: 'c', header: tx('نجح / فشل / تُخطّي', 'OK / failed / skipped'), hideBelow: 'lg', align: 'end', cell: (a) => { const c = runCounts(rlist, a.id); return <a href={ahref('', { tab: 'runs', automation: a.id })} className="tabular-nums text-muted hover:text-fg"><span className="text-emerald-700 dark:text-emerald-400">{c.succeeded}</span> / <span className="text-red-700 dark:text-red-400">{c.failed}</span> / {c.skipped}</a>; } },
+    { key: 'cost', header: <span className="inline-flex items-center gap-1">{tx('التكلفة', 'Cost')}<InfoHint>{tx('رسائل سُلّمت للمزوّد بسعر الاختبار.', 'Messages handed to the provider, at the test rate.')}</InfoHint></span>, hideBelow: 'lg', align: 'end', cell: (a) => <Money v={flowCost(rlist, a.id)} className="text-muted" /> },
+    { key: 'act', header: <span className="sr-only">{tx('إجراء', 'Action')}</span>, align: 'end', cell: (a) => (manage && (a.status === 'active' || canActivate(a)) ? <Button variant="secondary" size="sm" onClick={(e) => { e.preventDefault(); e.stopPropagation(); setToggle(a); }}>{a.status === 'active' ? <><Pause className="size-3.5" aria-hidden="true" />{tx('أوقف', 'Pause')}</> : <><Play className="size-3.5" aria-hidden="true" />{tx('فعّل', 'Activate')}</>}</Button> : null) },
   ];
 
   return (
@@ -141,6 +150,27 @@ function List({ route }: { route: Route }) {
         )}
         {!manage && <p className="border-t border-border px-5 py-3"><Locked>{tx('دورك يعرض الأتمتة فقط.', 'Your role can only view automations.')}</Locked></p>}
       </Card>
+      {followups.length > 0 && (
+        <a href={ahref('', { tab: 'runs', outcome: 'followup' })} className="flex items-center justify-between gap-3 rounded-2xl border border-amber-500/30 bg-amber-500/8 px-5 py-3 text-sm font-medium text-amber-900 hover:bg-amber-500/12 dark:text-amber-200">
+          <span className="flex items-center gap-2"><RotateCw className="size-4" aria-hidden="true" />{tx(`${followups.length} تشغيل فاشل يحتاج متابعة`, `${followups.length} failed run(s) need follow-up`)}</span><ArrowLeft className="size-4 ltr:rotate-180" aria-hidden="true" />
+        </a>
+      )}
+      {toggle && (
+        <Modal title={toggle.status === 'active' ? tx(`إيقاف «${toggle.name[lang]}»`, `Pause “${toggle.name[lang]}”`) : tx(`تفعيل «${toggle.name[lang]}» الإصدار ${toggle.version}`, `Activate “${toggle.name[lang]}” version ${toggle.version}`)} onClose={() => setToggle(null)}
+          footer={<><Button variant="secondary" onClick={() => setToggle(null)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => {
+            const st = toggle.status === 'active' ? 'paused' as const : 'active' as const;
+            automationsStore.set((l) => l.map((x) => (x.id === toggle.id ? { ...x, status: st } : x)));
+            logAction('marketing', st === 'active' ? { ar: `فعّل الأتمتة ${toggle.id}`, en: `Activated automation ${toggle.id}` } : { ar: `أوقف الأتمتة ${toggle.id}`, en: `Paused automation ${toggle.id}` }, { target: toggle.id });
+            toast({ tone: 'ok', text: st === 'active' ? tx('فُعّلت', 'Activated') : tx('أُوقفت', 'Paused') });
+            setToggle(null);
+          }}>{toggle.status === 'active' ? tx('أوقف', 'Pause') : tx('فعّل', 'Activate')}</Button></>}>
+          <ul className="space-y-1.5 text-sm text-fg">
+            {toggle.status === 'active'
+              ? <><li>{tx('لا تبدأ تشغيلات جديدة، وتتوقف التي في الانتظار قبل خطوتها التالية.', 'No new runs start; runs in their wait stop before their next step.')}</li><li>{tx('ما سُلّم من رسائل لا يُسترجع.', 'Messages already handed over cannot be recalled.')}</li></>
+              : <><li>{tx('يعمل على الأحداث الجديدة من الآن، بتوقيت الرياض.', 'Runs on new events from now on, Riyadh time.')}</li><li>{tx('هذا الإصدار جُرّب تجربة آمنة.', 'This version passed a dry run.')}</li></>}
+          </ul>
+        </Modal>
+      )}
       {manage && list.length > 0 && (
         <section aria-labelledby="h-tpl" className="space-y-3">
           <h2 id="h-tpl" className="text-[15px] font-semibold text-fg">{tx('ابدأ من قالب', 'Start from a template')}</h2>

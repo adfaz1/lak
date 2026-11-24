@@ -9,10 +9,12 @@ import { Alert, Field, Input, Modal, Simulated, Switch, Textarea } from '../../.
 import { Button, Money, ProductImage, Segmented, cn, useTx } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { REFUND_REASONS, applyRestock, refundFromNextPayout, type RefundReason } from './model';
-import { Qty, Row, saveOrder } from './ui';
+import { Qty, Row, saveOrder, useActor } from './ui';
+import { act, stamp } from '../../merchant/ops';
 
 export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg?: string) => void }) {
   const tx = useTx();
+  const who = useActor();
   const { lang } = useLang();
   const [qty, setQty] = useState<number[]>(o.items.map(() => 0));
   const [restock, setRestock] = useState<number[]>(o.items.map(() => 0));
@@ -30,7 +32,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
       : q.error === 'exceeds' ? tx('المبلغ يتجاوز المتاح', 'Amount exceeds what is available') : null;
 
   const submit = () => {
-    const next = requestRefund(o, qty, ship, restock, loc, reason.trim());
+    const next = stamp(o, requestRefund(o, qty, ship, restock, loc, reason.trim()), who, Date.now());
     if (next === o) return;
     const r = next.refunds[next.refunds.length - 1];
     saveOrder(next);
@@ -140,6 +142,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
 /** Failed payment: the next step is a conversation. The message is copied for the merchant's own channel; nothing is sent. */
 export function ContactModal({ o, onClose }: { o: Order; onClose: (msg?: string) => void }) {
   const tx = useTx();
+  const who = useActor();
   const { lang } = useLang();
   const first = o.customer[lang].split(' ')[0];
   const amount = formatMoney(total(o));
@@ -149,7 +152,7 @@ export function ContactModal({ o, onClose }: { o: Order; onClose: (msg?: string)
   return (
     <Modal title={tx(`رسالة إلى ${o.customer[lang]}`, `Message ${o.customer[lang]}`)} onClose={() => onClose()}
       footer={<><Button variant="secondary" onClick={() => onClose()}>{tx('إلغاء', 'Cancel')}</Button>
-        <Button disabled={!text.trim()} onClick={() => { void navigator.clipboard?.writeText(text).catch(() => undefined); onClose(tx('نُسخت الرسالة. أرسلها من قناتك المعتادة.', 'Message copied. Send it from your usual channel.')); }}>{tx('انسخ الرسالة', 'Copy message')}</Button></>}>
+        <Button disabled={!text.trim()} onClick={() => { void navigator.clipboard?.writeText(text).catch(() => undefined); saveOrder(act(o, 'messageCopied', who, Date.now(), { text: text.slice(0, 120) })); onClose(tx('نُسخت الرسالة. أرسلها من قناتك المعتادة.', 'Message copied. Send it from your usual channel.')); }}>{tx('انسخ الرسالة', 'Copy message')}</Button></>}>
       {o.pay === 'failed' && <Alert tone="bad" title={tx('لم يُحصَّل أي مبلغ', 'Nothing was collected')}>{tx('لا تجهّز قبل تأكيد الدفع.', 'Do not fulfil before payment is confirmed.')}</Alert>}
       <Field label={tx('نص الرسالة', 'Message')} hint={tx('لا يُرسل شيء من هنا؛ يُنسخ النص فقط', 'Nothing is sent; the text is copied')}>
         {(p) => <Textarea {...p} value={text} onChange={(e) => setText(e.target.value)} className="min-h-28" />}

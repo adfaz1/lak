@@ -1,22 +1,23 @@
 // Product editor (`#/dashboard/products/<id>` and `/new`). Typing is kept as a session draft (never counted as saved);
 // "saved" only after the simulated server round trip succeeds, with the new version number.
 import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ImagePlus, PackageSearch, Star, Trash2, X, Plus, Boxes } from 'lucide-react';
-import { replace } from '../../../core/router';
+import { ArrowDown, ArrowUp, ImagePlus, PackageSearch, Star, Trash2, X, Plus, Boxes, Copy } from 'lucide-react';
+import { navigate, replace } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
 import { LOCATIONS, LOC_IDS, type Channel, type LocId } from '../../merchant/domain';
-import { parseMoney, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
+import { colorText, parseMoney, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
 import { available, levelOf } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { draftsStore, levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, draftsStore, levelsStore, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
 import {
-  CATEGORIES, CHANNELS, categoryKey, discountPct, fieldId, fromEditDraft, hiddenReason, levelsForNew, makePrimary, mediaSrc, moveItem, nextProductId,
-  orderErrors, previewPrice, profitOf, rebuildEditVariants, seoPreview, slugify, toEditDraft, validateEdit, type EditDraft, type EditVariant,
+  CHANNELS, TAG_MAX, categoryKey, categoryOptions, checkImage, discountPct, duplicateDraft, fieldId, fromEditDraft, hiddenReason, levelsForNew, makePrimary, mediaSrc,
+  moveItem, nextProductId, normaliseTags, orderErrors, previewPrice, profitOf, rebuildEditVariants, rememberUrl, removeMedia, restoreMedia, seoPreview, slugify, toEditDraft,
+  validateEdit, type EditDraft, type EditVariant, type FileProblem,
 } from './model';
 import { LeaveModal, ReviewTools, STATUS_TONE, phref, roleBadge, useLeaveGuard, useNames, useRole } from './common';
 
@@ -77,6 +78,8 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
   const summaryRef = useRef<HTMLDivElement>(null);
 
   const known = useMemo(() => new Set(levels.map((l) => l.sku)), [levels]);
+  const cats = categoriesStore.use();
+  const catOpts = categoryOptions(cats);
   const errors = useMemo(() => validateEdit(draft, takenSkus(products, product?.id), known), [draft, products, product?.id, known]);
   const errorKeys = orderErrors(Object.keys(errors));
   const dirty = state === 'dirty' || state === 'failed' || state === 'saving';
@@ -90,6 +93,10 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
     setState((s) => (s === 'saving' ? s : 'dirty'));
   };
   const clearStored = () => draftsStore.set((d) => { const n = { ...d }; delete n[key]; return n; });
+  const duplicate = (p: Product) => {
+    draftsStore.set((x) => ({ ...x, [draftKey('new')]: { ...duplicateDraft(p, productsStore.get()), copyOf: p.name[lang] } as unknown as ProductDraft }));
+    navigate(phref('new'));
+  };
   const discard = () => { setDraft(base); draftRef.current = base; clearStored(); setState('clean'); setShowErr(false); setRestored(false); };
 
   const save = () => {
@@ -157,9 +164,10 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
           <span role="status" aria-live="polite" className={cn('text-[13px]', state === 'failed' ? 'font-semibold text-red-600 dark:text-red-400' : state === 'dirty' ? 'text-amber-700 dark:text-amber-300' : 'text-muted')}>{stateLine[state]}</span>
           {!canEdit && roleBadge(tx)}
         </>}
-        actions={canEdit && <Button onClick={save} disabled={state === 'saving' || (!dirty && !isNew)}>{state === 'saving' ? tx('جارٍ الحفظ…', 'Saving…') : state === 'failed' ? tx('أعد المحاولة', 'Try again') : tx('احفظ', 'Save')}</Button>} />
+        actions={canEdit && <>{!isNew && <Button variant="secondary" onClick={() => duplicate(product!)} disabled={dirty}><Copy className="size-4" aria-hidden="true" />{tx('انسخ', 'Duplicate')}</Button>}<Button onClick={save} disabled={state === 'saving' || (!dirty && !isNew)}>{state === 'saving' ? tx('جارٍ الحفظ…', 'Saving…') : state === 'failed' ? tx('أعد المحاولة', 'Try again') : tx('احفظ', 'Save')}</Button></>} />
 
-      {restored && state === 'dirty' && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We restored your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard them')}</Button>}>{tx('من هذه الجلسة. لم تُحفظ بعد.', 'From this session. Not saved yet.')}</Alert>}
+      {draft.copyOf && isNew && <Alert tone="info" title={tx('نسخة غير محفوظة', 'Unsaved copy')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('ألغِ النسخة', 'Discard copy')}</Button>}>{tx(`من «${draft.copyOf}». الحالة مسودة وSKU جديد؛ أدخل المخزون الأولي.`, `Of “${draft.copyOf}”. Draft status and a new SKU; enter initial stock.`)}</Alert>}
+      {restored && state === 'dirty' && !draft.copyOf && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We restored your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard them')}</Button>}>{tx('من هذه الجلسة. لم تُحفظ بعد.', 'From this session. Not saved yet.')}</Alert>}
       {state === 'failed' && (
         <Alert tone="bad" title={tx('لم يُحفظ المنتج', 'The product was not saved')}>
           {tx('انقطع الاتصال بالخادم. كل ما كتبته باقٍ هنا.', 'The connection to the server dropped. Everything you typed is still here.')} <Simulated />
@@ -180,7 +188,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
           <div className="min-w-0 space-y-6">
             <Basics draft={draft} set={set} fe={fe} />
-            <MediaSection draft={draft} set={set} fe={fe} />
+            <MediaSection draft={draft} set={set} fe={fe} get={() => draftRef.current} />
             <Pricing draft={draft} set={set} fe={fe} />
             <InventorySection draft={draft} set={set} fe={fe} known={known} />
             <Variants draft={draft} set={set} fe={fe} known={known} />
@@ -198,11 +206,12 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
               <CardHeader id="pe-h-status" title={tx('الحالة', 'Status')} hint={tx('المسودة والمؤرشف لا يظهران للعملاء.', 'Drafts and archived products are hidden from shoppers.')} />
               <div className="space-y-4 px-5 pb-5">
                 <Field label={tx('حالة المنتج', 'Product status')}>{(p) => <Select {...p} value={draft.status} onChange={(e) => set({ status: e.target.value as EditDraft['status'] })}>{(['active', 'draft', 'archived'] as const).map((s) => <option key={s} value={s}>{names.status(s)}</option>)}</Select>}</Field>
-                <Field label={tx('الفئة', 'Category')}>{(p) => (
-                  <Select {...p} value={categoryKey(draft.category)} onChange={(e) => set({ category: [...CATEGORIES, draft.category].find((c) => categoryKey(c) === e.target.value) ?? draft.category })}>
-                    {[...CATEGORIES, ...(CATEGORIES.some((c) => categoryKey(c) === categoryKey(draft.category)) ? [] : [draft.category])].map((c) => <option key={categoryKey(c)} value={categoryKey(c)}>{c[lang]}</option>)}
+                <Field label={<span className="flex w-full items-center justify-between gap-2">{tx('الفئة', 'Category')}<a href={phref('categories')} className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('إدارة الفئات', 'Manage')}</a></span>}>{(p) => (
+                  <Select {...p} value={categoryKey(draft.category)} onChange={(e) => set({ category: catOpts.find((c) => c.key === e.target.value)?.name ?? draft.category })}>
+                    {[...catOpts, ...(catOpts.some((c) => c.key === categoryKey(draft.category)) ? [] : [{ key: categoryKey(draft.category), name: draft.category, depth: 0 as const, id: null }])].map((c) => <option key={c.key} value={c.key}>{c.depth ? '— ' : ''}{c.name[lang]}</option>)}
                   </Select>
                 )}</Field>
+                <TagsField tags={draft.tags ?? []} onChange={(t) => set({ tags: t })} />
               </div>
             </Card>
             <PreviewCard draft={draft} />
@@ -254,20 +263,88 @@ function Basics({ draft, set, fe }: SecProps) {
   );
 }
 
-function MediaSection({ draft, set, fe }: SecProps) {
+interface Upload { id: string; name: string; size: number; src: string; progress: number; status: 'uploading' | 'failed'; problem?: FileProblem }
+/** Review switch: the first file of the next batch fails mid-upload (a simulated network error), so retry can be checked. */
+let failNextUpload = false;
+
+function MediaSection({ draft, set, fe, get }: SecProps & { get: () => EditDraft }) {
   const tx = useTx();
+  const { lang } = useLang();
+  const toast = useToast();
+  const review = useReviewMode();
   const media = draft.media;
-  const add = () => set({ media: [...media, { id: `up-${Date.now()}`, label: { ar: 'صورة مرفوعة', en: 'Uploaded image' }, alt: '' }] });
+  const input = useRef<HTMLInputElement>(null);
+  const [ups, setUps] = useState<Upload[]>([]);
+  const [over, setOver] = useState(false);
+  const [failSwitch, setFailSwitch] = useState(failNextUpload);
+  const upd = (id: string, p: Partial<Upload>) => setUps((l) => l.map((u) => (u.id === id ? { ...u, ...p } : u)));
+  const run = (u: Upload, fail: boolean) => {
+    let pct = 0;
+    const t = setInterval(() => {
+      pct += 12 + Math.round(Math.random() * 10);
+      if (fail && pct >= 60) { clearInterval(t); upd(u.id, { status: 'failed', progress: 60 }); return; }
+      if (pct >= 100) {
+        clearInterval(t);
+        setUps((l) => l.filter((x) => x.id !== u.id));
+        set({ media: [...get().media, { id: u.id, label: { ar: 'صورة مرفوعة', en: 'Uploaded image' }, alt: '', src: u.src }] });
+        return;
+      }
+      upd(u.id, { progress: pct });
+    }, 140);
+  };
+  const addFiles = (files: FileList | File[]) => {
+    const list = [...files];
+    if (!list.length) return;
+    const fresh: Upload[] = list.map((f, i) => {
+      const problem = checkImage(f);
+      return { id: `up-${Date.now().toString(36)}-${i}`, name: f.name, size: f.size, src: problem ? '' : rememberUrl(URL.createObjectURL(f)), progress: 0, status: problem ? 'failed' : 'uploading', problem: problem ?? undefined };
+    });
+    setUps((l) => [...l, ...fresh]);
+    let failed = false;
+    fresh.forEach((u) => { if (u.status === 'uploading') { const f = failNextUpload && !failed; if (f) failed = true; run(u, f); } });
+    if (failed) { failNextUpload = false; setFailSwitch(false); }
+  };
+  const retry = (u: Upload) => { upd(u.id, { status: 'uploading', progress: 0 }); run(u, false); };
+  const drop = (u: Upload) => setUps((l) => l.filter((x) => x.id !== u.id));
+  const remove = (i: number) => {
+    const r = removeMedia(get().media, i);
+    if (!r.removed) return;
+    set({ media: r.list });
+    const removed = r.removed;
+    toast({ tone: 'info', text: tx(`حُذفت الصورة ${i + 1}`, `Image ${i + 1} removed`), action: { label: tx('تراجع', 'Undo'), run: () => set({ media: restoreMedia(get().media, removed) }) } });
+  };
+  const problemText = (u: Upload) => (u.problem === 'type' ? tx('ليس صورة (JPG أو PNG أو WebP)', 'Not an image (JPG, PNG or WebP)') : u.problem === 'size' ? tx('أكبر من 10 ميغابايت', 'Over 10 MB') : u.problem === 'empty' ? tx('ملف فارغ', 'Empty file') : tx('انقطع الرفع', 'Upload interrupted'));
   return (
     <Card aria-labelledby="pe-h-media">
       <CardHeader id="pe-h-media" title={tx('الصور', 'Media')} hint={tx('الصورة الأولى هي الرئيسية في المتجر والقوائم. النص البديل مطلوب لكل صورة.', 'The first image is the main one in the store and lists. Every image needs alt text.')}
-        action={<span className="flex items-center gap-2"><Simulated /><Button variant="secondary" size="sm" onClick={add}><ImagePlus className="size-4" aria-hidden="true" />{tx('أضف صورة', 'Add image')}</Button></span>} />
-      <div className="px-5 pb-5">
-        {media.length === 0 ? (
-          <button type="button" onClick={add} className="flex w-full flex-col items-center gap-2 rounded-xl border border-dashed border-border px-4 py-8 text-sm text-muted transition-colors hover:border-brand-300 hover:text-fg">
-            <ImagePlus className="size-6" aria-hidden="true" />{tx('لا صور بعد · أضف صورة', 'No images yet · add one')}
-          </button>
-        ) : (
+        action={<span className="flex items-center gap-2"><InfoHint>{tx('المعاينة محلية في هذه الجلسة؛ الحفظ الدائم يحتاج خادمًا.', 'Previews are local to this session; permanent storage needs a server.')}</InfoHint><Button variant="secondary" size="sm" onClick={() => input.current?.click()}><ImagePlus className="size-4" aria-hidden="true" />{tx('ارفع صورًا', 'Upload images')}</Button></span>} />
+      <div className="space-y-3 px-5 pb-5">
+        <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/avif" className="sr-only" tabIndex={-1} aria-label={tx('صور المنتج', 'Product images')} onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
+        <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
+          className={cn('flex flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 text-center text-sm text-muted transition-colors', media.length ? 'py-4' : 'py-8', over ? 'border-brand-400 bg-brand-500/5 text-fg' : 'border-border')}>
+          <ImagePlus className="size-6" aria-hidden="true" />
+          <span>{tx('اسحب الصور هنا أو', 'Drag images here or')} <button type="button" className="font-semibold text-brand-700 hover:underline dark:text-brand-300" onClick={() => input.current?.click()}>{tx('اختر من جهازك', 'choose from your device')}</button></span>
+          <span className="text-xs text-subtle">{tx('JPG أو PNG أو WebP حتى 10 ميغابايت', 'JPG, PNG or WebP up to 10 MB')}</span>
+        </div>
+        {ups.length > 0 && (
+          <ul className="space-y-2" aria-live="polite" aria-label={tx('الرفع', 'Uploads')}>
+            {ups.map((u) => (
+              <li key={u.id} className={cn('flex flex-wrap items-center gap-3 rounded-xl border p-3', u.status === 'failed' ? 'border-red-500/40 bg-red-500/5' : 'border-border')}>
+                <ProductImage src={u.src || undefined} alt="" size={44} />
+                <div className="min-w-0 flex-1 basis-40">
+                  <p className="truncate text-sm font-semibold text-fg"><bdi dir="ltr">{u.name}</bdi></p>
+                  {u.status === 'uploading' ? (
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={u.progress} aria-label={tx(`رفع ${u.name}`, `Uploading ${u.name}`)}><div className="h-full rounded-full bg-brand-gradient transition-[width]" style={{ width: `${u.progress}%` }} /></div>
+                  ) : <p className="text-xs font-medium text-red-700 dark:text-red-300">{problemText(u)}</p>}
+                </div>
+                {u.status === 'uploading' ? <span className="text-xs tabular-nums text-muted">{u.progress}%</span> : (
+                  <span className="flex gap-1">{!u.problem && <Button size="sm" variant="secondary" onClick={() => retry(u)}>{tx('أعد المحاولة', 'Retry')}</Button>}<Button size="sm" variant="ghost" onClick={() => drop(u)}>{tx('أزل', 'Remove')}</Button></span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        {media.length > 0 && (
           <ol className="space-y-3">
             {media.map((m, i) => (
               <li key={m.id} className="flex flex-wrap items-start gap-3 rounded-xl border border-border p-3 sm:flex-nowrap">
@@ -275,19 +352,30 @@ function MediaSection({ draft, set, fe }: SecProps) {
                   <ProductImage src={mediaSrc(m)} alt={m.alt || tx('صورة بلا وصف', 'Image without description')} size={72} />
                   {i === 0 && <span className="absolute -top-1.5 start-1.5"><Badge tone="brand" className="h-5 px-2 text-[10px]">{tx('رئيسية', 'Main')}</Badge></span>}
                 </div>
-                <Field id={fieldId(`media.${i}`)} className="min-w-0 flex-1 basis-48" label={tx(`النص البديل · صورة ${i + 1}`, `Alt text · image ${i + 1}`)} error={fe(`media.${i}`)}>
-                  {(p) => <Input {...p} value={m.alt} onChange={(e) => set({ media: media.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)) })} />}
-                </Field>
+                <div className="min-w-0 flex-1 basis-48 space-y-2">
+                  <Field id={fieldId(`media.${i}`)} label={tx(`النص البديل · صورة ${i + 1}`, `Alt text · image ${i + 1}`)} error={fe(`media.${i}`)}>
+                    {(p) => <Input {...p} value={m.alt} onChange={(e) => set({ media: media.map((x, j) => (j === i ? { ...x, alt: e.target.value } : x)) })} />}
+                  </Field>
+                  {draft.colors.length > 0 && (
+                    <label className="flex flex-wrap items-center gap-2 text-xs text-muted">{tx('تُعرض عند اختيار اللون', 'Shown when the colour is')}
+                      <Select className="h-8 w-auto text-xs" value={m.variant ?? ''} onChange={(e) => set({ media: media.map((x, j) => (j === i ? { ...x, variant: e.target.value || undefined } : x)) })}>
+                        <option value="">{tx('كل الألوان', 'Any colour')}</option>
+                        {draft.colors.map((c) => <option key={c} value={c}>{colorText(c, lang)}</option>)}
+                      </Select>
+                    </label>
+                  )}
+                </div>
                 <div className="flex items-center gap-1 sm:pt-6">
                   <IconBtn label={tx(`اجعل الصورة ${i + 1} رئيسية`, `Make image ${i + 1} the main image`)} disabled={i === 0} onClick={() => set({ media: makePrimary(media, i) })}><Star className="size-4" /></IconBtn>
                   <IconBtn label={tx(`قدّم الصورة ${i + 1}`, `Move image ${i + 1} earlier`)} disabled={i === 0} onClick={() => set({ media: moveItem(media, i, -1) })}><ArrowUp className="size-4" /></IconBtn>
                   <IconBtn label={tx(`أخّر الصورة ${i + 1}`, `Move image ${i + 1} later`)} disabled={i === media.length - 1} onClick={() => set({ media: moveItem(media, i, 1) })}><ArrowDown className="size-4" /></IconBtn>
-                  <IconBtn label={tx(`احذف الصورة ${i + 1}`, `Remove image ${i + 1}`)} onClick={() => set({ media: media.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></IconBtn>
+                  <IconBtn label={tx(`احذف الصورة ${i + 1}`, `Remove image ${i + 1}`)} onClick={() => remove(i)}><Trash2 className="size-4" /></IconBtn>
                 </div>
               </li>
             ))}
           </ol>
         )}
+        {review && <label className="flex items-center gap-2 rounded-xl border border-dashed border-border p-2.5 text-xs text-muted"><Switch checked={failSwitch} onChange={(v) => { failNextUpload = v; setFailSwitch(v); }} label={tx('حاكِ فشل رفع صورة واحدة', 'Simulate one failed upload')} />{tx('أداة مراجعة: يفشل رفع أول صورة في الدفعة التالية', 'Review tool: the first image of the next batch fails')}<Simulated /></label>}
       </div>
     </Card>
   );
@@ -515,5 +603,26 @@ function EditorSkeleton() {
       <div className="space-y-6">{[0, 1, 2].map((i) => <div key={i} className="space-y-4 rounded-2xl border border-border bg-surface p-5"><Skeleton className="h-5 w-28" /><div className="grid grid-cols-2 gap-4"><Skeleton className="h-10 rounded-xl" /><Skeleton className="h-10 rounded-xl" /></div><Skeleton className="h-24 rounded-xl" /></div>)}</div>
       <div className="space-y-6"><Skeleton className="h-40 rounded-2xl" /><Skeleton className="h-80 rounded-2xl" /></div>
     </div>
+  );
+}
+
+function TagsField({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
+  const tx = useTx();
+  const [typed, setTyped] = useState('');
+  const add = () => { const v = typed.trim(); if (!v) return; onChange(normaliseTags([...tags, v])); setTyped(''); };
+  return (
+    <Field label={tx('الوسوم', 'Tags')} optional hint={tx('للتصفية والمجموعات الذكية', 'For filters and smart collections')}>
+      {(p) => (
+        <div>
+          <div className="flex gap-2">
+            <input {...p} className={inputClass} value={typed} maxLength={TAG_MAX} placeholder={tx('مثل: رمضان', 'e.g. ramadan')} onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); add(); } }} />
+            <Button variant="secondary" onClick={add} aria-label={tx('أضف الوسم', 'Add tag')}><Plus className="size-4" aria-hidden="true" /></Button>
+          </div>
+          {tags.length > 0 && <ul className="mt-2 flex flex-wrap gap-1.5">{tags.map((t) => (
+            <li key={t} className="inline-flex h-7 items-center gap-1 rounded-full bg-surface-2 ps-3 pe-1 text-[13px] font-medium text-fg">{t}<button type="button" onClick={() => onChange(tags.filter((x) => x !== t))} aria-label={tx(`احذف ${t}`, `Remove ${t}`)} className="grid size-5 place-items-center rounded-full text-muted hover:bg-border hover:text-fg"><X className="size-3" aria-hidden="true" /></button></li>
+          ))}</ul>}
+        </div>
+      )}
+    </Field>
   );
 }

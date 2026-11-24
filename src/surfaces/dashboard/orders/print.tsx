@@ -152,7 +152,7 @@ function InvoiceDoc({ o, seller }: { o: Order; seller: { name: string; vatNo: st
         </dl>
       </div>
       {o.cancelled && <p className="mt-3 rounded border border-red-400 px-3 py-1 text-center font-bold text-red-700">{lang === 'ar' ? 'طلب ملغى — يصدر إشعار دائن عند الاسترداد' : 'Cancelled order — a credit note is issued on refund'}</p>}
-      <table className="mt-5 w-full border-collapse text-[12px]">
+      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[30rem] border-collapse text-[12px]">
         <thead><tr className="border-y border-neutral-300 bg-neutral-50 text-start">
           {[['الصنف', 'Item'], ['الكمية', 'Qty'], ['سعر الوحدة', 'Unit'], ['الضريبة', 'VAT'], ['المجموع', 'Total']].map(([a, e], i) => <th key={e} className={cn('px-2 py-2 font-semibold', i === 0 ? 'text-start' : 'text-end')}>{lang === 'ar' ? a : e}</th>)}
         </tr></thead>
@@ -167,7 +167,7 @@ function InvoiceDoc({ o, seller }: { o: Order; seller: { name: string; vatNo: st
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
       <dl className="ms-auto mt-4 w-full max-w-xs space-y-1 text-[12px]">
         {[
           [lang === 'ar' ? 'المجموع' : 'Subtotal', r(inv.subtotal)],
@@ -198,7 +198,7 @@ function SlipDoc({ o, store }: { o: Order; store: string }) {
         {o.gift && <div className="rounded border border-neutral-300 p-2"><p className="font-semibold">{lang === 'ar' ? 'هدية — بلا أسعار' : 'Gift — no prices'}</p>{o.gift.message && <p className="mt-1">«{o.gift.message}»</p>}</div>}
       </section>
       {(o.customerNote || o.address?.notes) && <p className="mt-3 rounded bg-neutral-100 px-3 py-2"><b>{lang === 'ar' ? 'ملاحظة العميل: ' : 'Customer note: '}</b>{o.customerNote ?? o.address?.notes}</p>}
-      <table className="mt-4 w-full border-collapse text-[12px]">
+      <div className="mt-4 overflow-x-auto"><table className="w-full min-w-[30rem] border-collapse text-[12px]">
         <thead><tr className="border-y border-neutral-300 bg-neutral-50">
           <th className="w-8 px-2 py-2" aria-label="✓" /><th className="px-2 py-2 text-start">{lang === 'ar' ? 'الصنف' : 'Item'}</th><th className="px-2 py-2 text-start">SKU</th><th className="px-2 py-2 text-start">{lang === 'ar' ? 'الموقع' : 'Location'}</th><th className="px-2 py-2 text-end">{lang === 'ar' ? 'الكمية' : 'Qty'}</th>
         </tr></thead>
@@ -211,7 +211,7 @@ function SlipDoc({ o, store }: { o: Order; store: string }) {
             <td className="px-2 py-2 text-end text-[14px] font-bold tabular-nums">{it.qty}</td>
           </tr>
         ))}</tbody>
-      </table>
+      </table></div>
       <p className="mt-4 text-[11px] text-neutral-500">{lang === 'ar' ? `${o.items.reduce((s, i) => s + i.qty, 0)} قطع. تحقّق من كل سطر قبل الإغلاق.` : `${o.items.reduce((s, i) => s + i.qty, 0)} items. Check every line before sealing.`}</p>
     </>
   );

@@ -116,7 +116,7 @@ export function bulkChanged(products: Product[], rows: BulkRow[]): string[] {
 export type StockBy = Record<LocId, string>;
 export interface EditVariant extends VariantDraft { stockBy: StockBy }
 /** The catalogue draft plus what this editor adds: category and initial stock per warehouse. */
-export interface EditDraft extends Omit<ProductDraft, 'variants'> { variants: EditVariant[]; category: L; stockBy: StockBy; tags: string[] }
+export interface EditDraft extends Omit<ProductDraft, 'variants'> { variants: EditVariant[]; category: L; stockBy: StockBy; tags: string[]; /** Name of the product this unsaved draft was copied from. */ copyOf?: string }
 
 export const CATEGORIES: L[] = [
   { ar: 'أزياء', en: 'Fashion' }, { ar: 'عطور', en: 'Fragrance' }, { ar: 'حقائب', en: 'Bags' }, { ar: 'منزل', en: 'Home' },
@@ -344,7 +344,8 @@ export function duplicateDraft(p: Product, products: Product[]): EditDraft {
   const d = toEditDraft(p);
   return {
     ...d, nameAr: `${p.name.ar} (نسخة)`, nameEn: `${p.name.en} (copy)`, status: 'draft', sku, slug: '', seoTitle: '', barcode: '',
-    media: d.media.map((m, i) => ({ ...m, id: `${m.id}-c${i}` })),
+    // Media ids are only unique within a product, so the copy keeps them (and with them the licensed photos).
+    media: d.media.map((m) => ({ ...m })),
     variants: d.variants.map((v) => ({ ...v, sku: variantSku(sku, v.color, v.size), isNew: true, stock: '0', stockBy: Object.fromEntries(LOC_IDS.map((l) => [l, '0'])) })),
   };
 }

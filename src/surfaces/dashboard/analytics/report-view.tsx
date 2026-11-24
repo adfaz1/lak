@@ -49,7 +49,7 @@ function CellView({ c, v, pid }: { c: Col; v: Cell; pid?: string }) {
   const products = productsStore.use();
   if (c.unit === 'product') {
     const name = typeof v === 'object' && v ? v[lang] : String(v ?? '');
-    return <span className="flex min-w-0 items-center gap-2.5"><ProductImage src={pid ? productPhoto(pid) : undefined} alt={name} size={36} /><span className="truncate font-medium text-fg">{products.find((p) => p.id === pid)?.name[lang] ?? name}</span></span>;
+    return <span className="flex w-[9rem] min-w-0 items-center gap-2.5 sm:w-[14rem]"><ProductImage src={pid ? productPhoto(pid) : undefined} alt={name} size={36} /><span className="truncate font-medium text-fg">{products.find((p) => p.id === pid)?.name[lang] ?? name}</span></span>;
   }
   if (v === null || v === undefined) return <span className="text-subtle" title={tx('لا بيانات', 'No data')}>—</span>;
   if (typeof v === 'object') return <>{v[lang]}</>;
@@ -76,7 +76,7 @@ export function ReportTable({ t, meta, file }: { t: Table; meta: { from: string;
         action={<Button size="sm" variant="secondary" onClick={exportCsv} disabled={!t.rows.length}><Download className="size-4" aria-hidden="true" />CSV</Button>} />
       {t.rows.length === 0 ? <EmptyState icon={<BarChart3 className="size-6" aria-hidden="true" />} title={t.empty[lang]} /> : (
         <div className="scrollbar-thin max-h-[480px] overflow-auto border-t border-border">
-          <table className="w-full text-sm">
+          <table className="w-full min-w-0 text-sm">
             <caption className="sr-only">{t.title[lang]}</caption>
             <thead className="sticky top-0 z-10 bg-surface text-xs text-muted shadow-[0_1px_0_var(--border)]">
               <tr>
@@ -93,7 +93,7 @@ export function ReportTable({ t, meta, file }: { t: Table; meta: { from: string;
                   {t.cols.map((c, i) => {
                     const El = i === 0 ? 'th' : 'td';
                     return (
-                      <El key={c.key} {...(i === 0 ? { scope: 'row' } : {})} className={cn('py-2.5', i === 0 ? 'max-w-[14rem] ps-5 pe-3 text-start font-medium text-fg' : i === t.cols.length - 1 ? 'ps-3 pe-5' : 'px-3', c.end ? 'text-end' : 'text-start', i > 0 && 'whitespace-nowrap', hide(c))}>
+                      <El key={c.key} {...(i === 0 ? { scope: 'row' } : {})} className={cn('py-2.5', i === 0 ? 'max-w-[9.5rem] ps-5 pe-3 text-start font-medium text-fg sm:max-w-[14rem]' : i === t.cols.length - 1 ? 'ps-3 pe-5' : 'px-3', c.end ? 'text-end' : 'text-start', i > 0 && 'whitespace-nowrap', hide(c))}>
                         <CellView c={c} v={r[c.key]} pid={typeof r._pid === 'string' ? r._pid : undefined} />
                       </El>
                     );

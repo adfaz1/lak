@@ -35,10 +35,10 @@ export function CustomRange({ value, onApply, max }: { value: Range; onApply: (r
   return (
     <form className="flex flex-wrap items-start gap-2" onSubmit={(e) => { e.preventDefault(); apply(); }}>
       <label className="sr-only" htmlFor="rng-from">{tx('من', 'From')}</label>
-      <Input id="rng-from" dir="ltr" inputMode="numeric" className="w-[8.5rem]" value={from} aria-invalid={err ? true : undefined} aria-describedby={err ? 'rng-err' : undefined} onChange={(e) => { setFrom(e.target.value); setErr(null); }} placeholder="2026-11-01" />
+      <div className="w-[8.5rem]"><Input id="rng-from" dir="ltr" inputMode="numeric" value={from} aria-invalid={err ? true : undefined} aria-describedby={err ? 'rng-err' : undefined} onChange={(e) => { setFrom(e.target.value); setErr(null); }} placeholder="2026-11-01" /></div>
       <span className="pt-2.5 text-sm text-muted" aria-hidden="true">–</span>
       <label className="sr-only" htmlFor="rng-to">{tx('إلى', 'To')}</label>
-      <Input id="rng-to" dir="ltr" inputMode="numeric" className="w-[8.5rem]" value={to} aria-invalid={err ? true : undefined} aria-describedby={err ? 'rng-err' : undefined} onChange={(e) => { setTo(e.target.value); setErr(null); }} placeholder="2026-11-23" />
+      <div className="w-[8.5rem]"><Input id="rng-to" dir="ltr" inputMode="numeric" value={to} aria-invalid={err ? true : undefined} aria-describedby={err ? 'rng-err' : undefined} onChange={(e) => { setTo(e.target.value); setErr(null); }} placeholder="2026-11-23" /></div>
       <Button type="submit" variant="secondary">{tx('طبّق', 'Apply')}</Button>
       {err && <p id="rng-err" role="alert" className="basis-full text-xs font-medium text-red-600 dark:text-red-400">{msg(err)}</p>}
     </form>
@@ -60,7 +60,7 @@ export function PeriodBar<P extends string>({ presets, preset, range, cmp, onPre
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="max-w-full overflow-x-auto scrollbar-thin"><Segmented label={tx('الفترة', 'Period')} value={preset} onChange={onPreset} options={presets} /></div>
+        <div className="max-w-full overflow-x-auto scrollbar-thin [&_button]:whitespace-nowrap"><Segmented label={tx('الفترة', 'Period')} value={preset} onChange={onPreset} options={presets} /></div>
         {cmp && onCompare && (
           <label className="flex items-center gap-2 text-[13px] font-medium text-fg">
             <span className="shrink-0">{tx('قارن بـ', 'Compare with')}</span>

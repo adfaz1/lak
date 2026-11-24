@@ -562,7 +562,7 @@ export function createManual(
     confirmed: true, channel: 'online', fulfilments: [], refunds: [], slips: 0, settled: false, customerId: customer.id,
     discount: q.discount || undefined, placedAt: now, manual: { pay: d.pay },
     ...(d.pay === 'cod' ? { payment: { method: 'cod' as const, state: 'cod_due' as const } } : {}),
-    contact: { phone: d.customerId ? customer.phone : d.newPhone.trim(), email: (d.customerId ? customer.email : d.newEmail.trim()) || undefined },
+    contact: { phone: d.customerId ? customer.phone : normDigits(d.newPhone).replace(/[\s-]/g, ''), email: (d.customerId ? customer.email : d.newEmail.trim()) || undefined },
     address: { name: customer.name.ar, line: d.address.trim(), city, notes: d.addressNote.trim() || undefined },
     customerNote: d.customerNote.trim() || undefined,
   };

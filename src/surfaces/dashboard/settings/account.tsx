@@ -125,19 +125,19 @@ function AlertsTab() {
     <Section id="ac-a" flush title={tx('تنبيهاتي', 'My alerts')} hint={<InfoHint>{tx('تنبيهاتك أنت فقط، حسب ما يسمح به دورك. تنبيهات بريد المتجر العام في «الإشعارات».', 'Your own alerts, limited to what your role can see. The store contact email’s alerts are under Notifications.')}</InfoHint>}
       action={<span className="text-xs text-muted tabular-nums">{tx(`≈ ${sms} رسالة نصية أسبوعيًا`, `≈ ${sms} SMS a week`)}</span>}>
       <div className="scrollbar-thin overflow-x-auto">
-        <table className="w-full min-w-[420px] text-sm">
+        <table className="w-full min-w-0 text-sm">
           <caption className="sr-only">{tx('التنبيهات حسب الحدث والقناة', 'Alerts by event and channel')}</caption>
-          <thead><tr className="border-y border-border text-xs text-muted"><th scope="col" className="px-5 py-2.5 text-start font-semibold">{tx('الحدث', 'Event')}</th>{ALERT_CHANNELS.map((c) => <th key={c} scope="col" className="w-24 px-2 py-2.5 font-semibold">{ch(c)}</th>)}</tr></thead>
+          <thead><tr className="border-y border-border text-xs text-muted"><th scope="col" className="px-4 py-2.5 text-start font-semibold sm:px-5">{tx('الحدث', 'Event')}</th>{ALERT_CHANNELS.map((c) => <th key={c} scope="col" className="w-14 px-1 py-2.5 font-semibold sm:w-24 sm:px-2">{ch(c)}</th>)}</tr></thead>
           <tbody className="divide-y divide-border">
             {list.map((a, i) => (
               <tr key={a.id}>
-                <th scope="row" className="px-5 py-3 text-start font-medium text-fg">
+                <th scope="row" className="px-4 py-3 text-start font-medium text-fg sm:px-5">
                   {(i === 0 || list[i - 1].group !== a.group) && <span className="mb-0.5 block text-[11px] font-semibold uppercase tracking-wide text-subtle">{GROUP[a.group]}</span>}
                   {a.label[lang]}
                 </th>
                 {ALERT_CHANNELS.map((c) => {
                   const locked = a.locked?.includes(c);
-                  return <td key={c} className="px-2 py-3"><span className="flex justify-center"><Switch checked={prefs[a.id][c]} disabled={locked} onChange={(v) => setP(setPref(prefs, a.id, c, v))} label={`${a.label[lang]} · ${ch(c)}${locked ? tx(' (إلزامي للأمان)', ' (required for security)') : ''}`} /></span></td>;
+                  return <td key={c} className="px-1 py-3 sm:px-2"><span className="flex justify-center"><Switch checked={prefs[a.id][c]} disabled={locked} onChange={(v) => setP(setPref(prefs, a.id, c, v))} label={`${a.label[lang]} · ${ch(c)}${locked ? tx(' (إلزامي للأمان)', ' (required for security)') : ''}`} /></span></td>;
                 })}
               </tr>
             ))}

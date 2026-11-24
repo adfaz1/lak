@@ -30,7 +30,7 @@ export function PeriodFilter({ from, to, onChange }: { from: string; to: string;
   };
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="max-w-full overflow-x-auto scrollbar-thin">
+      <div className="max-w-full overflow-x-auto scrollbar-thin [&_button]:whitespace-nowrap">
         <Segmented label={tx('الفترة', 'Period')} value={value} onChange={pick}
           options={[{ value: 'all', label: tx('الكل', 'All') }, { value: 'mtd', label: tx('هذا الشهر', 'This month') }, { value: '30', label: tx('30 يومًا', '30 days') }, { value: 'custom', label: tx('مخصص', 'Custom') }]} />
       </div>

@@ -159,3 +159,9 @@ export function CatalogNav() {
   );
 }
 
+
+/** "No products" / "1 product" / "2 products" with Arabic number agreement (منتج واحد، منتجان، 3 منتجات، 11 منتجًا). */
+export function productCount(tx: (a: string, e: string) => string, n: number): string {
+  const ar = n === 0 ? 'لا منتجات' : n === 1 ? 'منتج واحد' : n === 2 ? 'منتجان' : n <= 10 ? `${n} منتجات` : `${n} منتجًا`;
+  return tx(ar, n === 1 ? '1 product' : `${n} products`);
+}

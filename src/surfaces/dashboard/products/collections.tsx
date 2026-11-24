@@ -12,9 +12,9 @@ import { categoriesStore, collectionsStore, levelsStore, productsStore } from '.
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LinkButton, ProductImage, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, DataTable, Field, Input, Modal, PageHeader, SaveBar, Select, Switch, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
-import { useUnsaved } from '../unsaved';
+import { discardUnsaved, useUnsaved } from '../unsaved';
 import { listPhoto, moveItem, stockOf } from './model';
-import { CatalogNav, ReviewTools, phref, roleBadge, useNames, useRole } from './common';
+import { CatalogNav, ReviewTools, phref, productCount, roleBadge, useNames, useRole } from './common';
 
 /** Unsaved collection edits, per collection id, kept for this session. */
 const draftsStore = createStore.key('dashboard.collectionDrafts')<Record<string, Collection>>(() => ({}));
@@ -63,7 +63,7 @@ function List() {
             {tx('اجمع منتجات يدويًا، أو بشروط تتحدّث وحدها.', 'Group products by hand, or by rules that update themselves.')}
           </EmptyState>
         ) : <DataTable label={tx('المجموعات', 'Collections')} rows={rows} columns={columns} rowKey={(c) => c.id} href={(c) => phref(`collections/${c.id}`)}
-          card={(c) => <span className="flex items-center justify-between gap-2"><span className="font-semibold text-fg">{c.name[lang]}</span><span className="flex items-center gap-2 text-xs text-muted"><Badge tone={c.kind === 'smart' ? 'brand' : 'gray'}>{c.kind === 'smart' ? tx('ذكية', 'Smart') : tx('يدوية', 'Manual')}</Badge>{tx(`${collectionMembers(c, products, stock).length} منتجات`, `${collectionMembers(c, products, stock).length} products`)}</span></span>} />}
+          card={(c) => <span className="flex items-center justify-between gap-2"><span className="font-semibold text-fg">{c.name[lang]}</span><span className="flex items-center gap-2 text-xs text-muted"><Badge tone={c.kind === 'smart' ? 'brand' : 'gray'}>{c.kind === 'smart' ? tx('ذكية', 'Smart') : tx('يدوية', 'Manual')}</Badge>{productCount(tx, collectionMembers(c, products, stock).length)}</span></span>} />}
       </Card>
       <ReviewTools />
     </div>
@@ -110,8 +110,9 @@ function Editor({ id }: { id: string }) {
     const next: Collection = { ...d, id: newId, name: { ar: d.name.ar.trim(), en: d.name.en.trim() }, version: (stored?.version ?? 0) + 1 };
     collectionsStore.set((cs) => (stored ? cs.map((c) => (c.id === newId ? next : c)) : [...cs, next]));
     clear();
-    toast({ tone: 'ok', text: tx(`حُفظت المجموعة · ${members.length} منتجات`, `Collection saved · ${members.length} products`) });
-    if (!stored) replace(phref(`collections/${newId}`));
+    toast({ tone: 'ok', text: `${tx('حُفظت المجموعة', 'Collection saved')} · ${productCount(tx, members.length)}` });
+    // Saved: nothing is unsaved any more, so the address change must not ask to leave.
+    if (!stored) { discardUnsaved(); setTimeout(() => replace(phref(`collections/${newId}`)), 0); }
     else setD(next);
   };
   const setRule = (i: number, p: Partial<Rule>) => set({ rules: d.rules.map((r, j) => (j === i ? { ...r, ...p } : r)) });

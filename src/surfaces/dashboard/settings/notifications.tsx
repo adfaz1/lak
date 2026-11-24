@@ -26,7 +26,7 @@ export default function NotificationsPage() {
       hint={<InfoHint>{tx('تصل إليك وإلى بريد التواصل في بيانات المتجر. ليست رسائل للعملاء.', 'Sent to you and the contact email in store details. These are not customer messages.')}</InfoHint>}
       action={<span className="text-xs text-muted tabular-nums">{tx(`${c.email} بريد · ${c.sms} رسائل`, `${c.email} email · ${c.sms} SMS`)}</span>}>
       <LeaveGuard dirty={dirty} />
-      <table className="w-full text-sm">
+      <table className="w-full min-w-0 text-sm">
         <caption className="sr-only">{tx('التنبيهات حسب الحدث والقناة', 'Alerts by event and channel')}</caption>
         <thead><tr className="border-y border-border text-xs text-muted"><th scope="col" className="px-5 py-2.5 text-start font-semibold">{tx('الحدث', 'Event')}</th><th scope="col" className="w-20 px-3 py-2.5 font-semibold">{tx('بريد', 'Email')}</th><th scope="col" className="w-20 px-5 py-2.5 font-semibold">{tx('رسائل', 'SMS')}</th></tr></thead>
         <tbody className="divide-y divide-border">

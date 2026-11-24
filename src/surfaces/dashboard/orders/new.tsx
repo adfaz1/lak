@@ -122,20 +122,17 @@ export default function NewOrder() {
               {q.lines.length > 0 && (
                 <ul className="divide-y divide-border rounded-xl border border-border">
                   {q.lines.map((l, i) => (
-                    <li key={l.opt.sku} className="flex flex-wrap items-center gap-3 px-3 py-3">
-                      <ProductImage src={skuPhoto(l.opt.sku)} alt={l.opt.name[lang]} size={44} />
-                      <div className="min-w-0 flex-1">
+                    <li key={l.opt.sku} className="space-y-2 px-3 py-3">
+                      <div className="flex items-start gap-3"><ProductImage src={skuPhoto(l.opt.sku)} alt={l.opt.name[lang]} size={44} /><div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-fg">{l.opt.name[lang]}{l.opt.variant && <span className="font-normal text-muted"> · {l.opt.variant[lang]}</span>}</p>
                         <p className="flex flex-wrap gap-1.5 pt-1">{LOC_IDS.map((loc) => <Badge key={loc} tone={(l.opt.avail[loc] ?? 0) ? 'sky' : 'gray'}>{LOCATIONS[loc][lang]} <b className="tabular-nums">{l.opt.avail[loc] ?? 0}</b></Badge>)}</p>
                         {l.error && tried && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">{l.error === 'stock' ? tx(`المتاح ${l.opt.total} فقط`, `Only ${l.opt.total} available`) : tx('كمية صحيحة من 1', 'A whole number from 1')}</p>}
-                      </div>
-                      <span className="inline-flex h-10 items-center overflow-hidden rounded-xl border border-border">
+                      </div><IconButton label={tx('احذف السطر', 'Remove line')} onClick={() => set({ lines: d.lines.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></IconButton></div>
+                      <div className="flex items-center justify-between gap-3 ps-14"><span className="inline-flex h-10 items-center overflow-hidden rounded-xl border border-border">
                         <IconButton label={tx('إنقاص', 'Decrease')} className="rounded-none" onClick={() => set({ lines: d.lines.map((x, j) => (j === i ? { ...x, qty: String(Math.max(1, (Number(x.qty) || 1) - 1)) } : x)) })}><Minus className="size-4" /></IconButton>
                         <input dir="ltr" inputMode="numeric" aria-label={tx(`كمية ${l.opt.name.ar}`, `Quantity of ${l.opt.name.en}`)} value={d.lines[i].qty} onChange={(e) => set({ lines: d.lines.map((x, j) => (j === i ? { ...x, qty: e.target.value } : x)) })} className="h-full w-12 border-x border-border bg-transparent text-center text-sm font-semibold tabular-nums text-fg focus:outline-none" />
                         <IconButton label={tx('زيادة', 'Increase')} className="rounded-none" onClick={() => set({ lines: d.lines.map((x, j) => (j === i ? { ...x, qty: String((Number(x.qty) || 0) + 1) } : x)) })}><Plus className="size-4" /></IconButton>
-                      </span>
-                      <Money v={l.amount} className="w-24 text-end text-sm font-semibold text-fg" />
-                      <IconButton label={tx('احذف السطر', 'Remove line')} onClick={() => set({ lines: d.lines.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></IconButton>
+                      </span><Money v={l.amount} className="text-sm font-semibold text-fg" /></div>
                     </li>
                   ))}
                 </ul>
