@@ -125,7 +125,7 @@ export const validHost = (s: string) => /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63}
 export type PolicyId = 'returns' | 'shipping' | 'privacy' | 'terms';
 export interface Policy { id: PolicyId; text: string; state: 'missing' | 'draft' | 'published' }
 export const policyFixtures = (): Policy[] => [
-  { id: 'returns', state: 'published', text: 'Returns are accepted within 7 days of delivery for unused items in original packaging.' },
+  { id: 'returns', state: 'published', text: 'Returns are accepted within 14 days of delivery for unworn items in their original condition.' },
   { id: 'shipping', state: 'draft', text: 'Orders are prepared within 2 working days.' },
   { id: 'privacy', state: 'missing', text: '' },
   { id: 'terms', state: 'missing', text: '' },
@@ -167,7 +167,7 @@ export interface ThemeState { published: ThemeVersion; draft: Section[]; history
 
 export function themeFixture(): ThemeState {
   const sections: Section[] = [
-    { id: 's1', kind: 'announcement', visible: true, heading: 'شحن مجاني للطلبات فوق 300 ر.س داخل الرياض' },
+    { id: 's1', kind: 'announcement', visible: true, heading: 'توصيل مجاني للطلبات من 300 ر.س داخل المملكة' },
     { id: 's2', kind: 'hero', visible: true, heading: 'تشكيلة العبايات المطرّزة' },
     { id: 's3', kind: 'featured', visible: true, heading: 'الأكثر مبيعًا' },
     { id: 's4', kind: 'categories', visible: true, heading: 'تسوّقي حسب الفئة' },

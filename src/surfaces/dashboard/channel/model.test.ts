@@ -8,7 +8,8 @@ import {
   submittable, toggleImpact, type Reviews,
 } from './model';
 
-const products = productFixtures();
+// The rules are tested on a catalogue where only p1 has a description, so the "needs details" paths stay covered.
+const products = productFixtures().map((p) => (p.id === 'p1' ? p : { ...p, desc: { ar: '', en: '' } }));
 const levels = initialLevels(products.flatMap(skusOf));
 const stockOf = (p: Product) => (p.type === 'digital' ? null : levels.filter((l) => skusOf(p).includes(l.sku)).reduce((s, l) => s + available(l), 0));
 const photo = (p: Product) => p.id !== 'p7' && p.id !== 'p10';
