@@ -1,313 +1,199 @@
-import { useEffect, useMemo, useState } from 'react';
-import {
-  CARRIERS, VIEWS, canFulfil, fixtures, formatMoney, isToday, issueLabel, parseWeight, search, shipmentRef,
-  subtotal, total, units, vatIncluded,
-  type CarrierId, type Lang, type Order, type View,
-} from './domain';
-import { strings, type Strings } from './i18n';
+import { useEffect, useRef, useState, type ComponentType } from 'react';
+import { link, type Route } from '../../core/router';
+import { Badge } from '../../core/ui';
+import { VIEWS } from './domain';
+import { lowStock } from './inventory';
+import { canSee, ROLES, type Page, type Role } from './perms';
+import { levelsStore, ordersStore, settingsStore, testStore } from './stores';
+import { Icon, NoAccess, ROLE_NAMES, mhref, useL, useTx, type IconName } from './kit';
+import { CommandPalette } from './palette';
+import Home from './home';
+import { OrdersPage } from './orders';
+import { ProductsPage } from './products';
+import { InventoryPage } from './inventory-page';
+import { CustomersPage } from './customers';
+import { AnalyticsPage } from './analytics';
+import { FinancePage } from './finance-page';
+import { MarketingPage } from './marketing';
+import { AutomationsPage } from './automations';
+import { StorefrontPage } from './storefront';
+import { AppsPage } from './apps';
+import { SettingsPage } from './settings';
+import { HelpPage } from './help';
+import './styles.css';
 
-/** Route lives in the hash so filters survive navigation, reload and deep links. */
-interface Route { page: 'home' | 'orders' | 'order'; ref?: string; view: View; q: string }
+export { ordersStore };
 
-function parseHash(hash: string): Route {
-  const [path, query = ''] = hash.replace(/^#/, '').split('?');
-  const params = new URLSearchParams(query);
-  const v = params.get('view') as View | null;
-  const view: View = v && v in VIEWS ? v : 'all';
-  const q = params.get('q') ?? '';
-  const parts = path.split('/').filter(Boolean);
-  if (parts[0] === 'orders') return parts[1] ? { page: 'order', ref: parts[1], view, q } : { page: 'orders', view, q };
-  return { page: 'home', view, q };
-}
+const PAGES: Record<Page, ComponentType<{ route: Route }>> = {
+  home: Home, orders: OrdersPage, products: ProductsPage, inventory: InventoryPage, customers: CustomersPage,
+  analytics: AnalyticsPage, finance: FinancePage, marketing: MarketingPage, automations: AutomationsPage,
+  storefront: StorefrontPage, apps: AppsPage, settings: SettingsPage, help: HelpPage,
+};
 
-function href(r: Partial<Route> & { page: Route['page'] }): string {
-  const params = new URLSearchParams();
-  if (r.view && r.view !== 'all') params.set('view', r.view);
-  if (r.q) params.set('q', r.q);
-  const query = params.toString() ? `?${params}` : '';
-  const path = r.page === 'home' ? '/' : r.page === 'orders' ? '/orders' : `/orders/${r.ref}`;
-  return `#${path}${query}`;
-}
+type Item = { page: Page; icon: IconName; ar: string; en: string };
+const GROUPS: { id: string; ar: string; en: string; items: Item[] }[] = [
+  { id: 'operate', ar: 'التشغيل', en: 'Operate', items: [
+    { page: 'home', icon: 'home', ar: 'الرئيسية', en: 'Home' },
+    { page: 'orders', icon: 'orders', ar: 'الطلبات', en: 'Orders' },
+    { page: 'products', icon: 'products', ar: 'المنتجات', en: 'Products' },
+    { page: 'inventory', icon: 'inventory', ar: 'المخزون', en: 'Inventory' },
+    { page: 'customers', icon: 'customers', ar: 'العملاء', en: 'Customers' },
+  ] },
+  { id: 'performance', ar: 'الأداء', en: 'Performance', items: [
+    { page: 'analytics', icon: 'analytics', ar: 'التحليلات', en: 'Analytics' },
+    { page: 'finance', icon: 'finance', ar: 'الأموال', en: 'Finance' },
+  ] },
+  { id: 'growth', ar: 'النمو', en: 'Growth', items: [
+    { page: 'marketing', icon: 'marketing', ar: 'التسويق والعروض', en: 'Marketing & offers' },
+    { page: 'automations', icon: 'automations', ar: 'الأتمتة', en: 'Automations' },
+  ] },
+  { id: 'channels', ar: 'القنوات', en: 'Channels', items: [
+    { page: 'storefront', icon: 'store', ar: 'المتجر الإلكتروني', en: 'Online store' },
+  ] },
+  { id: 'ecosystem', ar: 'المنظومة', en: 'Ecosystem', items: [
+    { page: 'apps', icon: 'apps', ar: 'التطبيقات', en: 'Apps' },
+  ] },
+];
+const FIXED: Item[] = [
+  { page: 'settings', icon: 'settings', ar: 'الإعدادات', en: 'Settings' },
+  { page: 'help', icon: 'help', ar: 'المساعدة', en: 'Help' },
+];
+const PAGE_WHAT: Record<Page, [string, string]> = {
+  home: ['الرئيسية', 'home'], orders: ['الطلبات', 'orders'], products: ['المنتجات', 'products'], inventory: ['المخزون', 'inventory'],
+  customers: ['بيانات العملاء', 'customer data'], analytics: ['التحليلات', 'analytics'], finance: ['الأموال والتسويات', 'finance and payouts'],
+  marketing: ['التسويق والعروض', 'marketing and offers'], automations: ['الأتمتة', 'automations'], storefront: ['المتجر الإلكتروني والثيمات', 'the online store and themes'],
+  apps: ['التطبيقات', 'apps'], settings: ['الإعدادات', 'settings'], help: ['المساعدة', 'help'],
+};
 
-function useRoute(): Route {
-  const [hash, setHash] = useState(window.location.hash);
+const isPage = (s: string | undefined): s is Page => !!s && s in PAGES;
+const editable = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null;
+  return !!el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName));
+};
+
+/** Merchant workspace. `route` is the path below /merchant. */
+export default function Merchant({ route }: { route: Route }) {
+  const tx = useTx();
+  const l = useL();
+  const test = testStore.use();
+  const orders = ordersStore.use();
+  const levels = levelsStore.use();
+  const settings = settingsStore.use();
+  const [menu, setMenu] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
+  const seg = route.path[0];
+  const page: Page | null = !seg ? 'home' : isPage(seg) ? seg : null;
+  const role = test.role;
+
+  useEffect(() => { setMenu(false); }, [route]);
   useEffect(() => {
-    const on = () => setHash(window.location.hash);
-    window.addEventListener('hashchange', on);
-    return () => window.removeEventListener('hashchange', on);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && !editable(e.target)) { e.preventDefault(); setPalette(true); }
+      if (e.key === 'Escape') setMenu(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, []);
-  return useMemo(() => parseHash(hash), [hash]);
-}
+  useEffect(() => { if (menu) navRef.current?.querySelector<HTMLElement>('a, button')?.focus(); }, [menu]);
 
-function readLang(): Lang {
-  try { return localStorage.getItem('lak.lang') === 'en' ? 'en' : 'ar'; } catch { return 'ar'; }
-}
-
-export function App() {
-  const [lang, setLang] = useState<Lang>(readLang);
-  const [orders, setOrders] = useState<Order[]>(fixtures);
-  const route = useRoute();
-  const t = strings[lang];
-
-  useEffect(() => {
-    document.documentElement.lang = lang;
-    document.documentElement.dir = t.dir;
-    try { localStorage.setItem('lak.lang', lang); } catch { /* preference only */ }
-  }, [lang, t.dir]);
-
-  const needs = orders.filter(VIEWS.needs).length;
-  const onOrders = route.page !== 'home';
+  const counts: Partial<Record<Page, number>> = { orders: orders.filter(VIEWS.needs).length, inventory: lowStock(levels).length };
+  const navItem = (it: Item) => (
+    <li key={it.page}>
+      <a className="m-nav-link" href={mhref(it.page === 'home' ? '' : it.page)} aria-current={page === it.page ? 'page' : undefined}>
+        <Icon name={it.icon} /><span className="grow">{tx(it.ar, it.en)}</span>
+        {counts[it.page] ? <span className="m-count"><span className="sr">{tx('بحاجة إلى انتباه:', 'needing attention:')}</span>{counts[it.page]}</span> : null}
+      </a>
+    </li>
+  );
+  const visible = (items: Item[]) => items.filter((i) => canSee(role, i.page));
+  const Body = page ? PAGES[page] : null;
 
   return (
-    <div className="shell">
-      <a className="skip" href="#main">{t.skip}</a>
-      <nav className="nav" aria-label={t.navHome}>
-        <div className="brand">
-          <bdi className="wordmark" dir="ltr">LAK | لك</bdi>
-          <span className="store">{t.store}</span>
+    <div className="m-shell">
+      {menu && <div className="m-scrim" onClick={() => setMenu(false)} aria-hidden="true" />}
+      <div className="m-navcol">
+      <nav ref={navRef} id="m-nav" className={`m-nav${menu ? ' open' : ''}`} aria-label={tx('تنقل لوحة التاجر', 'Merchant workspace')}>
+        <div className="m-store">
+          <span className="m-store-mark" aria-hidden="true">{settings.store.name.slice(0, 1)}</span>
+          <span className="grow"><span className="strong">{settings.store.name}</span><span className="muted small">{tx('متجر تجريبي · بيانات اختبار', 'Demo store · test data')}</span></span>
+          <button type="button" className="btn small m-only-mobile" onClick={() => setMenu(false)} aria-label={tx('إغلاق القائمة', 'Close menu')}><Icon name="close" /></button>
         </div>
-        <div className="nav-links">
-          <a className="nav-link" href={href({ page: 'home' })} aria-current={!onOrders ? 'page' : undefined}>{t.navHome}</a>
-          <a className="nav-link" href={href({ page: 'orders', view: route.view, q: route.q })} aria-current={onOrders ? 'page' : undefined}>
-            <span>{t.navOrders}</span><span className="count">{needs}</span>
-          </a>
+        <div className="m-nav-groups">
+          {GROUPS.map((g) => {
+            const items = visible(g.items);
+            const channels = g.id === 'channels' && canSee(role, 'storefront');
+            if (!items.length) return null;
+            return (
+              <div key={g.id} className="m-nav-group">
+                <h2 className="m-nav-h" id={`nav-${g.id}`}>{tx(g.ar, g.en)}</h2>
+                <ul aria-labelledby={`nav-${g.id}`}>
+                  {items.map(navItem)}
+                  {channels && (
+                    <>
+                      <li><a className="m-nav-link" href={link('/market')}><Icon name="market" /><span className="grow">{tx('سوق لك', 'LAK marketplace')}</span><Icon name="external" size={16} /><span className="sr">{tx('(واجهة أخرى)', '(another surface)')}</span></a></li>
+                      <li><a className="m-nav-link" href={link('/appmaker')}><Icon name="app" /><span className="grow">{tx('صانع التطبيقات', 'App Maker')}</span><Icon name="external" size={16} /><span className="sr">{tx('(واجهة أخرى)', '(another surface)')}</span></a></li>
+                    </>
+                  )}
+                </ul>
+              </div>
+            );
+          })}
         </div>
-        <p className="nav-note">{t.navLater}</p>
-        <button type="button" className="btn" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>{t.switchLang}</button>
+        <ul className="m-nav-fixed">{visible(FIXED).map(navItem)}</ul>
+        {role !== 'owner' && <p className="nav-note">{tx(`بعض الأقسام مخفية لأن دورك «${ROLE_NAMES[role].ar}».`, `Some sections are hidden for the “${ROLE_NAMES[role].en}” role.`)}</p>}
       </nav>
+      </div>
 
-      <main id="main" className="main" tabIndex={-1}>
-        <div className="demo-bar">
-          <span className="tag">{t.demo}</span>
-          <span className="grow">{t.demoNote}</span>
-          <button type="button" className="btn" onClick={() => setOrders(fixtures())}>{t.reset}</button>
+      <div className="m-main">
+        <div className="m-top">
+          <button type="button" className="btn m-only-mobile" aria-expanded={menu} aria-controls="m-nav" onClick={() => setMenu(true)}>
+            <Icon name="menu" /><span className="m-hide-xs">{tx('القائمة', 'Menu')}</span>
+          </button>
+          <button type="button" className="m-search-btn" onClick={() => setPalette(true)} aria-keyshortcuts="Control+K Meta+K">
+            <Icon name="search" /><span className="grow">{tx('ابحث أو اختر أمرًا', 'Search or run a command')}</span><kbd dir="ltr">Ctrl K</kbd>
+          </button>
+          <a className="btn small" href={link('/store')}><Icon name="external" size={16} /><span className="m-hide-xs">{tx('معاينة المتجر', 'Preview store')}</span></a>
+          <button type="button" className="btn small" aria-expanded={test.open} aria-controls="m-test" onClick={() => testStore.set((s) => ({ ...s, open: !s.open }))}>
+            <Icon name="flask" size={16} /><span className="m-hide-xs">{tx('لوحة الاختبار', 'Test panel')}</span>
+          </button>
+          <Badge tone="info">{l(ROLE_NAMES[role])}</Badge>
         </div>
-        {route.page === 'home' && <Home t={t} lang={lang} orders={orders} />}
-        {route.page === 'orders' && <Orders t={t} lang={lang} orders={orders} route={route} />}
-        {route.page === 'order' && (
-          <OrderDetail key={route.ref} t={t} lang={lang} route={route} order={orders.find((o) => o.ref === route.ref)}
-            onChange={(next) => setOrders((all) => all.map((o) => (o.ref === next.ref ? next : o)))} />
-        )}
-      </main>
+        {test.open && <TestPanel />}
+        <div className="m-content">
+          {!page || !Body ? (
+            <section className="card"><div className="card-body"><h1>{tx('لا توجد صفحة بهذا الرابط', 'No page at this address')}</h1><a className="btn" href={mhref('')}>{tx('العودة إلى الرئيسية', 'Back to home')}</a></div></section>
+          ) : canSee(role, page) ? <Body route={route} /> : <NoAccess what={tx(PAGE_WHAT[page][0], PAGE_WHAT[page][1])} />}
+        </div>
+      </div>
+      {palette && <CommandPalette onClose={() => setPalette(false)} />}
     </div>
   );
 }
 
-interface PageProps { t: Strings; lang: Lang }
-const Money = ({ v, t }: { v: number; t: Strings }) => <span className="money"><bdi>{formatMoney(v)}</bdi> {t.sar}</span>;
-const Ref = ({ r }: { r: string }) => <bdi dir="ltr">#{r}</bdi>;
-
-function Home({ t, orders }: PageProps & { orders: Order[] }) {
-  const today = orders.filter(isToday);
-  const needs = orders.filter(VIEWS.needs);
-  const failed = orders.filter(VIEWS.payfail);
-  const paidToday = today.filter((o) => o.pay === 'paid').reduce((sum, o) => sum + total(o), 0);
-  const oldest = needs.reduce((max, o) => Math.max(max, o.hoursAgo), 0);
+function TestPanel() {
+  const tx = useTx();
+  const l = useL();
+  const t = testStore.use();
+  const set = (p: Partial<typeof t>) => testStore.set((s) => ({ ...s, ...p }));
   return (
-    <>
-      <header>
-        <h1>{t.homeTitle}</h1>
-        <p className="muted">{t.homeContext}</p>
-      </header>
-      <section className="metrics" aria-label={t.homeTitle}>
-        <div className="card metric"><span className="muted">{t.mSales}</span><strong><Money v={paidToday} t={t} /></strong><small>{t.mSalesDef}</small></div>
-        <div className="card metric"><span className="muted">{t.mOrders}</span><strong>{today.length}</strong><small>{t.mOrdersDef}</small></div>
-        <div className="card metric"><span className="muted">{t.mNeeds}</span><strong>{needs.length}</strong><small>{t.mNeedsDef}</small></div>
-      </section>
-      <section className="card" aria-labelledby="queue-h">
-        <h2 id="queue-h" className="card-head">{t.queue}</h2>
-        <ul className="queue">
-          {needs.length > 0 ? (
-            <li><b className="n">{needs.length}</b><div className="grow"><div className="strong">{t.qNeeds}</div><div className="muted small">{t.qNeedsWhy(t.age(oldest))}</div></div>
-              <a className="btn primary" href={href({ page: 'orders', view: 'needs' })}>{t.qNeedsCta}</a></li>
-          ) : (
-            <li><b className="n">0</b><div className="grow"><div className="strong">{t.qClear}</div><div className="muted small">{t.qClearWhy}</div></div></li>
-          )}
-          {failed.length > 0 && (
-            <li><b className="n">{failed.length}</b><div className="grow"><div className="strong">{t.qFail}</div><div className="muted small">{t.qFailWhy}</div></div>
-              <a className="btn primary" href={href({ page: 'orders', view: 'payfail' })}>{t.qFailCta}</a></li>
-          )}
-          <li><b className="n">2</b><div className="grow"><div className="strong">{t.qStock}</div><div className="muted small">{t.qStockWhy}</div></div>
-            <span className="muted small">{t.qStockCta}</span></li>
-        </ul>
-      </section>
-    </>
-  );
-}
-
-function Orders({ t, lang, orders, route }: PageProps & { orders: Order[]; route: Route }) {
-  const rows = search(orders, route.view, route.q);
-  // Typing must not add a history entry per keystroke, so replace the URL and notify the router.
-  const setQ = (q: string) => {
-    window.history.replaceState(null, '', href({ page: 'orders', view: route.view, q }));
-    window.dispatchEvent(new HashChangeEvent('hashchange'));
-  };
-  return (
-    <>
-      <h1>{t.ordersTitle}</h1>
-      <div className="toolbar">
-        <div className="views" role="group" aria-label={t.viewsLabel}>
-          {(Object.keys(VIEWS) as View[]).map((v) => (
-            <a key={v} className="chip" href={href({ page: 'orders', view: v, q: route.q })} aria-current={route.view === v ? 'true' : undefined}>
-              {t.views[v]} · {orders.filter(VIEWS[v]).length}
-            </a>
-          ))}
+    <section id="m-test" className="m-test" aria-labelledby="m-test-h">
+      <h2 id="m-test-h" className="small">{tx('لوحة الاختبار — أدوات محاكاة وليست جزءًا من منتج التاجر', 'Test panel — simulation controls, not part of the merchant product')}</h2>
+      <div className="m-test-row">
+        <div className="field">
+          <label htmlFor="t-role">{tx('الدور الحالي', 'Current role')}</label>
+          <select id="t-role" className="input" value={t.role} onChange={(e) => set({ role: e.target.value as Role })}>
+            {ROLES.map((r) => <option key={r} value={r}>{l(ROLE_NAMES[r])}</option>)}
+          </select>
         </div>
-        <input className="input search" type="search" aria-label={t.searchLabel} placeholder={t.searchPh} value={route.q} onChange={(e) => setQ(e.target.value)} />
+        <fieldset className="m-inline-radios">
+          <legend>{tx('الرئيسية', 'Home')}</legend>
+          <label className="check"><input type="radio" name="t-mode" checked={t.mode === 'active'} onChange={() => set({ mode: 'active' })} /> {tx('متجر نشط', 'Active store')}</label>
+          <label className="check"><input type="radio" name="t-mode" checked={t.mode === 'new'} onChange={() => set({ mode: 'new' })} /> {tx('متجر جديد (قائمة الإعداد)', 'New store (setup checklist)')}</label>
+        </fieldset>
+        <label className="check"><input type="checkbox" checked={t.failBulk} onChange={(e) => set({ failBulk: e.target.checked })} /> {tx('حاكِ فشل بعض الطلبات في الإجراء الجماعي', 'Simulate some orders failing in bulk actions')}</label>
       </div>
-      <div className="card table-wrap">
-        <table>
-          <thead>
-            <tr><th scope="col">{t.cRef}</th><th scope="col">{t.cCustomer}</th><th scope="col">{t.cPay}</th><th scope="col">{t.cFul}</th><th scope="col">{t.cShip}</th><th scope="col" className="end">{t.cTotal}</th><th scope="col"><span className="sr">{t.cAction}</span></th></tr>
-          </thead>
-          <tbody>
-            {rows.map((o) => (
-              <tr key={o.ref}>
-                <td><span className="strong"><Ref r={o.ref} /></span><div className="muted small">{t.age(o.hoursAgo)}</div></td>
-                <td>{o.customer[lang]}<div className="muted small">{o.city[lang]}</div></td>
-                <td><span className={`status ${o.pay}`}>{t.pay[o.pay]}</span></td>
-                <td>{t.ful[o.ful]}</td>
-                <td>{t.ship[o.ship]}</td>
-                <td className="end strong"><Money v={total(o)} t={t} /></td>
-                <td className="end"><a className="btn" href={href({ page: 'order', ref: o.ref, view: route.view, q: route.q })} aria-label={t.openOrder(`#${o.ref}`)}>{t.open}</a></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <div className="empty"><span>{t.noRows}</span><a className="btn" href={href({ page: 'orders' })}>{t.clear}</a></div>
-        )}
-      </div>
-      <p className="muted small" role="status">{t.rowsNote(rows.length, orders.length)}</p>
-    </>
-  );
-}
-
-type Step = 'idle' | 'form' | 'review' | 'done';
-
-function OrderDetail({ t, lang, route, order, onChange }: PageProps & { route: Route; order?: Order; onChange: (o: Order) => void }) {
-  const [step, setStep] = useState<Step>('idle');
-  const [carrier, setCarrier] = useState<CarrierId>('a');
-  const [weight, setWeight] = useState('1.0');
-  const [weightErr, setWeightErr] = useState(false);
-  const [simFail, setSimFail] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const backHref = href({ page: 'orders', view: route.view, q: route.q });
-  const back = <a className="back" href={backHref}>{t.dir === 'rtl' ? '→' : '←'} {t.back(t.views[route.view])}</a>;
-
-  if (!order) return <>{back}<p role="alert">{t.notFound}</p></>;
-
-  const eligible = canFulfil(order);
-  const ref = shipmentRef(order);
-  const c = CARRIERS[carrier];
-
-  const issue = () => {
-    const next = issueLabel(order, carrier, simFail);
-    onChange(next);
-    if (next.ship === 'label') { setFailed(false); setStep('done'); } else { setFailed(true); setSimFail(false); }
-  };
-  const toReview = () => {
-    if (parseWeight(weight) === null) setWeightErr(true); else { setWeightErr(false); setStep('review'); }
-  };
-
-  return (
-    <>
-      {back}
-      <div className="title-row">
-        <h1>{t.order} <Ref r={order.ref} /></h1>
-        <span className="pill">{t.cPay}: <b>{t.pay[order.pay]}</b></span>
-        <span className="pill">{t.cFul}: <b>{t.ful[order.ful]}</b></span>
-        <span className="pill">{t.cShip}: <b>{t.ship[order.ship]}</b></span>
-      </div>
-      <div className="cols">
-        <div className="col-main">
-          <section className="card pad" aria-labelledby="next-h">
-            <h2 id="next-h">{t.next}</h2>
-            <p>{order.pay === 'failed' ? t.nextPayFailed : eligible ? t.nextReady : t.nextNone}</p>
-
-            {eligible && step === 'idle' && <button type="button" className="btn primary" onClick={() => setStep('form')}>{t.start}</button>}
-
-            {eligible && step === 'form' && (
-              <div className="flow">
-                <fieldset>
-                  <legend>{t.carrier}</legend>
-                  {(Object.keys(CARRIERS) as CarrierId[]).map((id) => (
-                    <label key={id} className="radio">
-                      <input type="radio" name="carrier" checked={carrier === id} onChange={() => setCarrier(id)} />
-                      <span className="grow strong">{CARRIERS[id].name[lang]}</span>
-                      <span><Money v={CARRIERS[id].price} t={t} /> · {t.estimated}</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <div className="field">
-                  <label htmlFor="weight">{t.weight}</label>
-                  <input id="weight" className="input" inputMode="decimal" dir="ltr" value={weight} aria-invalid={weightErr} aria-describedby={weightErr ? 'weight-err' : undefined}
-                    onChange={(e) => { setWeight(e.target.value); setWeightErr(false); }} />
-                  {weightErr && <span id="weight-err" className="error" role="alert">{t.weightErr}</span>}
-                </div>
-                <div className="actions">
-                  <button type="button" className="btn primary" onClick={toReview}>{t.review}</button>
-                  <button type="button" className="btn" onClick={() => { setStep('idle'); setFailed(false); }}>{t.cancel}</button>
-                </div>
-              </div>
-            )}
-
-            {eligible && step === 'review' && (
-              <div className="flow">
-                <p>{t.reviewText(units(order), c.name[lang], weight, formatMoney(c.price))}</p>
-                {failed && <div className="alert" role="alert"><b>{t.failTitle}</b> {t.failBody} <bdi dir="ltr">{ref}</bdi></div>}
-                <label className="check"><input type="checkbox" checked={simFail} onChange={(e) => setSimFail(e.target.checked)} /> {t.simFail}</label>
-                <div className="actions">
-                  <button type="button" className="btn primary" onClick={issue}>{failed ? t.retry : t.issue}</button>
-                  <button type="button" className="btn" onClick={() => setStep('form')}>{t.edit}</button>
-                </div>
-              </div>
-            )}
-
-            {step === 'done' && (
-              <div className="flow" role="status">
-                <p><b>{t.doneTitle}</b> {t.doneBody} <bdi dir="ltr">{ref}</bdi></p>
-                <a className="btn" href={href({ page: 'home' })}>{t.toHome}</a>
-              </div>
-            )}
-          </section>
-
-          <section className="card pad" aria-labelledby="items-h">
-            <h2 id="items-h">{t.items}</h2>
-            <ul className="lines">
-              {order.items.map((i) => (
-                <li key={i.name.en}><span className="grow">{i.name[lang]}</span><span className="muted">× {i.qty}</span><span className="strong amount"><Money v={i.qty * i.unit} t={t} /></span></li>
-              ))}
-            </ul>
-          </section>
-
-          <section className="card pad" aria-labelledby="log-h">
-            <h2 id="log-h">{t.activity}</h2>
-            <ol className="log">
-              {order.log.map((e, n) => (
-                <li key={n}><span className="muted when">{e.when === 'now' ? t.whenNow : t.whenEarlier} · {e.who === 'you' ? t.whoYou : t.whoSystem}</span><span className="grow">{t.log(e, e.carrier ? CARRIERS[e.carrier].name[lang] : '')}</span></li>
-              ))}
-            </ol>
-          </section>
-        </div>
-
-        <aside className="col-side">
-          <section className="card pad" aria-labelledby="cust-h">
-            <h2 id="cust-h">{t.customer}</h2>
-            <div className="strong">{order.customer[lang]}</div>
-            <div className="muted">{order.city[lang]}</div>
-          </section>
-          <section className="card pad" aria-labelledby="amt-h">
-            <h2 id="amt-h">{t.amount}</h2>
-            <dl className="breakdown">
-              <div><dt>{t.sub}</dt><dd><Money v={subtotal(order)} t={t} /></dd></div>
-              <div><dt>{t.fee}</dt><dd><Money v={order.fee} t={t} /></dd></div>
-              <div className="sum"><dt>{t.total}</dt><dd><Money v={total(order)} t={t} /></dd></div>
-              <div className="muted small"><dt>{t.vat}</dt><dd><Money v={vatIncluded(order)} t={t} /></dd></div>
-            </dl>
-          </section>
-        </aside>
-      </div>
-    </>
+      <p className="small muted">{tx('الدور يقيّد الصفحات والأفعال في هذه المعاينة فقط. في المنصة الحقيقية يجب أن يُفرض المنع على الخادم.', 'The role restricts pages and actions in this preview only. The real platform must enforce it on the server.')}</p>
+    </section>
   );
 }

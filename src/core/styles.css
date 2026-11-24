@@ -66,7 +66,7 @@ ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; list-style: none; }
 .muted { color: var(--muted); }
 .small, small { font-size: 13px; }
 .end { text-align: end; }
-.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .money { white-space: nowrap; }
 
 .btn { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 16px; border: 1px solid var(--control-border); border-radius: var(--r-control); background: var(--surface); color: var(--text); font: inherit; font-size: 14px; font-weight: 600; text-decoration: none; cursor: pointer; }
@@ -101,7 +101,7 @@ ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; list-style: none; }
 .input[aria-invalid='true'] { border-color: var(--danger); }
 .search { flex: 0 1 260px; }
 
-.table-wrap { overflow-x: auto; }
+.table-wrap { position: relative; overflow-x: auto; max-width: 100%; align-self: stretch; }
 table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: 14px; }
 th { padding: 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-weight: 600; text-align: start; }
 td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
@@ -171,7 +171,7 @@ main:focus { outline: none; }
 /* Kit */
 .page-header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
 .page-header .grow { flex-basis: 280px; }
-.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--r-control); background: var(--canvas); border: 1px solid var(--border); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--r-control); background: var(--canvas); border: 1px solid var(--border); font-size: 13px; font-weight: 600; max-width: 100%; }
 .badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .badge.success { background: var(--success-tint); border-color: transparent; } .badge.success::before { background: var(--success); }
 .badge.warning { background: var(--warning-tint); border-color: transparent; } .badge.warning::before { background: var(--warning); border-radius: 0; transform: rotate(45deg); }
@@ -190,3 +190,23 @@ select.input { padding-inline-end: 28px; }
 .dialog-body { display: flex; flex-direction: column; gap: 10px; }
 .save-bar { position: sticky; bottom: 12px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-radius: var(--r-surface); background: var(--ink); color: #fff; }
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
+
+/* Direction B (for comparison with the default direction A, skill ch. 02):
+   a narrower dark navigation, light content, and a strong context band that separates
+   "where am I / which store" from the work area. Toggled from the top bar; A stays the default. */
+[data-direction='b'] .m-shell { grid-template-columns: 216px minmax(0, 1fr); }
+[data-direction='b'] .m-nav { background: var(--ink); color: #fff; padding-inline: 10px; }
+[data-direction='b'] .m-store { border-color: rgba(255, 255, 255, 0.14); }
+[data-direction='b'] .m-store .muted, [data-direction='b'] .m-nav-h, [data-direction='b'] .m-nav .nav-note { color: #b9bfdd; }
+[data-direction='b'] .m-store-mark { background: var(--logo-cyan); color: var(--ink); }
+[data-direction='b'] .m-nav-link { color: #e4e7f6; font-size: 13.5px; }
+[data-direction='b'] .m-nav-link .m-icon { color: #b9bfdd; }
+[data-direction='b'] .m-nav-link:hover { background: rgba(255, 255, 255, 0.08); }
+[data-direction='b'] .m-nav-link[aria-current] { background: #fff; color: var(--ink); }
+[data-direction='b'] .m-nav-link[aria-current] .m-icon { color: var(--brand); }
+[data-direction='b'] .m-count { background: transparent; border-color: rgba(255, 255, 255, 0.3); color: #fff; }
+[data-direction='b'] .m-nav-link[aria-current] .m-count { border-color: var(--border); color: var(--ink); }
+[data-direction='b'] .m-nav-fixed { border-color: rgba(255, 255, 255, 0.14); }
+[data-direction='b'] .m-top { background: var(--surface); padding-block: 14px; box-shadow: 0 1px 0 var(--border); }
+[data-direction='b'] .m-main .page-header { padding: 20px 24px; margin: 0 -4px; border-radius: var(--r-surface); background: var(--brand-tint); }
+[data-direction='b'] .m-main .card { border-color: transparent; box-shadow: 0 1px 2px rgba(22, 27, 69, 0.08); }

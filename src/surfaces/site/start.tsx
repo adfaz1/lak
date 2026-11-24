@@ -57,7 +57,7 @@ const C = {
 
 const EMPTY: SignupDraft = { storeName: '', activity: '', phone: '', plan: '', terms: false };
 /** Simulated sign-up; the draft survives visiting the terms page and coming back. */
-const startStore = createStore<{ draft: SignupDraft; created: boolean }>(() => ({ draft: EMPTY, created: false }));
+const startStore = createStore.key('site.startStore')<{ draft: SignupDraft; created: boolean }>(() => ({ draft: EMPTY, created: false }));
 
 export default function Start({ route }: { route: Route }) {
   const { lang, t, tr } = useSite();

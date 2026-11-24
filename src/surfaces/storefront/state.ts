@@ -7,14 +7,14 @@ import {
 
 const sid = () => Math.random().toString(36).slice(2, 10);
 
-export const catalogStore = createStore<Product[]>(catalogue);
-export const cartStore = createStore<Cart>(() => ({ lines: [] }));
+export const catalogStore = createStore.key('storefront.catalogStore')<Product[]>(catalogue);
+export const cartStore = createStore.key('storefront.cartStore')<Cart>(() => ({ lines: [] }));
 
 export interface SavedAddress extends Address { id: string; label: string }
 export const CUSTOMER = { id: 'c-1001', name: { ar: 'سارة الحربي', en: 'Sara Alharbi' }, phone: '501234567', email: 'sara@example.com' };
 
 export interface Account { signedIn: boolean; addresses: SavedAddress[]; defaultId?: string; wishlist: string[] }
-export const accountStore = createStore<Account>(() => ({
+export const accountStore = createStore.key('storefront.accountStore')<Account>(() => ({
   signedIn: false,
   wishlist: ['satin-dress'],
   defaultId: 'a1',
@@ -38,10 +38,10 @@ export interface CheckoutState {
   notice?: { kind: 'declined' | 'challenge' | 'verify_failed'; ref: string };
 }
 const freshCheckout = (): CheckoutState => ({ sessionId: sid(), mode: 'guest', email: '', addr: {}, ship: 'standard', method: 'card', gift: false, giftMsg: '' });
-export const checkoutStore = createStore<CheckoutState>(freshCheckout);
+export const checkoutStore = createStore.key('storefront.checkoutStore')<CheckoutState>(freshCheckout);
 
 export interface TestState { open: boolean; applePay: boolean; outcome: Outcome; verify: 'paid' | 'failed' | 'unknown' }
-export const testStore = createStore<TestState>(() => ({ open: false, applePay: false, outcome: 'success', verify: 'paid' }));
+export const testStore = createStore.key('storefront.testStore')<TestState>(() => ({ open: false, applePay: false, outcome: 'success', verify: 'paid' }));
 
 /** Past orders for the test customer, so tracking, returns and the COD limit have something real to work on. */
 function pastOrders(): Order[] {
@@ -65,7 +65,7 @@ function pastOrders(): Order[] {
     mk('DN-24741', [['shirt-dress~ivory-M', 1]], 44, 'card', { deliveredAt: now - 41 * DAY, received: true, trackingNo: 'TRK24741SA' }),
   ];
 }
-export const ordersStore = createStore<Order[]>(pastOrders);
+export const ordersStore = createStore.key('storefront.ordersStore')<Order[]>(pastOrders);
 
 /* ───────────── Actions ───────────── */
 

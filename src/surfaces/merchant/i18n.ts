@@ -1,4 +1,4 @@
-import type { Ful, Lang, LogEntry, Pay, Ship, View } from './domain';
+import { formatMoney, type Ful, type Lang, type LogEntry, type Pay, type Ship, type View } from './domain';
 
 const ar = {
   dir: 'rtl' as 'rtl' | 'ltr',
@@ -34,7 +34,7 @@ const ar = {
   qClearWhy: 'جُهّزت كل الطلبات المدفوعة.',
   ordersTitle: 'الطلبات',
   viewsLabel: 'عروض الطلبات',
-  views: { all: 'الكل', needs: 'يحتاج تجهيزًا', payfail: 'تعثر الدفع', shipped: 'له شحنة' } as Record<View, string>,
+  views: { all: 'الكل', needs: 'يحتاج تجهيزًا', late: 'متأخر', payfail: 'تعثر الدفع', shipped: 'له شحنة', returns: 'مرتجعات واستردادات' } as Record<View, string>,
   searchLabel: 'بحث بالمرجع أو اسم العميل',
   searchPh: 'ابحث بالمرجع أو العميل',
   cRef: 'المرجع', cCustomer: 'العميل', cPay: 'الدفع', cFul: 'التجهيز', cShip: 'الشحنة', cTotal: 'الإجمالي', cAction: 'إجراء',
@@ -46,8 +46,8 @@ const ar = {
   back: (view: string) => `العودة إلى الطلبات (${view})`,
   order: 'طلب',
   notFound: 'لا يوجد طلب بهذا المرجع في البيانات التجريبية.',
-  pay: { paid: 'مدفوع', failed: 'فشل الدفع' } as Record<Pay, string>,
-  ful: { none: 'لم يبدأ', done: 'مكتمل' } as Record<Ful, string>,
+  pay: { paid: 'مدفوع', failed: 'فشل الدفع', partially_refunded: 'مسترد جزئيًا', refunded: 'مسترد بالكامل' } as Record<Pay, string>,
+  ful: { none: 'لم يبدأ', partial: 'جزئي', done: 'مكتمل' } as Record<Ful, string>,
   ship: { none: 'لا توجد شحنة', label: 'صدر الملصق', transit: 'في الطريق', delivered: 'تم التسليم' } as Record<Ship, string>,
   next: 'الإجراء التالي',
   nextPayFailed: 'الدفع لم يتأكد. لا يمكن تجهيز الطلب قبل نجاح الدفع؛ التحصيل وإعادة المحاولة خارج هذه الزيادة.',
@@ -84,6 +84,13 @@ const ar = {
       payFailed: 'أُنشئ الطلب. محاولة الدفع فشلت لدى المزوّد.',
       labelIssued: `صدر ملصق الشحن عبر ${carrier} (محاكاة). المرجع ${e.ref}`,
       labelFailed: `تعذر إصدار الملصق: الناقل لم يستجب (محاكاة). المرجع ${e.ref}`,
+      confirmed: 'أُكّد الطلب ضمن إجراء جماعي.',
+      slipPrinted: 'طُبعت قائمة التعبئة (محاكاة).',
+      partialFulfilled: `جُهّزت ${e.units} قطعة من ${e.loc === 'jed' ? 'مستودع جدة' : 'مستودع الرياض'} وصدر ملصق (محاكاة). المرجع ${e.ref}`,
+      refundRequested: `طُلب استرداد ${formatMoney(e.amount ?? 0)} ر.س من مزود الدفع (محاكاة). المرجع ${e.ref}. بانتظار التأكيد.`,
+      refundConfirmed: `أكد مزود الدفع الاسترداد ${e.ref} (محاكاة).`,
+      refundFailed: `رفض مزود الدفع الاسترداد ${e.ref} (محاكاة). لم يُخصم أي مبلغ.`,
+      restocked: `أُعيدت ${e.units} قطعة إلى المخزون في ${e.loc === 'jed' ? 'مستودع جدة' : 'مستودع الرياض'}.`,
     })[e.kind],
 };
 
@@ -121,7 +128,7 @@ const en: typeof ar = {
   qClearWhy: 'Every paid order has been fulfilled.',
   ordersTitle: 'Orders',
   viewsLabel: 'Order views',
-  views: { all: 'All', needs: 'Needs fulfilment', payfail: 'Payment failed', shipped: 'Has shipment' },
+  views: { all: 'All', needs: 'Needs fulfilment', late: 'Late', payfail: 'Payment failed', shipped: 'Has shipment', returns: 'Returns & refunds' },
   searchLabel: 'Search by reference or customer name',
   searchPh: 'Search reference or customer',
   cRef: 'Reference', cCustomer: 'Customer', cPay: 'Payment', cFul: 'Fulfilment', cShip: 'Shipment', cTotal: 'Total', cAction: 'Action',
@@ -133,8 +140,8 @@ const en: typeof ar = {
   back: (view) => `Back to orders (${view})`,
   order: 'Order',
   notFound: 'No order with this reference in the demo data.',
-  pay: { paid: 'Paid', failed: 'Payment failed' },
-  ful: { none: 'Not started', done: 'Complete' },
+  pay: { paid: 'Paid', failed: 'Payment failed', partially_refunded: 'Partially refunded', refunded: 'Refunded' },
+  ful: { none: 'Not started', partial: 'Partial', done: 'Complete' },
   ship: { none: 'No shipment', label: 'Label issued', transit: 'In transit', delivered: 'Delivered' },
   next: 'Next action',
   nextPayFailed: 'Payment is not confirmed. The order cannot be fulfilled before payment succeeds; collection and retry are outside this increment.',
@@ -171,6 +178,13 @@ const en: typeof ar = {
       payFailed: 'Order created. The payment attempt failed at the provider.',
       labelIssued: `Shipping label issued via ${carrier} (simulated). Reference ${e.ref}`,
       labelFailed: `Label could not be issued: carrier did not respond (simulated). Reference ${e.ref}`,
+      confirmed: 'Order confirmed in a bulk action.',
+      slipPrinted: 'Packing slip printed (simulated).',
+      partialFulfilled: `${e.units} item(s) fulfilled from the ${e.loc === 'jed' ? 'Jeddah' : 'Riyadh'} warehouse and a label issued (simulated). Reference ${e.ref}`,
+      refundRequested: `Refund of SAR ${formatMoney(e.amount ?? 0)} requested from the payment provider (simulated). Reference ${e.ref}. Awaiting confirmation.`,
+      refundConfirmed: `The payment provider confirmed refund ${e.ref} (simulated).`,
+      refundFailed: `The payment provider declined refund ${e.ref} (simulated). Nothing was deducted.`,
+      restocked: `${e.units} item(s) returned to stock at the ${e.loc === 'jed' ? 'Jeddah' : 'Riyadh'} warehouse.`,
     })[e.kind],
 };
 

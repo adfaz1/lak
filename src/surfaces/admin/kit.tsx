@@ -25,7 +25,7 @@ export const pct = (bp: number) => `${(bp / 100).toFixed(2)}%`;
 
 /* ---------- Flash: a persistent status line for the last action's outcome ---------- */
 
-export const flashStore = createStore<{ msg: string; at: string } | null>(() => null);
+export const flashStore = createStore.key('admin.flashStore')<{ msg: string; at: string } | null>(() => null);
 /** Path below /admin, e.g. "stores/s-1001". A flash shows only on the page it belongs to. */
 export const adminKey = () => parse(window.location.hash).path.slice(1).join('/');
 export const flash = (msg: string, at: string = adminKey()) => flashStore.set({ msg, at });

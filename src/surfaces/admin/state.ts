@@ -12,20 +12,20 @@ import { DELIVERY_STATE, DISPUTE_STATE, MOD_ACTION, ROLE_LABEL } from './i18n';
 
 /* Session-only fixture state. Nothing here reaches the live platform; resets with the global "Reset data". */
 
-export const roleStore = createStore<RoleId>(() => 'owner');
-export const storesStore = createStore(storeFixtures);
-export const kycStore = createStore(applicationFixtures);
-export const changesStore = createStore<PlanChange[]>(() => []);
-export const accessStore = createStore<AccessSession[]>(() => []);
-export const disputesStore = createStore(disputeFixtures);
-export const ledgerStore = createStore(ledgerFixtures);
-export const carriersStore = createStore(carrierFixtures);
-export const deliveriesStore = createStore(deliveryFixtures);
-export const contentStore = createStore(submissionFixtures);
-export const announcementsStore = createStore(announcementFixtures);
-export const revenueStore = createStore(revenueFixture);
-export const auditStore = createStore<AuditEntry[]>(() => []);
-export const draftStore = createStore<AnnouncementDraft>(() => emptyDraft());
+export const roleStore = createStore.key('admin.roleStore')<RoleId>(() => 'owner');
+export const storesStore = createStore.key('admin.storesStore')(storeFixtures);
+export const kycStore = createStore.key('admin.kycStore')(applicationFixtures);
+export const changesStore = createStore.key('admin.changesStore')<PlanChange[]>(() => []);
+export const accessStore = createStore.key('admin.accessStore')<AccessSession[]>(() => []);
+export const disputesStore = createStore.key('admin.disputesStore')(disputeFixtures);
+export const ledgerStore = createStore.key('admin.ledgerStore')(ledgerFixtures);
+export const carriersStore = createStore.key('admin.carriersStore')(carrierFixtures);
+export const deliveriesStore = createStore.key('admin.deliveriesStore')(deliveryFixtures);
+export const contentStore = createStore.key('admin.contentStore')(submissionFixtures);
+export const announcementsStore = createStore.key('admin.announcementsStore')(announcementFixtures);
+export const revenueStore = createStore.key('admin.revenueStore')(revenueFixture);
+export const auditStore = createStore.key('admin.auditStore')<AuditEntry[]>(() => []);
+export const draftStore = createStore.key('admin.draftStore')<AnnouncementDraft>(() => emptyDraft());
 
 export function emptyDraft(): AnnouncementDraft {
   return { kind: 'update', title: { ar: '', en: '' }, body: { ar: '', en: '' }, audience: { type: 'all', plans: [], storeIds: [] }, at: '', windowEnd: '' };

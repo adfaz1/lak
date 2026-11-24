@@ -65,7 +65,7 @@ const C = {
 
 const EMPTY: ContactDraft = { name: '', email: '', phone: '', topic: '', message: '' };
 /** Draft and sent state survive navigating away and back (simulated, per session). */
-const contactStore = createStore<{ draft: ContactDraft; sent: number; lastRef: string | null }>(() => ({ draft: EMPTY, sent: 0, lastRef: null }));
+const contactStore = createStore.key('site.contactStore')<{ draft: ContactDraft; sent: number; lastRef: string | null }>(() => ({ draft: EMPTY, sent: 0, lastRef: null }));
 
 export function Contact({ route }: { route: Route }) {
   const { lang, t, tr } = useSite();

@@ -66,7 +66,7 @@ export function Stories() {
 }
 
 /** Ticked guide tasks. Simulated, per session. */
-const guideStore = createStore<Record<string, boolean>>(() => ({}));
+const guideStore = createStore.key('site.guideStore')<Record<string, boolean>>(() => ({}));
 
 export function Guide({ route }: { route: Route }) {
   const { lang, tr } = useSite();

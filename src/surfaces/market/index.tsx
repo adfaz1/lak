@@ -18,7 +18,7 @@ import './styles.css';
 interface Ticket { ref: string; topic: string; order: string; at: string }
 interface MState { cart: Line[]; orders: Order[]; notes: Note[]; tickets: Ticket[]; listing: ListingItem[]; verified: boolean; seq: number }
 
-export const marketStore = createStore<MState>(() => ({
+export const marketStore = createStore.key('market.marketStore')<MState>(() => ({
   cart: [], orders: initialOrders(), notes: initialNotes(), tickets: [], listing: initialListing(), verified: true, seq: 1,
 }));
 
@@ -207,6 +207,7 @@ function Discover(ctx: Ctx) {
 
   return (
     <>
+      <h1 className="sr">{lang === 'ar' ? 'اكتشف المنتجات عبر متاجر لك' : 'Discover products across LAK stores'}</h1>
       <nav className="mk-cats" aria-label={t.catsLabel}>
         <a href={q({ cat: undefined })} aria-current={!f.cat ? 'true' : undefined} className="mk-cat"><span className="mk-cat-ico"><Ico.compass /></span>{t.allCats}</a>
         {CATS.map((c) => (

@@ -18,7 +18,7 @@ import './styles.css';
 
 interface AMState { plan: Plan; addon: Addon; draft: AppConfig; listing: Listing; accounts: Accounts; releases: Release[]; seq: number }
 
-export const appStore = createStore<AMState>(() => ({
+export const appStore = createStore.key('appmaker.appStore')<AMState>(() => ({
   plan: 'plus', addon: 'active', draft: initialDraft(), listing: initialListing(), accounts: initialAccounts(), releases: initialReleases(), seq: 10,
 }));
 

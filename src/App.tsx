@@ -1,13 +1,15 @@
-import type { ComponentType } from 'react';
+import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react';
 import { useLang, type L } from './core/lang';
 import { link, sub, useRoute, type Route } from './core/router';
 import { resetAll } from './core/store';
-import Site from './surfaces/site';
-import Admin from './surfaces/admin';
-import Merchant from './surfaces/merchant';
-import Storefront from './surfaces/storefront';
-import AppMaker from './surfaces/appmaker';
-import Market from './surfaces/market';
+
+// Each surface is its own chunk so opening one does not download the other five.
+const Site = lazy(() => import('./surfaces/site'));
+const Admin = lazy(() => import('./surfaces/admin'));
+const Merchant = lazy(() => import('./surfaces/merchant'));
+const Storefront = lazy(() => import('./surfaces/storefront'));
+const AppMaker = lazy(() => import('./surfaces/appmaker'));
+const Market = lazy(() => import('./surfaces/market'));
 
 /** The six surfaces of the platform blueprint, in dependency order. */
 const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }> }[] = [
@@ -21,9 +23,9 @@ const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }
 
 const S = {
   ar: { skip: 'تخطَّ إلى المحتوى', surfaces: 'واجهات المنصة', demo: 'بيانات تجريبية', reset: 'إعادة ضبط البيانات', other: 'English',
-    hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
+    dirA: 'الاتجاه A · بدّل إلى B', dirB: 'الاتجاه B · بدّل إلى A', hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
   en: { skip: 'Skip to content', surfaces: 'Platform surfaces', demo: 'Demo data', reset: 'Reset data', other: 'العربية',
-    hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
+    dirA: 'Direction A · switch to B', dirB: 'Direction B · switch to A', hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
 };
 
 export function App() {
@@ -31,6 +33,13 @@ export function App() {
   const t = S[lang];
   const route = useRoute();
   const current = SURFACES.find((s) => s.id === route.path[0]);
+  const [direction, setDirection] = useState<'a' | 'b'>(() => {
+    try { return localStorage.getItem('lak.direction') === 'b' ? 'b' : 'a'; } catch { return 'a'; }
+  });
+  useEffect(() => {
+    document.documentElement.dataset.direction = direction;
+    try { localStorage.setItem('lak.direction', direction); } catch { /* preference only */ }
+  }, [direction]);
 
   return (
     <>
@@ -47,12 +56,17 @@ export function App() {
         </nav>
         <div className="topbar-tools">
           <span className="tag">{t.demo}</span>
+          {current?.id === 'merchant' && (
+            <button type="button" className="btn small" aria-pressed={direction === 'b'} onClick={() => setDirection(direction === 'a' ? 'b' : 'a')}>
+              {direction === 'a' ? t.dirA : t.dirB}
+            </button>
+          )}
           <button type="button" className="btn small" onClick={resetAll}>{t.reset}</button>
           <button type="button" className="btn small" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>{t.other}</button>
         </div>
       </header>
       <main id="main" tabIndex={-1}>
-        {current ? <current.C route={sub(route, 1)} /> : (
+        {current ? <Suspense fallback={<div className="main" aria-busy="true" />}><current.C route={sub(route, 1)} /></Suspense> : (
           <div className="main hub">
             <header><h1>{t.hubTitle}</h1><p className="muted">{t.hubSub}</p></header>
             <ul className="hub-grid">

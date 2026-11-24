@@ -152,7 +152,7 @@ function Missing({ title, body, back, backLabel }: { title: string; body: string
 
 interface Comment { n: number; name: string; body: string }
 /** Simulated, local-only comments. Reset with the global "Reset data" button. */
-const commentsStore = createStore<Record<string, Comment[]>>(() => ({}));
+const commentsStore = createStore.key('site.commentsStore')<Record<string, Comment[]>>(() => ({}));
 
 export function Blog({ route, id }: { route: Route; id?: string }) {
   return id ? <BlogPost key={id} id={id} /> : <BlogIndex route={route} />;
