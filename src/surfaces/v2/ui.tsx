@@ -78,9 +78,15 @@ export function Icon({ name, size, label }: { name: IconName; size?: 'sm' | 'xs'
 
 /* ---------- Money and identifiers ---------- */
 
-export function Money({ v, strong }: { v: number; strong?: boolean }) {
+/** Amount with the official Saudi Riyal symbol (glyph from LAK's own riyal font); the accessible name says the currency. */
+export function Money({ v, strong, figure }: { v: number; strong?: boolean; figure?: boolean }) {
   const { lang } = useLang();
-  return <span className={`lk-num${strong ? ' lk-strong' : ''}`}><bdi>{formatMoney(v)}</bdi> <span className="lk-3">{lang === 'ar' ? 'ر.س' : 'SAR'}</span></span>;
+  return (
+    <span className={`lk-num${strong ? ' lk-strong' : ''}${figure ? ' lk-figure' : ''}`} style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.25em' }}>
+      <bdi>{formatMoney(v)}</bdi>
+      <span className="lk-riyal" role="img" aria-label={lang === 'ar' ? 'ريال سعودي' : 'Saudi riyal'}>{'\uE900'}</span>
+    </span>
+  );
 }
 export const Ref = ({ children }: { children: ReactNode }) => <bdi dir="ltr" className="lk-num">{children}</bdi>;
 

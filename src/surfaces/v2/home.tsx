@@ -1,5 +1,5 @@
 // Merchant home, redesigned. Question it answers in the first second: "what needs me right now, and is the store healthy?"
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useLang } from '../../core/lang';
 import { link } from '../../core/router';
 import { formatMoney } from '../../core/format';
@@ -10,8 +10,10 @@ import { analyticsSeries, summarize, change, periods } from '../merchant/growth'
 import { Icon, Money, Ref, Skeleton, EmptyState, ThumbStack, Thumb, useTx, type IconName, type Tone } from './ui';
 import { reviewStore, vhref, isLate, itemImage, productImage, productIdForSku, age, stageOf } from './data';
 import { Page } from './index';
+import { QuickAccess } from './nav';
 import './home.css';
 
+type Tint = 'purple' | 'cyan' | 'peach' | 'green' | 'indigo';
 interface Task { id: string; tone: Tone; icon: IconName; title: string; why: string; count: number; value?: number; cta: string; href: string; secondary?: { label: string; href: string }; preview?: { src?: string; alt: string }[] }
 
 export default function Home() {
@@ -59,23 +61,24 @@ export default function Home() {
     why: tx('المتاح = الموجود − المحجوز. قد يتوقف البيع في الموقع المعني.', 'Available = on hand − reserved. Sales may stop at that location.'),
     cta: tx('افتح المخزون', 'Open inventory'), href: link('/merchant/inventory'), secondary: { label: tx('الإصدار الحالي', 'current version'), href: link('/merchant/inventory') }, preview: lowPreview });
 
-  const kpis = [
-    { label: tx('مبيعات مدفوعة اليوم', 'Paid sales today'), value: <Money v={paidToday} />, note: tx(`${today.length} طلبات اليوم`, `${today.length} orders today`), delta: null as number | null },
-    { label: tx('صافي آخر 7 أيام', 'Net sales, last 7 days'), value: <Money v={sCur.net} />, note: tx('مقابل الأيام السبعة السابقة', 'vs the previous 7 days'), delta: change(sCur.net, sPrev.net) },
-    { label: tx('بانتظار التجهيز', 'Awaiting fulfilment'), value: <span className="lk-num">{needs.length}</span>, note: late.length ? tx(`${late.length} منها متأخرة`, `${late.length} of them late`) : tx('لا متأخر', 'none late'), delta: null },
-    { label: tx('معدل التحويل', 'Conversion'), value: <span className="lk-num">{sCur.conversion === null ? '—' : `${sCur.conversion}%`}</span>, note: tx(`محسوب على ${sCur.sessionDays} من ${sCur.days} أيام فيها بيانات زيارات`, `On ${sCur.sessionDays} of ${sCur.days} days with visit data`), delta: change(sCur.conversion, sPrev.conversion) },
+  const last14 = series.slice(-14);
+  const kpis: { label: string; value: ReactNode; note: string; delta: number | null; tint: Tint; icon: IconName; spark?: number[] }[] = [
+    { label: tx('مبيعات مدفوعة اليوم', 'Paid sales today'), value: <Money v={paidToday} figure />, note: tx(`${today.length} طلبات حتى الآن`, `${today.length} orders so far`), delta: null, tint: 'purple', icon: 'wallet' },
+    { label: tx('صافي آخر 7 أيام', 'Net sales, last 7 days'), value: <Money v={sCur.net} figure />, note: tx('مقابل الأيام السبعة السابقة', 'vs previous 7 days'), delta: change(sCur.net, sPrev.net), tint: 'cyan', icon: 'analytics', spark: last14.map((d) => d.net) },
+    { label: tx('بانتظار التجهيز', 'Awaiting fulfilment'), value: <span className="lk-figure">{needs.length}</span>, note: late.length ? tx(`${late.length} منها متأخرة`, `${late.length} of them late`) : tx('لا شيء متأخر', 'none late'), delta: null, tint: 'peach', icon: 'box' },
+    { label: tx('معدل التحويل', 'Conversion rate'), value: <span className="lk-figure">{sCur.conversion === null ? '—' : `${sCur.conversion}%`}</span>, note: tx(`من ${sCur.sessionDays} أيام فيها بيانات زيارات`, `from ${sCur.sessionDays} days with visit data`), delta: change(sCur.conversion, sPrev.conversion), tint: 'green', icon: 'customers', spark: last14.map((d) => d.orders) },
   ];
 
   const head = (
     <div className="lk-pagehead">
       <div className="lk-col lk-grow lk-gap-4">
         <span className="lk-eyebrow">{tx('الاثنين 24 نوفمبر · توقيت الرياض', 'Monday 24 November · Riyadh time')}</span>
-        <h1 className="lk-display">{tx('صباح الخير', 'Good morning')}</h1>
+        <h1 className="lk-display">{tx('صباح الخير يا سارة', 'Good morning, Sara')}</h1>
         <p className="lk-2">{state === 'live' && tasks.length ? tx(`${tasks.length} أمور تحتاجك اليوم، مرتبة حسب أثرها على المال والوقت.`, `${tasks.length} things need you today, ranked by money and time impact.`) : tx('ملخص متجرك اليوم.', 'Your store today.')}</p>
       </div>
       <div className="lk-row lk-wrap">
         <a className="lk-btn" href={vhref(`products/${products[0].id}`)}><Icon name="plus" size="sm" />{tx('منتج جديد', 'New product')}</a>
-        <a className="lk-btn primary" href={vhref('orders', { view: 'needs' })}><Icon name="box" size="sm" />{tx('جهّز الطلبات', 'Fulfil orders')}</a>
+        <a className="lk-btn brand lg" href={vhref('orders', { view: 'needs' })}><Icon name="box" size="sm" />{tx('جهّز الطلبات', 'Fulfil orders')}</a>
       </div>
     </div>
   );
@@ -121,18 +124,26 @@ export default function Home() {
   );
 
   const kpiCards = (
-    <section className={`home-kpis ${dir}`} aria-label={tx('مؤشرات', 'Key figures')}>
+    <section className={`home-tiles ${dir}`} aria-label={tx('مؤشرات', 'Key figures')}>
       {kpis.map((k) => (
-        <div key={k.label} className="home-kpi">
-          <span className="lk-small lk-2">{k.label}</span>
-          <strong className="home-kpi-v">{state === 'empty' ? <span className="lk-3">—</span> : k.value}</strong>
-          <span className="lk-micro lk-3 lk-row lk-wrap" style={{ gap: 6 }}>
-            {state !== 'empty' && k.delta !== null && <Delta v={k.delta} />}{state === 'empty' ? tx('لا بيانات بعد', 'No data yet') : k.note}
-          </span>
+        <div key={k.label} className={`home-tile t-${k.tint}`}>
+          <div className="lk-row lk-between" style={{ alignItems: 'flex-start' }}>
+            <span className="lk-small home-tile-l">{k.label}</span>
+            <span className={`lk-ic sm ${k.tint}`}><Icon name={k.icon} size="sm" /></span>
+          </div>
+          <strong className="home-tile-v">{state === 'empty' ? <span className="lk-3">—</span> : k.value}</strong>
+          <div className="lk-row lk-between" style={{ alignItems: 'flex-end' }}>
+            <span className="lk-micro home-tile-n lk-row lk-wrap" style={{ gap: 6 }}>
+              {state !== 'empty' && k.delta !== null && <Delta v={k.delta} />}{state === 'empty' ? tx('لا بيانات بعد', 'No data yet') : k.note}
+            </span>
+            {k.spark && state !== 'empty' && <Spark values={k.spark} />}
+          </div>
         </div>
       ))}
     </section>
   );
+  const goal = <Goal net={state === 'empty' ? 0 : series.slice(-23).reduce((s, d) => s + d.net, 0)} />;
+  const quick = <QuickAccess />;
 
   const chart = <SalesChart days={state === 'empty' ? [] : series.slice(-14)} />;
   const activity = <Activity orders={state === 'empty' ? [] : orders.slice(0, 6)} />;
@@ -157,20 +168,26 @@ export default function Home() {
     </section>
   );
 
+  // A "Workbench": the store at a glance first, then work and context side by side.
+  // B "Focus": the work first, full width; figures and context follow.
   return dir === 'a' ? (
     <Page>
       {head}
+      {kpiCards}
       <div className="home-a">
-        <div className="lk-col lk-gap-16 home-a-main">{queue}{chart}</div>
-        <aside className="lk-col lk-gap-16 home-a-rail">{kpiCards}{stock}{activity}</aside>
+        <div className="lk-col lk-gap-16">{queue}{chart}</div>
+        <aside className="lk-col lk-gap-16">{goal}{activity}{stock}</aside>
       </div>
+      {quick}
     </Page>
   ) : (
     <Page>
       {head}
-      {kpiCards}
+      {quick}
       {queue}
-      <div className="home-b-grid">{chart}<div className="lk-col lk-gap-16">{stock}{activity}</div></div>
+      {kpiCards}
+      <div className="home-b-grid">{chart}{goal}</div>
+      <div className="home-b-grid even">{activity}{stock}</div>
     </Page>
   );
 }
@@ -185,7 +202,6 @@ function SalesChart({ days }: { days: { date: string; net: number; orders: numbe
   const { lang } = useLang();
   const [table, setTable] = useState(false);
   const [hover, setHover] = useState<number | null>(null);
-  const max = Math.max(1, ...days.map((d) => d.net));
   const totalNet = days.reduce((s, d) => s + d.net, 0);
   const fmtDay = (iso: string) => new Date(iso + 'T00:00:00Z').toLocaleDateString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' });
   const h = hover === null ? null : days[hover];
@@ -212,14 +228,7 @@ function SalesChart({ days }: { days: { date: string; net: number; orders: numbe
                 <div className="lk-col"><span className="lk-micro lk-3">{h ? fmtDay(h.date) : tx('الإجمالي', 'Total')}</span><span className="lk-h1 lk-num">{formatMoney(h ? h.net : totalNet)} <span className="lk-small lk-3">{tx('ر.س', 'SAR')}</span></span></div>
                 <span className="lk-small lk-2 lk-num">{h ? tx(`${h.orders} طلب`, `${h.orders} orders`) : tx(`${days.reduce((s, d) => s + d.orders, 0)} طلب`, `${days.reduce((s, d) => s + d.orders, 0)} orders`)}</span>
               </div>
-              <div className="home-bars" onMouseLeave={() => setHover(null)}>
-                {days.map((d, i) => (
-                  <button key={d.date} type="button" className="home-bar" aria-label={`${fmtDay(d.date)}: ${formatMoney(d.net)} ${tx('ر.س', 'SAR')}`}
-                    onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)} data-on={hover === i ? '' : undefined}>
-                    <span style={{ height: `${Math.max(2, (d.net / max) * 100)}%` }} className={d.net === 0 ? 'zero' : undefined} />
-                  </button>
-                ))}
-              </div>
+              <Area days={days} hover={hover} setHover={setHover} label={(d) => `${fmtDay(d.date)}: ${formatMoney(d.net)}`} />
               <div className="home-axis lk-micro lk-3"><span>{fmtDay(days[0].date)}</span><span>{fmtDay(days[days.length - 1].date)}</span></div>
             </>
           )}
@@ -263,5 +272,69 @@ function HomeSkeleton({ dir }: { dir: 'a' | 'b' }) {
       {dir === 'a' ? <div className="home-a"><div className="lk-col lk-gap-16">{block(260)}{block(200)}</div><div className="lk-col lk-gap-16">{kp}{block(160)}</div></div>
         : <div className="lk-col lk-gap-16">{kp}{block(240)}{block(220)}</div>}
     </div>
+  );
+}
+
+function Spark({ values }: { values: number[] }) {
+  const max = Math.max(...values), min = Math.min(...values);
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * 84},${26 - ((v - min) / Math.max(1, max - min)) * 22}`).join(' ');
+  return <svg className="home-spark lk-flipx" viewBox="0 0 84 28" aria-hidden="true"><polyline points={pts} /></svg>;
+}
+
+/** Smooth area chart with a brand gradient; every day is a focusable point with its value. */
+function Area({ days, hover, setHover, label }: { days: { date: string; net: number }[]; hover: number | null; setHover: (i: number | null) => void; label: (d: { date: string; net: number }) => string }) {
+  const W = 640, H = 200, P = 8;
+  const max = Math.max(1, ...days.map((d) => d.net)) * 1.1;
+  const x = (i: number) => P + (i / (days.length - 1)) * (W - 2 * P);
+  const y = (v: number) => H - (v / max) * (H - 16);
+  const pts = days.map((d, i) => [x(i), y(d.net)] as const);
+  const path = pts.reduce((acc, [px, py], i) => {
+    if (i === 0) return `M${px},${py}`;
+    const [qx, qy] = pts[i - 1]; const cx = (qx + px) / 2;
+    return `${acc} C${cx},${qy} ${cx},${py} ${px},${py}`;
+  }, '');
+  return (
+    <div className="home-area" onMouseLeave={() => setHover(null)}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-hidden="true">
+        <defs><linearGradient id="lkArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#5b6cf0" stopOpacity="0.28" /><stop offset="100%" stopColor="#0ab2ec" stopOpacity="0.02" /></linearGradient>
+          <linearGradient id="lkLine" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stopColor="#7b5cf0" /><stop offset="100%" stopColor="#0ab2ec" /></linearGradient></defs>
+        {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} className="grid" />)}
+        <path d={`${path} L${x(days.length - 1)},${H} L${x(0)},${H} Z`} fill="url(#lkArea)" />
+        <path d={path} fill="none" stroke="url(#lkLine)" strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+        {hover !== null && <line x1={pts[hover][0]} x2={pts[hover][0]} y1="0" y2={H} className="cross" />}
+      </svg>
+      <div className="home-area-hits">
+        {days.map((d, i) => (
+          <button key={d.date} type="button" aria-label={label(d)} onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
+            {hover === i && <span className="home-dot" style={{ bottom: `${(d.net / max) * (100 - 8)}%` }} />}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** Month-to-date progress against the merchant's own target (a demo value the merchant sets). */
+function Goal({ net }: { net: number }) {
+  const tx = useTx();
+  const target = 75000000;
+  const pct = Math.min(100, Math.round((net / target) * 1000) / 10);
+  const r = 52, c = 2 * Math.PI * r;
+  return (
+    <section className="lk-card home-goal" aria-labelledby="goal-h">
+      <div className="lk-card-h flat"><span className="lk-ic sm green"><Icon name="spark" size="sm" /></span><h2 id="goal-h" className="lk-h2 lk-grow">{tx('هدف نوفمبر', 'November goal')}</h2><span className="lk-sim">{tx('هدف تجريبي', 'Demo target')}</span></div>
+      <div className="home-goal-b">
+        <svg viewBox="0 0 128 128" className="home-ring" role="img" aria-label={tx(`تحقق ${pct}% من الهدف`, `${pct}% of target reached`)}>
+          <defs><linearGradient id="lkRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#7b5cf0" /><stop offset="100%" stopColor="#0ab2ec" /></linearGradient></defs>
+          <circle cx="64" cy="64" r={r} className="track" />
+          <circle cx="64" cy="64" r={r} className="val" stroke="url(#lkRing)" strokeDasharray={`${(pct / 100) * c} ${c}`} />
+        </svg>
+        <div className="home-goal-t"><span className="lk-figure home-goal-pct">{pct}%</span><span className="lk-micro lk-3">{tx('من الهدف', 'of target')}</span></div>
+      </div>
+      <div className="home-goal-f">
+        <div className="lk-col"><span className="lk-micro lk-3">{tx('المحقق حتى أمس', 'Achieved to yesterday')}</span><Money v={net} strong /></div>
+        <div className="lk-col" style={{ alignItems: 'flex-end' }}><span className="lk-micro lk-3">{tx('الهدف', 'Target')}</span><Money v={target} strong /></div>
+      </div>
+    </section>
   );
 }

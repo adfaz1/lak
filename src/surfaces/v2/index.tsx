@@ -5,7 +5,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { link, type Route } from '../../core/router';
 import { useLang } from '../../core/lang';
-import { ordersStore, productsStore, settingsStore } from '../merchant/stores';
+import { ordersStore, settingsStore } from '../merchant/stores';
 import { VIEWS } from '../merchant/domain';
 import { Icon, useTx, type IconName } from './ui';
 import { reviewStore, vhref, type DemoState } from './data';
@@ -13,6 +13,8 @@ import Home from './home';
 import Orders from './orders';
 import ProductEdit from './product';
 import Compare from './compare';
+import { AllMenu, SideGroups } from './nav';
+import './nav.css';
 import './lk.css';
 import './shell.css';
 
@@ -23,71 +25,76 @@ export default function V2({ route }: { route: Route }) {
   const tx = useTx();
   const review = reviewStore.use();
   const orders = ordersStore.use();
-  const products = productsStore.use();
   const settings = settingsStore.use();
   const [menu, setMenu] = useState(false);
+  const [all, setAll] = useState(false);
   const seg = route.path[0];
   const section: Section = seg === 'orders' ? 'orders' : seg === 'products' ? 'products' : seg === 'compare' ? 'compare' : 'home';
-  useEffect(() => setMenu(false), [route]);
+  useEffect(() => { setMenu(false); setAll(false); }, [route]);
+  // "/" opens the sections menu from anywhere except while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key === '/' && !(t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)))) { e.preventDefault(); setAll(true); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
 
   const needs = orders.filter(VIEWS.needs).length;
-  const firstProduct = products.find((p) => p.status === 'active') ?? products[0];
-  const nav: { id: Section; label: string; icon: IconName; href: string; count?: number }[] = [
+  const view = route.query.get('view');
+  const current = section === 'orders' ? (view === 'late' || view === 'returns' || view === 'payfail' ? view : 'orders') : section === 'products' ? 'product-edit' : section;
+  const primary: { id: Section; label: string; icon: IconName; href: string; count?: number }[] = [
     { id: 'home', label: tx('الرئيسية', 'Home'), icon: 'home', href: vhref('') },
     { id: 'orders', label: tx('الطلبات', 'Orders'), icon: 'orders', href: vhref('orders'), count: needs },
-    { id: 'products', label: tx('المنتجات', 'Products'), icon: 'products', href: vhref(`products/${firstProduct.id}`) },
+    { id: 'products', label: tx('المنتجات', 'Products'), icon: 'products', href: vhref('products/p1') },
   ];
-  /** Not redesigned yet: they open the current workspace, and say so. */
-  const later: { label: string; icon: IconName; page: string }[] = [
-    { label: tx('المخزون', 'Inventory'), icon: 'inventory', page: 'inventory' },
-    { label: tx('العملاء', 'Customers'), icon: 'customers', page: 'customers' },
-    { label: tx('التحليلات', 'Analytics'), icon: 'analytics', page: 'analytics' },
-    { label: tx('الأموال', 'Finance'), icon: 'finance', page: 'finance' },
-    { label: tx('التسويق', 'Marketing'), icon: 'marketing', page: 'marketing' },
-    { label: tx('الإعدادات', 'Settings'), icon: 'settings', page: 'settings' },
-  ];
-
   const body = section === 'orders' ? <Orders route={route} /> : section === 'products' ? <ProductEdit route={route} /> : section === 'compare' ? <Compare /> : <Home />;
-  const storeName = settings.store.name;
-  const search = (
-    <a className="lk-search" href={vhref('orders', { focus: 'search' })}
-      aria-label={tx('بحث في الطلبات والمنتجات والعملاء', 'Search orders, products and customers')}>
-      <Icon name="search" size="sm" /><span className="lk-grow lk-small">{tx('ابحث عن طلب أو منتج أو عميل', 'Search orders, products, customers')}</span><span className="lk-kbd">/</span>
-    </a>
+  const store = settings.store.name;
+  const allBtn = (cls: string) => (
+    <button type="button" className={cls} onClick={() => setAll(true)} aria-haspopup="dialog" aria-keyshortcuts="/">
+      <Icon name="menu" size="sm" /><span>{tx('كل الأقسام', 'All sections')}</span><span className="lk-kbd lk-only-desktop">/</span>
+    </button>
+  );
+  const storeCard = (
+    <div className="sh-store">
+      <span className="sh-store-logo" aria-hidden="true">{store.slice(0, 1)}</span>
+      <div className="lk-col lk-grow" style={{ minWidth: 0 }}>
+        <span className="lk-strong lk-truncate">{store}</span>
+        <span className="sh-live"><span className="dot" />{tx('المتجر يستقبل الطلبات', 'Store is taking orders')}</span>
+      </div>
+      <a className="lk-btn icon sm soft" href={link('/store')} aria-label={tx('زيارة المتجر', 'Visit store')} title={tx('زيارة المتجر', 'Visit store')}><Icon name="external" size="sm" /></a>
+    </div>
+  );
+  const tools = (
+    <>
+      <button type="button" className="lk-btn icon ghost" aria-label={tx('الإشعارات (لا جديد)', 'Notifications (none new)')} title={tx('لا إشعارات جديدة', 'No new notifications')}><Icon name="bell" /></button>
+      <a className="lk-btn icon ghost" href={link('/merchant/settings')} aria-label={tx('الإعدادات (الإصدار الحالي)', 'Settings (current version)')}><Icon name="settings" /></a>
+      <span className="sh-user" title={tx('سارة · المالكة', 'Sara · Owner')}><span className="lk-avatar">س</span><span className="lk-only-desktop lk-col"><span className="lk-small lk-strong">{tx('سارة', 'Sara')}</span><span className="lk-micro lk-3">{tx('المالكة', 'Owner')}</span></span></span>
+    </>
   );
 
   return (
     <div className="lk lk-app" data-dir={review.dir}>
-      <div className="lk-brandline" />
       {review.dir === 'a' ? (
         <div className="lk-a">
           <nav className={`lk-a-nav${menu ? ' open' : ''}`} aria-label={tx('تنقل لوحة التاجر', 'Merchant navigation')}>
-            <a className="lk-mark" href={vhref('')} style={{ padding: '4px 10px' }}><img src="/lak-mark.png" alt="" /><b>{tx('لك', 'LAK')}</b></a>
-            <div className="lk-storechip"><span className="logo" aria-hidden="true">{storeName.slice(0, 1)}</span><span className="lk-col lk-grow"><span className="lk-strong lk-truncate">{storeName}</span><span className="lk-micro lk-3">{tx('متجر تجريبي · بيانات اختبار', 'Demo store · test data')}</span></span></div>
-            <div className="lk-col lk-gap-4">
-              {nav.map((n) => (
-                <a key={n.id} className="lk-a-link" href={n.href} aria-current={section === n.id ? 'page' : undefined}>
-                  <Icon name={n.icon} /><span className="lk-grow">{n.label}</span>{n.count ? <span className="lk-count hot">{n.count}</span> : null}
-                </a>
-              ))}
+            <div className="lk-row lk-between" style={{ padding: '2px 6px 0' }}>
+              <a className="lk-mark" href={vhref('')}><img src="/lak-mark.png" alt="LAK | لك" /></a>
+              <button type="button" className="lk-btn icon sm ghost lk-a-menu" aria-label={tx('إغلاق القائمة', 'Close menu')} onClick={() => setMenu(false)}><Icon name="close" size="sm" /></button>
             </div>
-            <div className="lk-col lk-gap-4">
-              <h2 className="lk-eyebrow">{tx('لم يُعَد تصميمها بعد', 'Not redesigned yet')}</h2>
-              {later.map((l) => (
-                <a key={l.page} className="lk-a-link" href={link(`/merchant/${l.page}`)}>
-                  <Icon name={l.icon} /><span className="lk-grow">{l.label}</span><span className="old">{tx('الإصدار الحالي', 'current')}</span>
-                </a>
-              ))}
-            </div>
+            {storeCard}
+            <a className="sh-home" href={vhref('')} aria-current={section === 'home' ? 'page' : undefined}><Icon name="home" /><span className="lk-grow">{tx('الرئيسية', 'Home')}</span></a>
+            <SideGroups current={current} />
           </nav>
           {menu && <div className="lk-scrim" style={{ zIndex: 44, background: 'rgba(20,25,56,.35)' }} onClick={() => setMenu(false)} aria-hidden="true" />}
           <div style={{ minWidth: 0 }}>
             <header className="lk-a-top">
               <button type="button" className="lk-btn icon ghost lk-a-menu" aria-label={tx('فتح القائمة', 'Open menu')} aria-expanded={menu} onClick={() => setMenu(true)}><Icon name="menu" /></button>
-              {search}
+              <a className="lk-search" href={vhref('orders', { focus: 'search' })}><Icon name="search" size="sm" /><span className="lk-grow lk-small">{tx('ابحث عن طلب أو عميل', 'Search orders or customers')}</span></a>
+              {allBtn('lk-btn soft sh-all')}
               <span className="lk-grow" />
-              <a className="lk-btn sm ghost lk-only-desktop" href={link('/store')}><Icon name="external" size="sm" />{tx('معاينة المتجر', 'View store')}</a>
-              <button type="button" className="lk-btn icon ghost" aria-label={tx('الإشعارات (لا جديد)', 'Notifications (none new)')} title={tx('لا إشعارات جديدة', 'No new notifications')}><Icon name="bell" /></button>
+              {tools}
             </header>
             <main>{body}</main>
           </div>
@@ -96,28 +103,30 @@ export default function V2({ route }: { route: Route }) {
         <>
           <header className="lk-b-top">
             <div className="lk-b-bar">
-              <a className="lk-mark" href={vhref('')}><img src="/lak-mark.png" alt="" /><b>{tx('لك', 'LAK')}</b></a>
+              <a className="lk-mark" href={vhref('')}><img src="/lak-mark.png" alt="LAK | لك" /></a>
+              {allBtn('sh-b-all')}
               <nav className="lk-b-nav" aria-label={tx('تنقل لوحة التاجر', 'Merchant navigation')}>
-                {nav.map((n) => (
-                  <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}>{n.label}{n.count ? <span className="lk-count">{n.count}</span> : null}</a>
+                {primary.map((n) => (
+                  <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}><Icon name={n.icon} size="sm" />{n.label}{n.count ? <span className="lk-count">{n.count}</span> : null}</a>
                 ))}
-                <a href={link('/merchant/customers')}>{tx('المزيد', 'More')}<Icon name="external" size="xs" /></a>
+                <a href={link('/merchant/marketing')}><Icon name="marketing" size="sm" />{tx('التسويق', 'Marketing')}</a>
+                <a href={link('/merchant/finance')}><Icon name="finance" size="sm" />{tx('المالية', 'Money')}</a>
               </nav>
-              <span className="spacer lk-b-only-mobile" />
-              {search}
-              <button type="button" className="lk-btn icon ghost" aria-label={tx('الإشعارات (لا جديد)', 'Notifications (none new)')}><Icon name="bell" /></button>
+              <span className="spacer lk-grow" />
+              <a className="lk-btn icon ghost" href={vhref('orders', { focus: 'search' })} aria-label={tx('بحث', 'Search')}><Icon name="search" /></a>
+              {tools}
             </div>
-            <div className="lk-b-sub"><div className="inner"><span className="lk-strong" style={{ color: '#fff' }}>{storeName}</span><span>·</span><span>{tx('متجر تجريبي، بيانات اختبار', 'Demo store, test data')}</span><span className="lk-grow" /><a href={link('/store')} style={{ color: '#c5c9e6' }}>{tx('معاينة المتجر', 'View store')}</a></div></div>
           </header>
           <main className="lk-b-main">{body}</main>
           <nav className="lk-b-tabs" aria-label={tx('تنقل سريع', 'Quick navigation')}>
-            {nav.map((n) => (
+            {primary.map((n) => (
               <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}><Icon name={n.icon} />{n.label}{n.count ? <span className="lk-count">{n.count}</span> : null}</a>
             ))}
-            <a href={link('/merchant/customers')}><Icon name="more" />{tx('المزيد', 'More')}</a>
+            <button type="button" onClick={() => setAll(true)}><Icon name="menu" />{tx('الكل', 'All')}</button>
           </nav>
         </>
       )}
+      {all && <AllMenu onClose={() => setAll(false)} />}
       <ReviewBar />
       <span hidden>{lang}</span>
     </div>

@@ -1,3 +1,6 @@
+@font-face { font-family: 'Somar'; src: url('/fonts/SomarSans-Medium.otf') format('opentype'); font-weight: 500 700; font-display: swap; }
+@font-face { font-family: 'SaudiRiyal'; src: url('/fonts/saudi_riyal.ttf') format('truetype'); font-display: block; }
+
 /* ================================================================
    LAK design system v2 — proposed for approval.
    Everything is scoped under .lk so the rest of the prototype is untouched.
@@ -17,7 +20,7 @@
   --lk-purple-50: #f3edfe;
 
   /* Neutrals */
-  --lk-canvas: #f5f6fa;
+  --lk-canvas: #f4f7fb;
   --lk-surface: #ffffff;
   --lk-sunken: #f0f2f7;
   --lk-line: #e3e6ee;
@@ -34,13 +37,22 @@
   --lk-idle: #5d6480; --lk-idle-50: #eef0f5;
 
   /* Shape, depth, motion */
-  --lk-r-sm: 6px; --lk-r: 8px; --lk-r-lg: 12px; --lk-r-xl: 16px;
-  --lk-shadow-1: 0 1px 2px rgba(20, 25, 56, 0.06), 0 0 0 1px rgba(20, 25, 56, 0.04);
+  --lk-r-sm: 8px; --lk-r: 10px; --lk-r-lg: 16px; --lk-r-xl: 20px;
+  --lk-shadow-1: 0 1px 2px rgba(20, 25, 56, 0.04), 0 0 0 1px rgba(20, 25, 56, 0.05);
+  --lk-grad: linear-gradient(135deg, #7b5cf0 0%, #3d6fe0 55%, #0ab2ec 100%);
+  --lk-grad-soft: linear-gradient(135deg, #f1ecff 0%, #e8f1ff 55%, #e3f7fd 100%);
+  /* Tinted tiles, one per brand hue */
+  --lk-t-cyan: #e5f7fd; --lk-t-cyan-ink: #0a7fa8;
+  --lk-t-purple: #f1ecff; --lk-t-purple-ink: #6a3fd8;
+  --lk-t-indigo: #e9edff; --lk-t-indigo-ink: #3446c0;
+  --lk-t-green: #e5f6ee; --lk-t-green-ink: #12805c;
+  --lk-t-peach: #fff1e8; --lk-t-peach-ink: #b4520d;
   --lk-shadow-2: 0 8px 24px -8px rgba(20, 25, 56, 0.18), 0 0 0 1px rgba(20, 25, 56, 0.05);
   --lk-ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* Type */
   --lk-font: 'IBM Plex Sans Arabic', 'Noto Sans Arabic', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --lk-display-font: 'Somar', 'IBM Plex Sans Arabic', system-ui, sans-serif;
 
   font-family: var(--lk-font);
   font-size: 14px;
@@ -59,9 +71,11 @@
 .lk ::selection { background: var(--lk-cyan-50); }
 
 /* Type scale */
-.lk-display { font-size: 30px; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; }
-.lk-h1 { font-size: 24px; line-height: 1.3; font-weight: 700; letter-spacing: -0.005em; }
-.lk-h2 { font-size: 16px; line-height: 1.4; font-weight: 600; }
+.lk-display { font-family: var(--lk-display-font); font-size: 30px; line-height: 1.25; font-weight: 500; }
+.lk-h1 { font-family: var(--lk-display-font); font-size: 24px; line-height: 1.3; font-weight: 500; }
+.lk-h2 { font-family: var(--lk-display-font); font-size: 17px; line-height: 1.4; font-weight: 500; }
+.lk-figure { font-family: var(--lk-display-font); font-weight: 500; font-variant-numeric: tabular-nums; letter-spacing: 0.005em; }
+.lk-riyal { font-family: 'SaudiRiyal'; font-weight: 400; font-size: 0.92em; color: inherit; }
 .lk-h3 { font-size: 14px; line-height: 1.4; font-weight: 600; }
 .lk-body { font-size: 14px; }
 .lk-small { font-size: 13px; }
@@ -101,6 +115,11 @@
 .lk-btn[disabled], .lk-btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
 .lk-btn.primary { background: var(--lk-indigo); border-color: var(--lk-indigo); color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset, 0 1px 2px rgba(20, 25, 56, 0.2); }
 .lk-btn.primary:hover { background: var(--lk-indigo-600); border-color: var(--lk-indigo-600); }
+/* Brand call to action, as on lak.sa: one per screen at most. */
+.lk-btn.brand { border: 0; color: #fff; background: var(--lk-grad); box-shadow: 0 6px 16px -6px rgba(61, 111, 224, 0.55); }
+.lk-btn.brand:hover { filter: brightness(1.06); }
+.lk-btn.soft { border-color: transparent; background: var(--lk-indigo-50); color: var(--lk-indigo-600); }
+.lk-btn.soft:hover { background: var(--lk-indigo-100); }
 .lk-btn.ghost { border-color: transparent; background: transparent; }
 .lk-btn.ghost:hover { background: var(--lk-sunken); }
 .lk-btn.danger { color: var(--lk-bad); }
@@ -140,7 +159,17 @@
 
 /* Surfaces */
 .lk-card { background: var(--lk-surface); border-radius: var(--lk-r-lg); box-shadow: var(--lk-shadow-1); }
-.lk-card-h { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 12px 20px; border-bottom: 1px solid var(--lk-line); }
+.lk-card-h { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 14px 20px; border-bottom: 1px solid var(--lk-line); }
+.lk-card-h.flat { border-bottom: 0; padding-bottom: 4px; }
+.lk-ic { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 12px; }
+.lk-ic.sm { width: 32px; height: 32px; border-radius: 10px; }
+.lk-ic.cyan { background: var(--lk-t-cyan); color: var(--lk-t-cyan-ink); }
+.lk-ic.purple { background: var(--lk-t-purple); color: var(--lk-t-purple-ink); }
+.lk-ic.indigo { background: var(--lk-t-indigo); color: var(--lk-t-indigo-ink); }
+.lk-ic.green { background: var(--lk-t-green); color: var(--lk-t-green-ink); }
+.lk-ic.peach { background: var(--lk-t-peach); color: var(--lk-t-peach-ink); }
+.lk-ic.bad { background: var(--lk-bad-50); color: var(--lk-bad); }
+.lk-ic.warn { background: var(--lk-warn-50); color: var(--lk-warn); }
 .lk-card-b { padding: 16px 20px; }
 .lk-divider { height: 1px; background: var(--lk-line); border: 0; margin: 0; }
 
@@ -226,3 +255,6 @@
 
 /* Keyboard hint */
 .lk-kbd { display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px; border: 1px solid var(--lk-line-strong); border-bottom-width: 2px; color: var(--lk-text-3); font-size: 11px; font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; direction: ltr; }
+/* Guard against generic class names from the older prototype styles (e.g. a global .brand). */
+.lk .lk-btn { flex-direction: row; }
+[dir='rtl'] .lk-flipx { transform: scaleX(-1); }
