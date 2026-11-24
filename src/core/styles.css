@@ -1,9 +1,17 @@
-/* Tokens: provisional starting point from the LAK experience spec (ch. 02).
-   Replace with the approved brand tokens once the original identity assets arrive. */
+/* Tokens. Brand values are sampled from the supplied logo image (a JPEG, not a brand guide),
+   so they are provisional: replace them with the approved brand tokens when those exist. */
 :root {
-  --brand: #5b3fe4;
-  --brand-hover: #4930c5;
-  --brand-tint: #f0edff;
+  --brand: #4352c5;
+  --brand-hover: #3442a6;
+  --brand-tint: #eef0fc;
+  --logo-cyan: #02b5de;
+  --logo-purple: #a75dfc;
+  --logo-blue: #1e7bc1;
+  --ink: #161b45;
+  --warning: #8a5a00;
+  --warning-tint: #fff6e0;
+  --success-tint: #e9f6ef;
+  --info-tint: #e8f4fb;
   --canvas: #f6f7fa;
   --surface: #ffffff;
   --text: #17212f;
@@ -33,7 +41,7 @@ p { margin: 0; }
 ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; list-style: none; }
 :focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
 
-.shell { display: flex; flex-wrap: wrap; min-height: 100vh; }
+.shell { display: flex; flex-wrap: wrap; min-height: calc(100vh - 57px); }
 .skip { position: absolute; inset-inline-start: 8px; top: -60px; padding: 10px 14px; background: var(--surface); color: var(--brand); border-radius: var(--r-control); z-index: 2; }
 .skip:focus { top: 8px; }
 
@@ -69,7 +77,9 @@ ul, ol, dl, dd, fieldset { margin: 0; padding: 0; border: 0; list-style: none; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-surface); }
 .card.pad { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; padding: 18px 20px; }
 .card.pad > * { max-width: 100%; }
-.card-head { padding: 16px 20px; border-bottom: 1px solid var(--border); font-size: 18px; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); font-size: 18px; }
+.card-head h2 { font-size: 18px; }
+.card-body { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; }
 
 .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 .metric { display: flex; flex-direction: column; padding: 14px 16px; }
@@ -141,3 +151,42 @@ legend, .field label { padding: 0; margin-bottom: 4px; font-weight: 600; }
 @media (prefers-reduced-motion: no-preference) {
   .btn, .chip, .nav-link { transition: background-color 120ms, border-color 120ms; }
 }
+
+/* App frame */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; min-height: 56px; padding: 6px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.logo { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; text-decoration: none; }
+.logo img { height: 34px; width: auto; }
+.surfaces { flex: 1 1 320px; min-width: 0; display: flex; gap: 2px; overflow-x: auto; }
+.surfaces a { flex: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: var(--r-control); color: var(--muted); font-size: 14px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.surfaces a:hover { color: var(--text); background: var(--canvas); }
+.surfaces a[aria-current] { color: var(--brand-hover); background: var(--brand-tint); }
+.topbar-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.btn.small { min-height: 44px; padding: 0 12px; font-size: 13px; }
+main:focus { outline: none; }
+.hub { max-width: 1120px; margin: 0 auto; padding-top: 40px; }
+.hub-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
+.hub-grid .card { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 20px; }
+.hub-grid .btn { margin-top: 8px; }
+
+/* Kit */
+.page-header { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
+.page-header .grow { flex-basis: 280px; }
+.badge { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--r-control); background: var(--canvas); border: 1px solid var(--border); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.badge::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.badge.success { background: var(--success-tint); border-color: transparent; } .badge.success::before { background: var(--success); }
+.badge.warning { background: var(--warning-tint); border-color: transparent; } .badge.warning::before { background: var(--warning); border-radius: 0; transform: rotate(45deg); }
+.badge.danger { background: var(--danger-tint); border-color: transparent; } .badge.danger::before { background: var(--danger); border-radius: 0; }
+.badge.info { background: var(--info-tint); border-color: transparent; } .badge.info::before { background: var(--logo-blue); border-radius: 2px; }
+.sim { padding: 1px 8px; border: 1px dashed var(--control-border); border-radius: var(--r-control); color: var(--muted); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.hint { margin-top: 4px; color: var(--muted); font-size: 13px; }
+.field.wide { width: 100%; }
+textarea.input { min-height: 96px; padding: 10px 12px; resize: vertical; }
+select.input { padding-inline-end: 28px; }
+.alert.warning { border-color: var(--warning); background: var(--warning-tint); }
+.alert.info { border-color: var(--logo-blue); background: var(--info-tint); }
+.alert.success { border-color: var(--success); background: var(--success-tint); }
+.scrim { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(22, 27, 69, 0.5); }
+.dialog { width: 100%; max-width: 520px; max-height: calc(100vh - 32px); overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 22px 24px; border-radius: var(--r-surface); background: var(--surface); }
+.dialog-body { display: flex; flex-direction: column; gap: 10px; }
+.save-bar { position: sticky; bottom: 12px; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 16px; border-radius: var(--r-surface); background: var(--ink); color: #fff; }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 16px; }
