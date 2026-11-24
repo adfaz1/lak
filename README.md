@@ -1,10 +1,12 @@
 # LAK experience — merchant workspace preview
 
-Interactive preview of the first vertical slice of the new LAK merchant workspace:
-home priority queue → filtered orders → order detail → simulated shipment label → outcome and activity log.
+Interactive prototype of the six LAK surfaces: public website, platform admin, merchant workspace,
+merchant storefront and checkout, App Maker, and the LAK marketplace. Arabic (RTL) and English (LTR).
 
-**Status: prototype.** Fixture data only. No backend, no authentication, no real carrier or payment calls.
-Nothing here is connected to the live LAK platform. The wordmark and colour tokens are provisional until the approved brand assets are added.
+**Status: prototype.** Fixture data only. No backend, no authentication, no real carrier, payment or messaging calls.
+Nothing here is connected to the live LAK platform. Brand colours are sampled from the supplied logo image and are provisional.
+See `docs/lak-experience/STATUS.md` for what works per surface, `DECISIONS.md` for open business decisions,
+and `traceability.md` for the blueprint requirements register.
 
 ## Run
 
@@ -26,9 +28,8 @@ npm run build
 
 ## Structure
 
-- `src/domain.ts` — types, fixtures, money in integer halalas, views, simulated label issuance (unit-tested in `domain.test.ts`)
-- `src/i18n.ts` — Arabic (RTL) and English (LTR) strings
-- `src/App.tsx` — shell, hash router (filters live in the URL), home, orders, order detail
-- `src/styles.css` — design tokens and components
+- `src/core/` — hash router (filters live in the URL), language, fixture stores (persisted per tab session), formatting, UI kit, tokens
+- `src/surfaces/<site|admin|merchant|storefront|appmaker|market>/` — one folder per surface, each with its domain logic and tests
+- `src/App.tsx` — top bar, surface switcher, direction A/B toggle for the merchant workspace
 - `docs/lak-experience/` — capability matrix, decisions, known gaps, next increments
 - `render.yaml` — Render static-site definition for the preview

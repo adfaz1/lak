@@ -1,0 +1,52 @@
+PASS merchant-fulfil [ar 1440] open home
+PASS merchant-fulfil [ar 1440] go to filtered orders
+PASS merchant-fulfil [ar 1440] open order 10482
+PASS merchant-fulfil [ar 1440] start shipment
+PASS merchant-fulfil [ar 1440] review
+PASS merchant-fulfil [ar 1440] simulate carrier outage
+PASS merchant-fulfil [ar 1440] issue → failure alert
+PASS merchant-fulfil [ar 1440] retry → success
+PASS merchant-fulfil [ar 1440] reload keeps order page
+PASS merchant-fulfil [en 390] open home
+PASS merchant-fulfil [en 390] go to filtered orders
+PASS merchant-fulfil [en 390] open order 10482
+PASS merchant-fulfil [en 390] start shipment
+PASS merchant-fulfil [en 390] review
+PASS merchant-fulfil [en 390] simulate carrier outage
+PASS merchant-fulfil [en 390] issue → failure alert
+PASS merchant-fulfil [en 390] retry → success
+PASS merchant-fulfil [en 390] reload keeps order page
+PASS merchant-permissions [en 1440] open test panel
+PASS merchant-permissions [en 1440] switch to fulfilment role
+PASS merchant-permissions [en 1440] finance deep link is refused
+PASS merchant-product-edit [ar 1440] open new product
+PASS merchant-product-edit [ar 1440] type a name
+PASS merchant-product-edit [ar 1440] save bar appears
+PASS store-buy [ar 390] open category
+PASS store-buy [ar 390] open first product
+PASS store-buy [ar 390] add without size shows error
+PASS store-buy [ar 390] pick available options and add
+PASS store-buy [ar 390] open bag
+PASS store-buy [ar 390] go to checkout
+PASS store-buy [en 390] open category
+PASS store-buy [en 390] open first product
+PASS store-buy [en 390] add without size shows error
+PASS store-buy [en 390] pick available options and add
+PASS store-buy [en 390] open bag
+PASS store-buy [en 390] go to checkout
+PASS admin-suspend [en 1440] open stores
+PASS admin-suspend [en 1440] open first store
+PASS admin-suspend [en 1440] open suspend dialog
+PASS admin-suspend [en 1440] confirm disabled without reason
+PASS admin-suspend [en 1440] give reason and confirm
+PASS admin-suspend [en 1440] audit log records it
+PASS market-cart [ar 390] open discover
+PASS market-cart [ar 390] add a product from nakhla
+PASS market-cart [ar 390] add a product from oud
+PASS market-cart [ar 390] cart shows two store groups
+PASS appmaker-identity [en 1440] open identity
+PASS appmaker-identity [en 1440] rename app and see preview update
+PASS site-start [ar 390] open start
+PASS site-start [ar 390] submit empty shows errors
+
+50 passed, 0 failed

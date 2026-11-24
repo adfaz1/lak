@@ -23,9 +23,9 @@ const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }
 
 const S = {
   ar: { skip: 'تخطَّ إلى المحتوى', surfaces: 'واجهات المنصة', demo: 'بيانات تجريبية', reset: 'إعادة ضبط البيانات', other: 'English',
-    loading: 'جارٍ تحميل الواجهة…', dirA: 'الاتجاه A · بدّل إلى B', dirB: 'الاتجاه B · بدّل إلى A', hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
+    loading: 'جارٍ تحميل الواجهة…', dirA: 'الاتجاه A', dirB: 'الاتجاه B', hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
   en: { skip: 'Skip to content', surfaces: 'Platform surfaces', demo: 'Demo data', reset: 'Reset data', other: 'العربية',
-    loading: 'Loading this surface…', dirA: 'Direction A · switch to B', dirB: 'Direction B · switch to A', hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
+    loading: 'Loading this surface…', dirA: 'Direction A', dirB: 'Direction B', hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
 };
 
 export function App() {
@@ -57,7 +57,7 @@ export function App() {
         <div className="topbar-tools">
           <span className="tag">{t.demo}</span>
           {current?.id === 'merchant' && (
-            <button type="button" className="btn small" aria-pressed={direction === 'b'} onClick={() => setDirection(direction === 'a' ? 'b' : 'a')}>
+            <button type="button" className="btn small" aria-pressed={direction === 'b'} title={lang === 'ar' ? 'بدّل بين اتجاهي التصميم للمقارنة' : 'Switch between the two design directions to compare'} onClick={() => setDirection(direction === 'a' ? 'b' : 'a')}>
               {direction === 'a' ? t.dirA : t.dirB}
             </button>
           )}
