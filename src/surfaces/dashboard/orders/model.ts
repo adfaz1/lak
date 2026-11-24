@@ -17,7 +17,7 @@ import {
   act, canMarkShipped, collected as collectedOf, confirmTransfer, fulfilEffects, markShipped, openReturns, payView, placedAt, refundableNow, stamp, takeHeld,
   type Actor, type PayView, type StockEffect,
 } from '../../merchant/ops';
-import type { Level, StockLog } from '../../merchant/inventory';
+import { available, type Level, type StockLog } from '../../merchant/inventory';
 
 /* ---------- List query (lives in the URL) ---------- */
 
@@ -442,7 +442,8 @@ export function withLiveStock(o: Order, levels: Level[], locs: LocId[]): Order {
       for (const loc of locs) {
         const l = levels.find((x) => x.sku === it.sku && x.loc === loc);
         if (!l) continue;
-        stock[loc] = Math.max(0, it.reserved ? l.onHand - l.reserved + (it.reserved[loc] ?? 0) : l.onHand);
+        // Sellable units only: damaged, quarantined, payment holds and safety reserve never count.
+        stock[loc] = Math.max(0, available(l) + (it.reserved ? (it.reserved[loc] ?? 0) : l.reserved));
       }
       return { ...it, stock };
     }),
@@ -464,7 +465,7 @@ export function skuOptions(products: Product[], levels: Level[]): SkuOption[] {
     const vs = p.variants.length ? p.variants.map((v) => ({ sku: v.sku, unit: v.price, variant: variantLabel(v) })) : [{ sku: p.sku, unit: p.price, variant: undefined }];
     return vs.map((v) => {
       const avail: Partial<Record<LocId, number>> = {};
-      levels.filter((l) => l.sku === v.sku).forEach((l) => { avail[l.loc] = Math.max(0, l.onHand - l.reserved); });
+      levels.filter((l) => l.sku === v.sku).forEach((l) => { avail[l.loc] = Math.max(0, available(l)); });
       return { productId: p.id, sku: v.sku, name: p.name, variant: v.variant, unit: v.unit, weight: p.weight ?? 0, avail, total: Object.values(avail).reduce<number>((a, b) => a + (b ?? 0), 0) };
     });
   });

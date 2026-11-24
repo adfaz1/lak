@@ -3,7 +3,7 @@
 // one proposed action as a draft that opens the right tool prefilled. Nothing here executes anything.
 import { total, type Channel, type L, type LocId, type Order } from '../../merchant/domain';
 import { change, periods, summarize, type Automation, type Cart, type DayStat } from '../../merchant/growth';
-import type { History, Level } from '../../merchant/inventory';
+import { available, type History, type Level } from '../../merchant/inventory';
 import { can, canSee, type Action, type Page, type Role } from '../../merchant/perms';
 import { conversionAnswer, lateAnswer, stockAnswer } from '../../merchant/workspace';
 import { dayIndex } from '../analytics/model';
@@ -114,9 +114,9 @@ export function salesAnswer(series: DayStat[], orders: Order[], days: 7 | 30, ct
 
 /** For a drop: restock a falling best seller that is short; otherwise a cart reminder (or the carts list if one runs). */
 function salesDraft({ conv, products, levels, automations }: { conv: [number | null, number | null]; products: Mover[]; levels: Level[]; automations: Automation[] }): Draft | null {
-  const short = products.find((p) => p.sku && levels.some((l) => l.sku === p.sku && l.onHand - l.reserved <= l.threshold));
+  const short = products.find((p) => p.sku && levels.some((l) => l.sku === p.sku && available(l) <= l.threshold));
   if (short?.sku) {
-    const lv = levels.filter((l) => l.sku === short.sku).sort((x, y) => (x.onHand - x.reserved) - (y.onHand - y.reserved));
+    const lv = levels.filter((l) => l.sku === short.sku).sort((x, y) => available(x) - available(y));
     return transferDraft(short.sku, lv[0].loc, null);
   }
   const convDown = conv[0] !== null && conv[1] !== null && conv[0] < conv[1];
