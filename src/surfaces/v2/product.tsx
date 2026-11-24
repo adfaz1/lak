@@ -8,7 +8,7 @@ import { link, navigate, replace, type Route } from '../../core/router';
 import { createStore } from '../../core/store';
 import type { Product } from '../merchant/catalog';
 import { draftsStore, productsStore } from '../merchant/stores';
-import { Banner, Dialog, EmptyState, Icon, Pill, Ref, Skeleton, Toast, useTx } from './ui';
+import { Banner, Dialog, EmptyState, Icon, Pill, Ref, Skeleton, Toast, useTx, SrHeading } from './ui';
 import { reviewStore, vhref } from './data';
 import { Page } from './index';
 import { fieldId, mediaSrc, sectionOf, useEditor, useLeaveGuard, type Editor, type SectionId } from './product-model';
@@ -30,13 +30,13 @@ export default function ProductEdit({ route }: { route: Route }) {
   const toast = toastStore.use();
 
   let body: ReactNode;
-  if (state === 'loading') body = <ProductSkeleton dir={dir} />;
+  if (state === 'loading') body = <><SrHeading>{tx('جارٍ تحميل المنتج', 'Loading product')}</SrHeading><ProductSkeleton dir={dir} /></>;
   else if (state === 'error') {
     const kept = !!draftsStore.get()[id];
     body = (
       <Page>
         <Crumb />
-        <div className="lk-card"><EmptyState tone="bad" icon="alert" title={tx('تعذر تحميل المنتج', 'This product couldn’t load')}
+        <div className="lk-card"><EmptyState as="h1" tone="bad" icon="alert" title={tx('تعذر تحميل المنتج', 'This product couldn’t load')}
           action={<>
             <button type="button" className="lk-btn primary" onClick={() => reviewStore.set((s) => ({ ...s, state: 'live' }))}>{tx('أعد المحاولة', 'Try again')}</button>
             <a className="lk-btn" href={link('/merchant/products')}>{tx('كل المنتجات', 'All products')}</a>

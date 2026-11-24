@@ -129,15 +129,20 @@ export function Avatar({ name }: { name: string }) {
 
 /* ---------- States ---------- */
 
+/** Page heading for screen readers while a page's real heading is not on screen (loading). */
+export function SrHeading({ children }: { children: ReactNode }) {
+  return <h1 className="lk-sr">{children}</h1>;
+}
+
 export function Skeleton({ w = '100%', h = 14, r }: { w?: number | string; h?: number; r?: number }) {
   return <span className="lk-skel" style={{ display: 'block', width: w, height: h, borderRadius: r }} aria-hidden="true" />;
 }
 
-export function EmptyState({ icon = 'box', title, children, action, tone }: { icon?: IconName; title: ReactNode; children?: ReactNode; action?: ReactNode; tone?: 'bad' }) {
+export function EmptyState({ icon = 'box', title, children, action, tone, as: H = 'h3' }: { icon?: IconName; title: ReactNode; children?: ReactNode; action?: ReactNode; tone?: 'bad'; as?: 'h1' | 'h2' | 'h3' }) {
   return (
     <div className={`lk-state${tone ? ` ${tone}` : ''}`} role={tone === 'bad' ? 'alert' : undefined}>
       <span className="lk-state-art"><Icon name={icon} /></span>
-      <h3 className="lk-h2">{title}</h3>
+      <H className="lk-h2">{title}</H>
       {children && <p>{children}</p>}
       {action && <div className="lk-row lk-wrap" style={{ justifyContent: 'center', marginTop: 6 }}>{action}</div>}
     </div>

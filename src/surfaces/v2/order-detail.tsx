@@ -9,7 +9,7 @@ import {
   settleRefund, type LogEntry, type Order,
 } from '../merchant/domain';
 import { refundTx } from '../merchant/finance';
-import { Avatar, Banner, Dialog, EmptyState, Icon, Money, Pill, Ref, Sim, Skeleton, Thumb, Toast, useTx, type IconName, type Tone } from './ui';
+import { Avatar, Banner, Dialog, EmptyState, Icon, Money, Pill, Ref, Sim, Skeleton, Thumb, Toast, useTx, type IconName, type Tone, SrHeading } from './ui';
 import { age, isLate, itemImage, reviewStore, vhref } from './data';
 import { FUL_ICON, FUL_TONE, Menu, MenuItem, PAY_ICON, PAY_TONE, SHIP_ICON, SHIP_TONE, Layer, TestControl, saveOrder, useLabels, useMedia } from './orders-shared';
 import { FulfilDialog } from './order-fulfil';
@@ -68,11 +68,11 @@ export function OrderDetail({ refId, mode, backHref, backLabel, onClose }: { ref
     : null;
   const crumb = !panel ? <a className="lk-crumb" href={backHref}><Icon name="back" size="sm" />{backLabel}</a> : null;
 
-  if (state === 'loading') return <DetailSkeleton panel={panel} crumb={crumb} closeBtn={closeBtn} />;
+  if (state === 'loading') return <>{!panel && <SrHeading>{tx(`جارٍ تحميل الطلب #${refId}`, `Loading order #${refId}`)}</SrHeading>}<DetailSkeleton panel={panel} crumb={crumb} closeBtn={closeBtn} /></>;
   if (state === 'error') return (
     <div className={panel ? 'ord-panel-in' : 'lk-page ord-page'}>
       {crumb}{panel && <div className="ord-panel-top">{closeBtn}</div>}
-      <div className="ord-sec"><EmptyState tone="bad" icon="alert" title={tx('تعذّر تحميل الطلب', 'This order could not load')}
+      <div className="ord-sec"><EmptyState as={panel ? 'h2' : 'h1'} tone="bad" icon="alert" title={tx('تعذّر تحميل الطلب', 'This order could not load')}
         action={<button type="button" className="lk-btn primary" onClick={() => reviewStore.set((s) => ({ ...s, state: 'live' }))}>{tx('أعد المحاولة', 'Try again')}</button>}>
         {tx(`لم يتغير شيء في الطلب \u2066#${refId}\u2069؛ الدفع والشحن كما هما. التفاصيل فقط لم تصل.`, `Nothing changed on order #${refId}; payment and shipment are as they were. Only the details failed to arrive.`)}
       </EmptyState></div>
@@ -81,7 +81,7 @@ export function OrderDetail({ refId, mode, backHref, backLabel, onClose }: { ref
   if (!order) return (
     <div className={panel ? 'ord-panel-in' : 'lk-page ord-page'}>
       {crumb}{panel && <div className="ord-panel-top">{closeBtn}</div>}
-      <div className="ord-sec"><EmptyState icon="search" title={tx(`لا يوجد طلب برقم \u2066#${refId}\u2069`, `No order #${refId}`)}
+      <div className="ord-sec"><EmptyState as={panel ? 'h2' : 'h1'} icon="search" title={tx(`لا يوجد طلب برقم \u2066#${refId}\u2069`, `No order #${refId}`)}
         action={<a className="lk-btn primary" href={backHref}>{tx('العودة إلى الطلبات', 'Back to orders')}</a>}>
         {tx('ربما الرقم غير صحيح أو أن الطلب من متجر آخر. ابحث في القائمة برقم الطلب أو اسم العميل.', 'The number may be wrong, or the order belongs to another store. Search the list by order number or customer name.')}
       </EmptyState></div>
