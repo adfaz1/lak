@@ -1,0 +1,11 @@
+# Preview of the LAK merchant workspace prototype. Fixture data only; no backend.
+services:
+  - type: web
+    name: lak-experience-preview
+    runtime: static
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex
