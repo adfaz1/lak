@@ -41,7 +41,7 @@ export function AreaChart({ points, format, height = 220, rtl }: { points: Point
           </table>
         </div>
       ) : (
-        <div className="relative" style={{ height: H }} onMouseLeave={() => setHover(null)}>
+        <div className="relative overflow-x-clip" style={{ height: H }} onMouseLeave={() => setHover(null)}>
           <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cn('absolute inset-0 h-full w-full overflow-visible', rtl && '-scale-x-100')} aria-hidden="true">
             <defs>
               <linearGradient id={`a${gid}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="var(--color-brand-500)" stopOpacity="0.22" /><stop offset="100%" stopColor="var(--color-sky-500)" stopOpacity="0" /></linearGradient>
@@ -54,7 +54,7 @@ export function AreaChart({ points, format, height = 220, rtl }: { points: Point
           </svg>
           <div className="absolute inset-0 flex">
             {points.map((p, i) => (
-              <button key={p.key} type="button" className="relative flex-1 focus-visible:outline-none" aria-label={`${p.label}: ${format(p.value)}`}
+              <button key={p.key} type="button" className="relative min-w-0 flex-1 focus-visible:outline-none" aria-label={`${p.label}: ${format(p.value)}`}
                 onMouseEnter={() => setHover(i)} onFocus={() => setHover(i)} onBlur={() => setHover(null)}>
                 {hover === i && <span className="absolute start-1/2 size-3 -translate-x-1/2 rounded-full border-[3px] border-brand-600 bg-surface shadow rtl:translate-x-1/2" style={{ top: `calc(${(y(p.value) / H) * 100}% - 6px)` }} />}
               </button>
