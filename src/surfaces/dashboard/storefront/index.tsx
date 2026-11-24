@@ -1,34 +1,31 @@
-// Online store (`#/dashboard/storefront`): published vs draft theme, homepage sections (reorder, show/hide, heading),
-// live preview in the store's own colours, publish review with version, rollback, and separate store status switches.
-import { useState, type CSSProperties, type ReactNode } from 'react';
-import {
-  ArrowDown, ArrowUp, Eye, EyeOff, ExternalLink, Globe2, History, Megaphone, Image as ImageIcon, LayoutGrid, Mail, Play,
-  ShoppingBag, Smartphone, Sparkles, Tag, Upload,
-} from 'lucide-react';
+// Online store (`#/dashboard/storefront`): the store identity (logo, favicon, brand colour, type, buttons, header),
+// the announcement bar and homepage sections, all in one draft; preview on phone and desktop in the store's own look,
+// compare draft with live, publish with a change list, roll back to an earlier version, and the store status switches.
+import { useState, type ReactNode } from 'react';
+import { ArrowLeftRight, Eye, ExternalLink, Globe2, History, ShoppingBag, Smartphone, Upload } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, type Route } from '../../../core/router';
-import { StoreTabs, SubNotFound } from './nav';
+import { StoreTabs, SubNotFound, storeHref } from './nav';
 import PagesPage from './pages';
 import MenusPage from './menus';
 import SeoPage from './seo';
 import { can, canSee } from '../../merchant/perms';
-import { logAction, productsStore, settingsStore, themeStore } from '../../merchant/stores';
-import type { SectionKind, StoreStatus } from '../../merchant/workspace';
-import { Badge, Button, Card, CardHeader, ErrorState, IconButton, LinkButton, Segmented, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
-import { Alert, Field, Input, Modal, PageHeader, Simulated, Switch, Textarea, useToast } from '../../../ds/kit';
-import { productPhoto } from '../model/media';
+import { logAction, settingsStore, themeStore } from '../../merchant/stores';
+import type { StoreIdentity, StoreStatus } from '../../merchant/workspace';
+import { liveIdentity, mediaSrc } from '../../storefront/theme';
+import { Badge, Button, Card, CardHeader, ErrorState, LinkButton, Segmented, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
+import { Alert, Field, Input, Modal, PageHeader, Simulated, Switch, Tabs, Textarea, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { Locked, NoAccess, ReviewRole, useRole } from '../marketing/access';
 import {
-  HEADING_MAX, MAINT_MAX, STORE_PALETTE as P, canRollback, changeOf, discardDraft, headingError, maintenanceError, move, nextVersion, pendingChanges,
-  previewSections, publish, publishBlock, rollbackTheme, shopperView, toggleStatus, updateSection, type StatusKey,
+  MAINT_MAX, canRollback, identityPending, maintenanceError, nextVersion, pendingChanges, publish, publishBlock, rollbackTheme, sectionIssue, shopperView, toggleStatus, type StatusKey,
 } from './model';
-
-const K_ICON: Record<SectionKind, ReactNode> = {
-  announcement: <Megaphone className="size-4" />, hero: <ImageIcon className="size-4" />, featured: <Sparkles className="size-4" />, categories: <LayoutGrid className="size-4" />,
-  offers: <Tag className="size-4" />, video: <Play className="size-4" />, newsletter: <Mail className="size-4" />,
-};
-const C_TONE: Record<string, Tone> = { moved: 'sky', shown: 'green', hidden: 'gray', edited: 'brand' };
+import { draftIdentity, type IdentityChange } from './identity';
+import IdentityPanel, { useIdentityLabels } from './identity-panel';
+import SectionsPanel, { C_TONE, K_ICON, useKindLabels } from './sections';
+import AnnouncementPanel from './announcement';
+import { StorePreview } from './preview';
+import { mediaStore } from './state';
 
 export default function StorefrontSection({ route }: { route: Route }) {
   const sub = route.path[0];
@@ -36,10 +33,13 @@ export default function StorefrontSection({ route }: { route: Route }) {
   if (sub === 'menus') return <MenusPage />;
   if (sub === 'seo') return <SeoPage route={route} />;
   if (sub) return <SubNotFound />;
-  return <ThemePage />;
+  return <ThemePage route={route} />;
 }
 
-function ThemePage() {
+type EditTab = 'identity' | 'sections' | 'announcement';
+const EDIT_TABS: EditTab[] = ['identity', 'sections', 'announcement'];
+
+function ThemePage({ route }: { route: Route }) {
   const tx = useTx();
   const { lang } = useLang();
   const toast = useToast();
@@ -47,27 +47,35 @@ function ThemePage() {
   const state = useDashState();
   const theme = themeStore.use();
   const settings = settingsStore.use();
+  const L = useIdentityLabels();
+  const { kind, change, issue } = useKindLabels();
   const [device, setDevice] = useState<'desktop' | 'mobile'>('desktop');
+  const [view, setView] = useState<'draft' | 'live' | 'compare'>('draft');
   const [review, setReview] = useState(false);
   const [note, setNote] = useState('');
   const [rollback, setRollback] = useState<number | null>(null);
   const [statusDlg, setStatusDlg] = useState<StatusKey | null>(null);
+  const qEdit = route.query.get('edit') as EditTab | null;
+  const edit: EditTab = qEdit && EDIT_TABS.includes(qEdit) ? qEdit : 'identity';
 
   if (!canSee(role, 'storefront')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('المتجر الإلكتروني غير متاح لدورك', 'The online store is not available for your role')} /></div>;
   const canPublish = can(role, 'theme.publish');
-  const kind = (k: SectionKind) => ({ announcement: tx('شريط إعلان', 'Announcement bar'), hero: tx('بانر رئيسي', 'Hero banner'), featured: tx('منتجات مميزة', 'Featured products'), categories: tx('التصنيفات', 'Categories'), offers: tx('العروض', 'Offers'), video: tx('فيديو', 'Video'), newsletter: tx('النشرة البريدية', 'Newsletter') })[k];
-  const changeName = (k: string) => ({ moved: tx('نُقل', 'Moved'), shown: tx('أُظهر', 'Shown'), hidden: tx('أُخفي', 'Hidden'), edited: tx('عُدّل', 'Edited') } as Record<string, string>)[k];
   const changes = pendingChanges(theme);
+  const idChanges = identityPending(theme);
+  const total = changes.length + idChanges.length;
   const block = publishBlock(theme);
   const nv = nextVersion(theme);
   const st = settings.status;
+  const store = settings.store.name;
+  const draftId = draftIdentity(theme);
+  const firstIssue = theme.draft.map((x) => ({ x, i: sectionIssue(x) })).find((r) => r.i);
 
   const header = (
     <>
       <PageHeader title={tx('المتجر الإلكتروني', 'Online store')} description={tx('ثيم «هادئ» · نسخة تجريبية', 'Theme “Calm” · demo')}
-        meta={<><Badge tone="green">{tx(`المنشور: الإصدار ${theme.published.version}`, `Live: version ${theme.published.version}`)}</Badge><Badge tone={changes.length ? 'brand' : 'gray'}>{changes.length ? tx(`المسودة: ${changes.length} تغييرات`, `Draft: ${changes.length} changes`) : tx('المسودة مطابقة', 'Draft matches live')}</Badge></>}
+        meta={<><Badge tone="green">{tx(`المنشور: الإصدار ${theme.published.version}`, `Live: version ${theme.published.version}`)}</Badge><Badge tone={total ? 'brand' : 'gray'}>{total ? tx(`المسودة: ${total} تغييرات`, `Draft: ${total} changes`) : tx('المسودة مطابقة', 'Draft matches live')}</Badge></>}
         actions={<>
-          <LinkButton variant="secondary" href={link('/store')}><Eye className="size-4" aria-hidden="true" />{tx('معاينة المتجر', 'Preview store')}</LinkButton>
+          <LinkButton variant="secondary" href={link('/store')} target="_blank" rel="noopener"><Eye className="size-4" aria-hidden="true" />{tx('المتجر المنشور', 'Live store')}<ExternalLink className="size-3.5 opacity-60" aria-hidden="true" /></LinkButton>
           {canPublish && <Button disabled={!!block} onClick={() => setReview(true)}><Upload className="size-4" aria-hidden="true" />{tx('راجع وانشر', 'Review and publish')}</Button>}
         </>} />
       <StoreTabs current="theme" />
@@ -98,8 +106,19 @@ function ThemePage() {
     { key: 'accepting', label: tx('استقبال الطلبات', 'Accepting orders'), on: st.accepting, onText: tx('يمكن إتمام الطلبات', 'Orders can be placed'), offText: tx('تصفح فقط، بلا طلبات', 'Browse only, no orders'), tone: st.accepting ? 'green' : 'amber' },
     { key: 'maintenance', label: tx('وضع الصيانة', 'Maintenance mode'), on: st.maintenance, onText: st.message || tx('رسالة الصيانة تظهر', 'Maintenance message shown'), offText: tx('غير مفعّل', 'Off'), tone: st.maintenance ? 'amber' : 'gray' },
   ];
-  const view = shopperView(st);
-  const viewText = { hidden: tx('العملاء لا يرون المتجر', 'Shoppers cannot see the store'), maintenance: tx('العملاء يرون رسالة الصيانة', 'Shoppers see the maintenance message'), browseOnly: tx('العملاء يتصفحون ولا يطلبون', 'Shoppers can browse but not order'), open: tx('المتجر مفتوح ويستقبل الطلبات', 'The store is open and taking orders') }[view];
+  const sView = shopperView(st);
+  const viewText = { hidden: tx('العملاء لا يرون المتجر', 'Shoppers cannot see the store'), maintenance: tx('العملاء يرون رسالة الصيانة', 'Shoppers see the maintenance message'), browseOnly: tx('العملاء يتصفحون ولا يطلبون', 'Shoppers can browse but not order'), open: tx('المتجر مفتوح ويستقبل الطلبات', 'The store is open and taking orders') }[sView];
+  const changedIds = new Set(changes.map((c) => c.id));
+  const tabCount = (t: EditTab) => t === 'identity' ? idChanges.length : t === 'announcement' ? changes.filter((c) => theme.draft.find((x) => x.id === c.id)?.kind === 'announcement').length : changes.filter((c) => (theme.draft.find((x) => x.id === c.id) ?? theme.published.sections.find((x) => x.id === c.id))?.kind !== 'announcement').length;
+
+  const doPublish = () => {
+    const prev = theme.published.version;
+    const what = [...idChanges.map((c) => L.key(c.key)), ...changes.map((c) => { const x = theme.draft.find((d) => d.id === c.id) ?? theme.published.sections.find((d) => d.id === c.id)!; return `${kind(x.kind)} (${change(c.kind)})`; })].join('، ');
+    themeStore.set((t) => publish(t, note));
+    logAction('store', { ar: `نشر الإصدار ${nv} من ثيم المتجر: ${what}`, en: `Published store theme version ${nv}: ${what}` }, { target: `v${nv}`, before: `v${prev}`, after: `v${nv}` });
+    setReview(false); setNote('');
+    toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv}`, `Version ${nv} published`), action: { label: tx(`ارجع إلى ${prev}`, `Roll back to ${prev}`), run: () => { themeStore.set((t) => rollbackTheme(t, prev)); logAction('store', { ar: `تراجع عن نشر الإصدار ${nv} إلى ${prev}`, en: `Undid publishing version ${nv}, back to ${prev}` }, { target: `v${nv + 1}` }); } } });
+  };
 
   return (
     <div className="space-y-6">
@@ -107,7 +126,7 @@ function ThemePage() {
 
       <Card aria-labelledby="h-status">
         <CardHeader id="h-status" title={tx('حالة المتجر', 'Store status')} hint={tx('ثلاثة قرارات منفصلة: الظهور، واستقبال الطلبات، والصيانة. الصيانة تغلب الاثنين.', 'Three separate decisions: visibility, accepting orders and maintenance. Maintenance overrides the other two.')}
-          action={<span className={cn('flex items-center gap-1.5 text-xs font-medium', view === 'open' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300')}><span className={cn('size-2 rounded-full', view === 'open' ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden="true" />{viewText}</span>} />
+          action={<span className={cn('flex items-center gap-1.5 text-xs font-medium', sView === 'open' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-300')}><span className={cn('size-2 rounded-full', sView === 'open' ? 'bg-emerald-500' : 'bg-amber-500')} aria-hidden="true" /><span className="hidden sm:inline">{viewText}</span></span>} />
         <ul className="grid grid-cols-1 divide-y divide-border border-t border-border md:grid-cols-3 md:divide-y-0">
           {statusRows.map((r, i) => (
             <li key={r.key} className={cn('flex items-center gap-3 px-5 py-4', i > 0 && 'md:border-s md:border-border')}>
@@ -124,58 +143,62 @@ function ThemePage() {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-5">
         <div className="min-w-0 space-y-6 lg:col-span-3">
-          <Card aria-labelledby="h-sections">
-            <CardHeader id="h-sections" title={tx('أقسام الصفحة الرئيسية', 'Homepage sections')} hint={tx('التعديلات تُحفظ في المسودة تلقائيًا ولا يراها العملاء حتى تنشر.', 'Edits save to the draft automatically and stay invisible to shoppers until you publish.')}
-              action={changes.length ? <Button variant="ghost" size="sm" onClick={() => themeStore.set(discardDraft)}>{tx('تجاهل المسودة', 'Discard draft')}</Button> : <span className="text-xs text-muted">{tx('محفوظ في المسودة', 'Saved to draft')}</span>} />
-            {draft.length === 0 ? (
-              <p className="px-5 pb-6 text-sm text-muted">{tx('لا أقسام في الصفحة الرئيسية.', 'No homepage sections.')}</p>
-            ) : (
-              <ol className="divide-y divide-border border-t border-border">
-                {draft.map((s, i) => {
-                  const ch = changeOf(theme, s.id);
-                  const hErr = headingError(s.heading);
-                  return (
-                    <li key={s.id} className={cn('flex flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap sm:px-5', !s.visible && 'bg-surface-2/40')}>
-                      <span className={cn('grid size-9 shrink-0 place-items-center rounded-xl', s.visible ? 'bg-brand-500/10 text-brand-600 dark:text-brand-300' : 'bg-surface-2 text-subtle')} aria-hidden="true">{K_ICON[s.kind]}</span>
-                      <div className="min-w-0 flex-1 basis-48">
-                        <p className="flex items-center gap-2 text-xs font-semibold text-muted"><span className="tabular-nums">{i + 1}.</span>{kind(s.kind)}{ch && <Badge tone={C_TONE[ch]} className="h-5 px-2 text-[11px]">{changeName(ch)}</Badge>}</p>
-                        <Field label={<span className="sr-only">{tx(`عنوان ${kind(s.kind)}`, `${kind(s.kind)} heading`)}</span>} className="mt-1 space-y-1" error={hErr === 'empty' ? tx('اكتب عنوانًا', 'Enter a heading') : hErr === 'long' ? tx(`الحد ${HEADING_MAX} حرفًا`, `Max ${HEADING_MAX} characters`) : null}>
-                          {(p) => <Input {...p} className="h-9" dir="auto" value={s.heading} onChange={(e) => themeStore.set((t) => updateSection(t, s.id, { heading: e.target.value }))} />}
-                        </Field>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <span className="me-2 inline-flex items-center gap-2 text-xs text-muted">{s.visible ? <Eye className="size-4" aria-hidden="true" /> : <EyeOff className="size-4" aria-hidden="true" />}<Switch checked={s.visible} label={tx(`إظهار ${kind(s.kind)}`, `Show ${kind(s.kind)}`)} onChange={(v) => themeStore.set((t) => updateSection(t, s.id, { visible: v }))} /></span>
-                        <IconButton label={tx(`انقل ${kind(s.kind)} للأعلى`, `Move ${kind(s.kind)} up`)} disabled={i === 0} className="disabled:opacity-30" onClick={() => themeStore.set((t) => move(t, s.id, -1))}><ArrowUp className="size-4" aria-hidden="true" /></IconButton>
-                        <IconButton label={tx(`انقل ${kind(s.kind)} للأسفل`, `Move ${kind(s.kind)} down`)} disabled={i === draft.length - 1} className="disabled:opacity-30" onClick={() => themeStore.set((t) => move(t, s.id, 1))}><ArrowDown className="size-4" aria-hidden="true" /></IconButton>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </Card>
+          <Tabs label={tx('ما تعدّله', 'What you edit')} items={EDIT_TABS.map((t) => ({
+            href: storeHref('theme', { edit: t === 'identity' ? undefined : t }), current: edit === t, count: tabCount(t) || undefined,
+            label: { identity: tx('الهوية', 'Identity'), sections: tx('الأقسام', 'Sections'), announcement: tx('شريط الإعلان', 'Announcement') }[t],
+          }))} />
+          {block === 'invalid' && firstIssue && (
+            <Alert tone="warn" action={<LinkButton size="sm" variant="secondary" href={storeHref('theme', { edit: firstIssue.x.kind === 'announcement' ? 'announcement' : 'sections' })}>{tx('اذهب إليه', 'Go to it')}</LinkButton>}>
+              {tx('لا يمكن النشر قبل إصلاح:', 'Fix before publishing:')} {kind(firstIssue.x.kind)} · {issue(firstIssue.i!)}
+            </Alert>
+          )}
+          {edit === 'identity' && <IdentityPanel store={store} />}
+          {edit === 'sections' && <SectionsPanel empty={empty} />}
+          {edit === 'announcement' && <AnnouncementPanel empty={empty} />}
 
           <Card aria-labelledby="h-hist">
-            <CardHeader id="h-hist" title={tx('سجل الإصدارات', 'Version history')} hint={tx('الرجوع ينشر نسخة من إصدار سابق كإصدار جديد؛ السجل لا يُحذف.', 'Rolling back publishes a copy of an earlier version as a new one; history is never deleted.')} />
+            <CardHeader id="h-hist" title={tx('سجل الإصدارات', 'Version history')} hint={tx('الرجوع ينشر نسخة من إصدار سابق (أقسام وهوية) كإصدار جديد؛ السجل لا يُحذف.', 'Rolling back publishes a copy of an earlier version (sections and identity) as a new one; history is never deleted.')} />
             <ul className="divide-y divide-border border-t border-border">
-              {theme.history.map((h) => (
-                <li key={h.version} className="flex items-center gap-3 px-5 py-3">
-                  <History className="size-4 shrink-0 text-subtle" aria-hidden="true" />
-                  <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-fg tabular-nums">{tx(`الإصدار ${h.version}`, `Version ${h.version}`)}</p><p className="truncate text-xs text-muted" dir="auto">{h.note}</p></div>
-                  {h.version === theme.published.version ? <Badge tone="green">{tx('منشور', 'Live')}</Badge>
-                    : canPublish && canRollback(theme, h.version) && <Button variant="secondary" size="sm" onClick={() => setRollback(h.version)}>{tx('ارجع لهذا', 'Roll back')}</Button>}
-                </li>
-              ))}
+              {theme.history.map((h) => {
+                const hid = h.identity;
+                return (
+                  <li key={h.version} className="flex items-center gap-3 px-5 py-3">
+                    <History className="size-4 shrink-0 text-subtle" aria-hidden="true" />
+                    {hid && <span className="size-3.5 shrink-0 rounded-full ring-1 ring-border" style={{ background: hid.accent }} title={hid.accent} aria-hidden="true" />}
+                    <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-fg tabular-nums">{tx(`الإصدار ${h.version}`, `Version ${h.version}`)}</p><p className="truncate text-xs text-muted" dir="auto">{h.note}</p></div>
+                    {h.version === theme.published.version ? <Badge tone="green">{tx('منشور', 'Live')}</Badge>
+                      : canPublish && canRollback(theme, h.version) && <Button variant="secondary" size="sm" onClick={() => setRollback(h.version)}>{tx('ارجع لهذا', 'Roll back')}</Button>}
+                  </li>
+                );
+              })}
             </ul>
           </Card>
         </div>
 
         <div className="min-w-0 space-y-6 lg:col-span-2">
           <Card aria-labelledby="h-prev" className="lg:sticky lg:top-24">
-            <CardHeader id="h-prev" title={tx('معاينة المسودة', 'Draft preview')} hint={tx('بألوان متجرك التجريبي، لا ألوان «لك». تتحدث مع كل تعديل.', 'In your demo store’s colours, not LAK’s. Updates with every edit.')}
-              action={<Segmented label={tx('الجهاز', 'Device')} value={device} onChange={setDevice} options={[{ value: 'desktop', label: tx('كمبيوتر', 'Desktop') }, { value: 'mobile', label: tx('جوال', 'Mobile') }]} />} />
+            <CardHeader id="h-prev" title={view === 'live' ? tx('المنشور الآن', 'Live now') : view === 'compare' ? tx('المنشور مقابل المسودة', 'Live vs draft') : tx('معاينة المسودة', 'Draft preview')}
+              hint={tx('بهوية متجرك وألوانه، لا ألوان «لك». تتحدث مع كل تعديل.', 'In your store’s own identity and colours, not LAK’s. Updates with every edit.')} />
+            <div className="flex flex-wrap items-center gap-2 px-5 pb-3">
+              <Segmented label={tx('العرض', 'View')} value={view} onChange={setView} options={[{ value: 'draft', label: tx('المسودة', 'Draft') }, { value: 'live', label: tx('المنشور', 'Live') }, { value: 'compare', label: tx('قارن', 'Compare') }]} />
+              {view !== 'compare' && <Segmented label={tx('الجهاز', 'Device')} value={device} onChange={setDevice} options={[{ value: 'desktop', label: tx('كمبيوتر', 'Desktop') }, { value: 'mobile', label: tx('جوال', 'Phone') }]} />}
+            </div>
             <div className="px-5 pb-5">
-              <Preview draft={draft} device={device} store={settings.store.name} kind={kind} lang={lang} />
+              {view === 'compare' ? (
+                <div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="min-w-0"><p className="mb-1.5 text-center text-xs font-semibold text-muted">{tx(`المنشور · ${theme.published.version}`, `Live · ${theme.published.version}`)}</p>
+                      <StorePreview sections={theme.published.sections} identity={liveIdentity(theme)} device="mobile" store={store} lang={lang} label={tx('معاينة المنشور', 'Live preview')} /></div>
+                    <div className="min-w-0"><p className="mb-1.5 text-center text-xs font-semibold text-brand-700 dark:text-brand-300">{tx(`المسودة · ${total} تغييرات`, `Draft · ${total} changes`)}</p>
+                      <StorePreview sections={draft} identity={draftId} device="mobile" store={store} lang={lang} changed={changedIds} label={tx('معاينة المسودة', 'Draft preview')} /></div>
+                  </div>
+                  {total === 0 ? <p className="mt-3 text-center text-xs text-muted">{tx('لا فرق: المسودة مطابقة للمنشور.', 'No difference: the draft matches live.')}</p>
+                    : <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted"><ArrowLeftRight className="size-3.5" aria-hidden="true" />{tx('الأقسام المتغيرة محاطة بخط متقطع', 'Changed sections have a dashed outline')}</p>}
+                </div>
+              ) : (
+                <StorePreview sections={view === 'live' ? theme.published.sections : draft} identity={view === 'live' ? liveIdentity(theme) : draftId} device={device} store={store} lang={lang}
+                  label={tx(`معاينة ${view === 'live' ? 'المنشور' : 'المسودة'}`, `${view === 'live' ? 'Live' : 'Draft'} preview`)} />
+              )}
             </div>
           </Card>
 
@@ -192,13 +215,26 @@ function ThemePage() {
 
       {review && (
         <Modal size="lg" title={tx(`نشر الإصدار ${nv}`, `Publish version ${nv}`)} description={tx('يرى العملاء التغييرات فور النشر.', 'Shoppers see the changes as soon as you publish.')} onClose={() => setReview(false)}
-          footer={<><Button variant="secondary" onClick={() => setReview(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { const prev = theme.published.version; themeStore.set((t) => publish(t, note)); logAction('store', { ar: `نشر الإصدار ${nv} من ثيم المتجر`, en: `Published store theme version ${nv}` }, { target: `v${nv}`, before: `v${prev}`, after: `v${nv}` }); setReview(false); setNote(''); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv}`, `Version ${nv} published`), action: { label: tx(`ارجع إلى ${prev}`, `Roll back to ${prev}`), run: () => themeStore.set((t) => rollbackTheme(t, prev)) } }); }}><Upload className="size-4" aria-hidden="true" />{tx('انشر للعملاء', 'Publish to shoppers')}</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setReview(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={doPublish}><Upload className="size-4" aria-hidden="true" />{tx('انشر للعملاء', 'Publish to shoppers')}</Button></>}>
           <div className="flex flex-wrap items-center gap-2 text-sm"><Badge tone="gray">{tx(`الحالي: ${theme.published.version}`, `Live: ${theme.published.version}`)}</Badge><span className="text-subtle" aria-hidden="true">{tx('←', '→')}</span><Badge tone="brand">{tx(`الجديد: ${nv}`, `New: ${nv}`)}</Badge></div>
-          <ul className="divide-y divide-border rounded-xl border border-border">
-            {changes.map((c) => { const s = theme.draft.find((x) => x.id === c.id)!; return (
-              <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm"><span className="text-muted" aria-hidden="true">{K_ICON[s.kind]}</span><span className="min-w-0 flex-1 truncate text-fg">{kind(s.kind)} · <span className="text-muted" dir="auto">{s.heading}</span></span><Badge tone={C_TONE[c.kind]}>{changeName(c.kind)}</Badge></li>
-            ); })}
-          </ul>
+          {idChanges.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-muted">{tx('الهوية', 'Identity')}</p>
+              <ul className="divide-y divide-border rounded-xl border border-border">
+                {idChanges.map((c) => <IdentityRow key={c.key} c={c} label={L.key(c.key)} labels={L} />)}
+              </ul>
+            </div>
+          )}
+          {changes.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-xs font-semibold text-muted">{tx('الأقسام', 'Sections')}</p>
+              <ul className="divide-y divide-border rounded-xl border border-border">
+                {changes.map((c) => { const x = theme.draft.find((d) => d.id === c.id) ?? theme.published.sections.find((d) => d.id === c.id)!; return (
+                  <li key={c.id} className="flex items-center gap-3 px-4 py-2.5 text-sm"><span className="text-muted" aria-hidden="true">{K_ICON[x.kind]}</span><span className="min-w-0 flex-1 truncate text-fg">{kind(x.kind)} · <span className="text-muted" dir="auto">{x.heading}</span></span><Badge tone={C_TONE[c.kind]}>{change(c.kind)}</Badge></li>
+                ); })}
+              </ul>
+            </div>
+          )}
           <Field label={tx('ملاحظة الإصدار', 'Version note')} optional>{(p) => <Input {...p} value={note} maxLength={80} onChange={(e) => setNote(e.target.value)} />}</Field>
           <p className="text-[13px] text-muted">{tx(`الإصدار ${theme.published.version} يبقى في السجل ويمكن الرجوع إليه.`, `Version ${theme.published.version} stays in history and can be restored.`)}</p>
           <Simulated />
@@ -208,8 +244,8 @@ function ThemePage() {
         <Modal title={tx(`الرجوع إلى الإصدار ${rollback}`, `Roll back to version ${rollback}`)} onClose={() => setRollback(null)}
           footer={<><Button variant="secondary" onClick={() => setRollback(null)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { themeStore.set((t) => rollbackTheme(t, rollback)); logAction('store', { ar: `أرجع الثيم إلى الإصدار ${rollback} (نُشر كإصدار ${nv})`, en: `Rolled the theme back to version ${rollback} (published as ${nv})` }, { target: `v${nv}` }); setRollback(null); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv} (نسخة من ${rollback})`, `Version ${nv} published (copy of ${rollback})`) }); }}>{tx('ارجع وانشر', 'Roll back and publish')}</Button></>}>
           <ul className="space-y-1.5 text-sm text-fg">
-            <li>{tx(`تُنشر نسخة من الإصدار ${rollback} كإصدار جديد ${nv}.`, `A copy of version ${rollback} is published as new version ${nv}.`)}</li>
-            {changes.length > 0 && <li className="font-medium text-amber-800 dark:text-amber-300">{tx(`تعديلات المسودة الحالية (${changes.length}) تُستبدل.`, `Current draft edits (${changes.length}) are replaced.`)}</li>}
+            <li>{tx(`تُنشر نسخة من الإصدار ${rollback} (الأقسام والهوية) كإصدار جديد ${nv}.`, `A copy of version ${rollback} (sections and identity) is published as new version ${nv}.`)}</li>
+            {total > 0 && <li className="font-medium text-amber-800 dark:text-amber-300">{tx(`تعديلات المسودة الحالية (${total}) تُستبدل.`, `Current draft edits (${total}) are replaced.`)}</li>}
             <li>{tx('السجل لا يُحذف.', 'History is not deleted.')}</li>
           </ul>
           <Simulated />
@@ -217,6 +253,26 @@ function ThemePage() {
       )}
       {statusDlg && <StatusModal k={statusDlg} st={st} onClose={() => setStatusDlg(null)} />}
     </div>
+  );
+}
+
+/** One identity change in the publish review: before → after, shown as the thing itself (swatch, picture, name). */
+function IdentityRow({ c, label, labels }: { c: IdentityChange; label: string; labels: ReturnType<typeof useIdentityLabels> }) {
+  const tx = useTx();
+  const lib = mediaStore.use();
+  const show = (v: string | null): ReactNode => {
+    if (c.key === 'accent') return v ? <span className="inline-flex items-center gap-1.5"><span className="size-4 rounded-full ring-1 ring-border" style={{ background: v }} aria-hidden="true" /><bdi dir="ltr" className="font-mono text-xs">{v}</bdi></span> : '—';
+    if (c.key === 'logo' || c.key === 'favicon') { const src = mediaSrc(v, lib); return src ? <img src={src} alt="" className={cn('object-contain', c.key === 'logo' ? 'h-6 max-w-24' : 'size-5')} /> : <span className="text-xs text-muted">{tx('بلا', 'None')}</span>; }
+    if (c.key === 'font') return labels.font(v as StoreIdentity['font']);
+    if (c.key === 'button') return labels.button(v as StoreIdentity['button']);
+    if (c.key === 'header') return labels.header(v as StoreIdentity['header']);
+    return v;
+  };
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
+      <span className="min-w-0 flex-1 font-medium text-fg">{label}</span>
+      <span className="flex items-center gap-2 text-muted">{show(c.before)}<span className="text-subtle" aria-hidden="true">{tx('←', '→')}</span><span className="text-fg">{show(c.after)}</span></span>
+    </li>
   );
 }
 
@@ -266,56 +322,6 @@ function ChannelLink({ href, icon, title, sub }: { href: string; icon: ReactNode
         <ExternalLink className="size-4 text-subtle" aria-hidden="true" />
       </a>
     </li>
-  );
-}
-
-/** A faithful-enough sketch of the homepage in the store's palette: same order, visibility and headings as the draft. */
-function Preview({ draft, device, store, kind, lang }: { draft: { id: string; kind: SectionKind; heading: string; visible: boolean }[]; device: 'desktop' | 'mobile'; store: string; kind: (k: SectionKind) => string; lang: 'ar' | 'en' }) {
-  const tx = useTx();
-  const products = productsStore.use();
-  const featured = products.filter((p) => p.status === 'active' && productPhoto(p.id)).slice(0, device === 'mobile' ? 2 : 3);
-  const shown = previewSections(draft);
-  const box: CSSProperties = { background: P.bg, color: P.ink, borderColor: P.line };
-  return (
-    <div className={cn('mx-auto overflow-hidden rounded-xl border shadow-card transition-[max-width]', device === 'mobile' ? 'max-w-[260px]' : 'max-w-full')} style={box} role="img" aria-label={tx(`معاينة: ${shown.map((s) => kind(s.kind)).join('، ')}`, `Preview: ${shown.map((s) => kind(s.kind)).join(', ')}`)}>
-      <div className="flex items-center justify-between border-b px-3 py-2 text-[11px] font-bold tracking-wide" style={{ background: P.paper, borderColor: P.line }}>
-        <span>{store}</span><span className="flex gap-1.5" aria-hidden="true"><span className="size-1.5 rounded-full" style={{ background: P.muted }} /><span className="size-1.5 rounded-full" style={{ background: P.muted }} /></span>
-      </div>
-      <div className="max-h-[520px] space-y-2 overflow-y-auto p-2 scrollbar-thin">
-        {shown.length === 0 && <p className="px-3 py-10 text-center text-xs" style={{ color: P.muted }}>{tx('كل الأقسام مخفية', 'Every section is hidden')}</p>}
-        {shown.map((s) => {
-          if (s.kind === 'announcement') return <div key={s.id} className="rounded px-3 py-1.5 text-center text-[11px]" style={{ background: P.ink, color: '#f6efe4' }} dir="auto">{s.heading}</div>;
-          if (s.kind === 'hero') return (
-            <div key={s.id} className="relative overflow-hidden rounded-lg" style={{ background: P.tile }}>
-              <img src={productPhoto('p1', 'large')} alt="" className="h-28 w-full object-cover" loading="lazy" />
-              <div className="absolute inset-x-0 bottom-0 p-3" style={{ background: 'linear-gradient(transparent, rgb(30 27 24 / .75))' }}><p className="text-sm font-bold text-white" dir="auto">{s.heading}</p><span className="mt-1 inline-block rounded px-2 py-0.5 text-[10px] font-semibold" style={{ background: P.paper, color: P.ink }}>{tx('تسوّق الآن', 'Shop now')}</span></div>
-            </div>
-          );
-          if (s.kind === 'featured') return (
-            <div key={s.id} className="rounded-lg p-2" style={{ background: P.paper }}>
-              <p className="mb-2 text-xs font-bold" dir="auto">{s.heading}</p>
-              <div className={cn('grid gap-2', device === 'mobile' ? 'grid-cols-2' : 'grid-cols-3')}>
-                {featured.map((p) => <div key={p.id}><img src={productPhoto(p.id)} alt={p.name[lang]} className="aspect-square w-full rounded-md object-cover" loading="lazy" /><p className="mt-1 truncate text-[10px]">{p.name[lang]}</p></div>)}
-              </div>
-            </div>
-          );
-          if (s.kind === 'categories') return (
-            <div key={s.id} className="rounded-lg p-2" style={{ background: P.paper }}>
-              <p className="mb-2 text-xs font-bold" dir="auto">{s.heading}</p>
-              <div className="flex flex-wrap gap-1.5">{[tx('عبايات', 'Abayas'), tx('عطور', 'Fragrance'), tx('حقائب', 'Bags'), tx('منزل', 'Home')].map((c) => <span key={c} className="rounded-full border px-2 py-0.5 text-[10px]" style={{ borderColor: P.line, background: P.sand }}>{c}</span>)}</div>
-            </div>
-          );
-          if (s.kind === 'offers') return <div key={s.id} className="rounded-lg border-2 border-dashed px-3 py-3 text-center text-xs font-bold" style={{ borderColor: P.accent, color: P.sale }} dir="auto">{s.heading}</div>;
-          if (s.kind === 'video') return <div key={s.id} className="grid h-20 place-items-center rounded-lg" style={{ background: P.ink, color: '#f6efe4' }}><span className="flex items-center gap-2 text-[11px]" dir="auto"><Play className="size-4" aria-hidden="true" />{s.heading}</span></div>;
-          return (
-            <div key={s.id} className="rounded-lg p-3 text-center" style={{ background: P.sand }}>
-              <p className="text-xs font-bold" dir="auto">{s.heading}</p>
-              <div className="mx-auto mt-2 flex max-w-48 gap-1"><span className="h-6 flex-1 rounded border" style={{ background: P.paper, borderColor: P.line }} /><span className="h-6 w-12 rounded" style={{ background: P.ink }} /></div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
   );
 }
 

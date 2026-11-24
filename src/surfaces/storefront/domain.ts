@@ -285,11 +285,16 @@ export const CITIES: { id: CityId; name: L; zone: 0 | 1 | 2; districts: L[] }[] 
   { id: 'tabuk', name: { ar: 'تبوك', en: 'Tabuk' }, zone: 2, districts: [{ ar: 'المروج', en: 'Al Muruj' }, { ar: 'الفيصلية', en: 'Al Faisaliyah' }] },
 ];
 
-export type ShipId = 'standard' | 'express' | 'pickup';
+/** The fixture methods, or any method id the merchant set up (dashboard → Settings → Shipping). */
+export type ShipId = 'standard' | 'express' | 'pickup' | (string & {});
 export interface ShipMethod {
   id: ShipId; name: L; cost: number; zones: number[]; transit: Record<number, [number, number]>; note: L;
   /** Goods value (after discount) from which this method is free; null/absent = never free. */
   freeFrom?: number | null;
+  /** Merchant's preparation days for this destination; absent = the store default. */
+  handling?: number;
+  /** Cash on delivery with this method (merchant's shipping setup); absent = allowed. */
+  codOk?: boolean;
 }
 
 export const SHIP_METHODS: ShipMethod[] = [
@@ -331,7 +336,7 @@ export function deliveryEstimate(m: ShipMethod, city: CityId, now: number): { fr
   const c = cityById(city);
   if (!c || !m.zones.includes(c.zone)) return undefined;
   const transit = m.transit[c.zone];
-  const handling = MERCHANT.handlingDays;
+  const handling = m.handling ?? MERCHANT.handlingDays;
   return { from: addBusinessDays(now, handling + transit[0]), to: addBusinessDays(now, handling + transit[1]), handling, transit };
 }
 
@@ -356,15 +361,16 @@ export function computeTotals(lines: { amount: number }[], o: { discount?: numbe
 
 /** `bank` = bank transfer to the merchant's IBAN: the order is placed and waits for the transfer to be confirmed. */
 export type PayMethod = 'card' | 'applepay' | 'bnpl' | 'cod' | 'bank';
-export type Ineligible = 'no_device' | 'cod_over_limit' | 'cod_under_min' | 'cod_open_limit' | 'bnpl_range' | 'pickup_cod';
+export type Ineligible = 'no_device' | 'cod_over_limit' | 'cod_under_min' | 'cod_open_limit' | 'bnpl_range' | 'pickup_cod' | 'ship_cod';
 
 /** Limits default to the rule fixtures (MERCHANT); the live store passes the merchant's settings. `codOpenLimit: null` = no limit. */
-export function payEligibility(m: PayMethod, ctx: { total: number; applePayDevice: boolean; openCod: number; ship?: ShipId; codFee?: number; codMin?: number; codMax?: number; codOpenLimit?: number | null }): Ineligible | null {
+export function payEligibility(m: PayMethod, ctx: { total: number; applePayDevice: boolean; openCod: number; ship?: ShipId; codFee?: number; codMin?: number; codMax?: number; codOpenLimit?: number | null; codOk?: boolean }): Ineligible | null {
   if (m === 'applepay' && !ctx.applePayDevice) return 'no_device';
   if (m === 'cod') {
     const goods = ctx.total - (ctx.codFee ?? MERCHANT.codFee);
     const openLimit = ctx.codOpenLimit === undefined ? MERCHANT.codOpenLimit : ctx.codOpenLimit;
     if (ctx.ship === 'pickup') return 'pickup_cod';
+    if (ctx.codOk === false) return 'ship_cod';
     if (goods > (ctx.codMax ?? MERCHANT.codMax)) return 'cod_over_limit';
     if (goods < (ctx.codMin ?? 0)) return 'cod_under_min';
     if (openLimit !== null && ctx.openCod >= openLimit) return 'cod_open_limit';

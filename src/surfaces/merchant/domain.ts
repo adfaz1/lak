@@ -109,6 +109,8 @@ export interface Fulfilment {
   carrier?: CarrierId;
   /** Carrier tracking number when it differs from the label reference. */
   tracking?: string;
+  /** The label was voided at the carrier without cancelling the order (merchant/ops.ts voidLabels); qty is zeroed. */
+  voided?: boolean;
 }
 export type RefundStatus = 'pending' | 'confirmed' | 'failed';
 export interface Refund { id: string; amount: number; qty: number[]; shipping: number; restock: number[]; loc: LocId; reason: string; status: RefundStatus }
@@ -158,6 +160,12 @@ export interface Order {
   returns?: import('./ops').OrderReturn[];
   /** Created by hand in the dashboard; how it was or will be paid. */
   manual?: { pay: 'cash' | 'transfer' | 'link' | 'cod' };
+  /** Customer messages this order sent (simulated), newest last. merchant/ops.ts recordNotices. */
+  messages?: import('./ops').CustomerMessage[];
+  /** Language the customer reads messages in; absent = the store's default customer language. */
+  lang?: 'ar' | 'en';
+  /** Payment deadline (epoch ms) for orders awaiting a transfer or a payment link; absent = placed + 3 days. */
+  payDue?: number;
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {

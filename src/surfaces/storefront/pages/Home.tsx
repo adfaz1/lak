@@ -1,10 +1,11 @@
 // Storefront home: the merchant's published homepage sections, in the merchant's order, with the merchant's headings.
 import { useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, CreditCard, Receipt, RotateCcw, Tag, Truck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, BadgeCheck, Check, CreditCard, Quote, Receipt, RotateCcw, Star, Tag, Truck } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
 import { Field, Input } from '../../../ds/kit';
-import { themeStore } from '../../merchant/stores';
+import { collectionsStore, levelsStore, productsStore, reviewSettingsStore, reviewsStore, themeStore } from '../../merchant/stores';
+import { mediaStore } from '../../dashboard/storefront/state';
 import type { Section } from '../../merchant/workspace';
 import { EMAIL_RE, inStock, productById, type Product } from '../domain';
 import type { Coupon as MCoupon } from '../../merchant/growth';
@@ -13,7 +14,7 @@ import { H2, PANEL, ProductPhoto, WRAP, to, useS } from '../kit';
 import { hasPhoto } from '../photos';
 import { newsletterStore } from '../state';
 import { useCatalog, useCategories, useConfig, useCoupons } from '../data';
-import { headingText, liveSections } from '../theme';
+import { gridProducts, headingText, liveSections, mediaSrc, productRef, testimonials } from '../theme';
 import { ProductCard, ProductGrid } from './Listing';
 
 /** Featured = products on sale first, then the catalogue order the merchant set; sold-out products are skipped. */
@@ -75,9 +76,18 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
   const offer = liveOffer(useCoupons(), Date.now());
   const title = headingText(s.heading, lang);
   const hid = `sf-h-${s.id}`;
+  const media = mediaStore.use();
+  const mProducts = productsStore.use();
+  const levels = levelsStore.use();
+  const collections = collectionsStore.use();
+  const reviews = reviewsStore.use();
+  const reviewSettings = reviewSettingsStore.use();
+  /** Merchant links: a store path ("/c/abayas") stays inside the store; https:// opens as written. */
+  const href = (x: string) => (x.startsWith('/') ? to(x) : x);
   switch (s.kind) {
     case 'hero': {
-      const cover = productById(products, 'p1') ?? products.find((p) => hasPhoto(p.id)) ?? products[0];
+      const cover = productById(products, productRef(s.image) ?? 'p1') ?? productById(products, 'p1') ?? products.find((p) => hasPhoto(p.id)) ?? products[0];
+      const upload = mediaSrc(s.image, media);
       const second = cats.find((c) => c.id === 'fragrance') ?? cats[1];
       return (
         <section aria-labelledby={hid} className="bg-surface-2/60">
@@ -85,9 +95,9 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
             <div className="order-2 max-w-xl lg:order-1">
               <p className="text-[13px] font-semibold tracking-wide text-brand-700 dark:text-brand-300">{t.heroEyebrow}</p>
               <h1 id={hid} className="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-fg sm:text-5xl lg:text-[56px]">{title}</h1>
-              <p className="mt-4 text-[15px] leading-relaxed text-muted sm:text-lg">{t.heroSub}</p>
+              <p className="mt-4 text-[15px] leading-relaxed text-muted sm:text-lg" dir={s.body ? 'auto' : undefined}>{s.body || t.heroSub}</p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <LinkButton href={to(`/c/${cover.cat}`)} size="lg" className="h-12 px-7">{t.heroCta}</LinkButton>
+                <LinkButton href={s.link ? href(s.link) : to(`/c/${cover.cat}`)} size="lg" className="h-12 px-7">{t.heroCta}</LinkButton>
                 {second && second.id !== cover.cat && <LinkButton href={to(`/c/${second.id}`)} size="lg" variant="secondary" className="h-12 px-6">{second.id === 'fragrance' ? t.heroCta2 : l(second.name)}</LinkButton>}
               </div>
               {offer && (
@@ -98,9 +108,13 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
                 </p>
               )}
             </div>
-            <a href={to(`/p/${cover.id}`)} className="group order-1 block lg:order-2" aria-label={l(cover.name)}>
-              <ProductPhoto p={cover} variant="card" eager className="rounded-3xl shadow-[0_30px_60px_-30px_rgb(0_0_0/0.35)] sm:aspect-[5/4] lg:aspect-[4/5]" />
-            </a>
+            {upload ? (
+              <img src={upload} alt="" className="order-1 aspect-[4/5] w-full rounded-3xl object-cover shadow-[0_30px_60px_-30px_rgb(0_0_0/0.35)] sm:aspect-[5/4] lg:order-2 lg:aspect-[4/5]" />
+            ) : (
+              <a href={to(`/p/${cover.id}`)} className="group order-1 block lg:order-2" aria-label={l(cover.name)}>
+                <ProductPhoto p={cover} variant="card" eager className="rounded-3xl shadow-[0_30px_60px_-30px_rgb(0_0_0/0.35)] sm:aspect-[5/4] lg:aspect-[4/5]" />
+              </a>
+            )}
           </div>
         </section>
       );
@@ -164,6 +178,73 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
       );
     case 'newsletter':
       return <Newsletter id={hid} title={title} />;
+    case 'grid': {
+      const list = gridProducts(s.source, products, mProducts, levels, collections).slice(0, 8);
+      if (!list.length) return null;
+      const more = s.source?.startsWith('cat:') ? to(`/c/${s.source.slice(4)}`) : undefined;
+      return (
+        <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
+          <SectionHead id={hid} title={title} href={more} />
+          <ProductGrid products={list} className="xl:grid-cols-4" />
+        </section>
+      );
+    }
+    case 'banner': {
+      const pic = mediaSrc(s.image, media);
+      const prod = productById(products, productRef(s.image) ?? '');
+      if (!pic && !prod) return null;
+      return (
+        <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
+          <div className="grid items-center overflow-hidden rounded-3xl bg-surface-2 md:grid-cols-2">
+            {pic ? <img src={pic} alt="" className="aspect-[16/10] w-full object-cover md:aspect-auto md:h-full" loading="lazy" /> : <ProductPhoto p={prod!} className="rounded-none md:aspect-[5/4]" />}
+            <div className="p-6 sm:p-10">
+              <h2 id={hid} className={H2} dir="auto">{title}</h2>
+              {s.body && <p className="mt-3 leading-relaxed text-muted" dir="auto">{s.body}</p>}
+              {s.link && <LinkButton href={href(s.link)} size="lg" className="mt-6 h-12 px-7" {...(s.link.startsWith('/') ? {} : { target: '_blank', rel: 'noopener' })}>{t.viewAll}</LinkButton>}
+            </div>
+          </div>
+        </section>
+      );
+    }
+    case 'testimonials': {
+      // Only real, published reviews; with none, the section stays off the page rather than showing invented quotes.
+      const list = testimonials(reviews, reviewSettings);
+      if (!list.length) return null;
+      return (
+        <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
+          <SectionHead id={hid} title={title} />
+          <ul className="grid gap-4 md:grid-cols-3">
+            {list.map((r) => {
+              const p = productById(products, r.productId);
+              return (
+                <li key={r.id}>
+                  <figure className={cn(PANEL, 'flex h-full flex-col gap-3 p-6')}>
+                    <Quote className="size-5 text-brand-700 dark:text-brand-300" aria-hidden="true" />
+                    <span className="flex gap-0.5" aria-label={`${r.rating}/5`}>{Array.from({ length: 5 }, (_, i) => <Star key={i} className={cn('size-4', i < r.rating ? 'fill-current text-brand-600 dark:text-brand-300' : 'text-border')} aria-hidden="true" />)}</span>
+                    <blockquote className="flex-1 leading-relaxed text-fg" dir="auto">{r.text}</blockquote>
+                    <figcaption className="text-sm text-muted">
+                      <span className="font-semibold text-fg">{l(r.author)}</span>
+                      {r.verified && <span className="ms-2 inline-flex items-center gap-1 text-xs"><BadgeCheck className="size-3.5" aria-hidden="true" />{lang === 'ar' ? 'مشترٍ موثّق' : 'Verified buyer'}</span>}
+                      {p && <a href={to(`/p/${p.id}`)} className="mt-1 block truncate text-xs underline-offset-2 hover:underline">{l(p.name)}</a>}
+                    </figcaption>
+                  </figure>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      );
+    }
+    case 'richtext':
+      if (!s.body?.trim()) return null;
+      return (
+        <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
+          <div className="mx-auto max-w-3xl text-center">
+            <h2 id={hid} className={H2} dir="auto">{title}</h2>
+            <div className="mt-4 space-y-3 text-[15px] leading-relaxed text-muted" dir="auto">{s.body.split(/\n{2,}/).map((para, i) => <p key={i} className="whitespace-pre-line">{para}</p>)}</div>
+          </div>
+        </section>
+      );
     default:
       return null;
   }

@@ -1,105 +1,74 @@
-// Shipping: zones, flat or weight rates, free-shipping threshold.
-import { useState } from 'react';
-import { MapPin, Pencil, Plus, Trash2, Truck } from 'lucide-react';
+// Shipping (`#/dashboard/settings/shipping`): methods by category and their carriers, rules for when each shows at
+// checkout, zones and delivery promises, a "what the shopper sees" simulator, international readiness per product,
+// and operations (warehouse by city, phone check, COD exceptions). The online store reads all of it (storefront/bridge.ts).
+import { Truck } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { settingsStore } from '../../merchant/stores';
-import type { Zone } from '../../merchant/workspace';
-import { Badge, Button, EmptyState, IconButton, InfoHint, Money, useTx } from '../../../ds/ui';
-import { Drawer, Field, Input, Modal, Select, useToast } from '../../../ds/kit';
+import { useRoute } from '../../../core/router';
+import { shippingFixture } from '../../merchant/workspace';
+import { Button, Card, EmptyState, useTx } from '../../../ds/ui';
+import { Tabs } from '../../../ds/kit';
 import { setDashState, useDashState } from '../review';
-import { parseZone, shippingQuote, upsertZone, zoneDraft, type ZoneDraft } from './model';
-import { Section } from './common';
+import { summary } from './shipping-model';
+import { SHIP_TABS, commitShipping, shipHref, useShipping, type ShipTab } from './shipping-ui';
+import MethodsTab from './shipping-methods';
+import RulesTab from './shipping-rules';
+import SimulateTab from './shipping-sim';
+import IntlTab from './shipping-intl';
+import { OptionsTab, ZonesTab } from './shipping-more';
 
-const SAMPLE = { subtotal: 20000, kg: 2 };
+const LABEL: Record<ShipTab, { ar: string; en: string }> = {
+  methods: { ar: 'الطرق والناقلون', en: 'Methods & carriers' },
+  rules: { ar: 'القواعد', en: 'Rules' },
+  zones: { ar: 'المناطق والوعود', en: 'Zones & promises' },
+  simulate: { ar: 'ماذا يرى العميل', en: 'What the shopper sees' },
+  intl: { ar: 'الجاهزية الدولية', en: 'International' },
+  options: { ar: 'التشغيل والدفع عند الاستلام', en: 'Operations & COD' },
+};
 
 export default function ShippingPage() {
   const tx = useTx();
   const { lang } = useLang();
-  const toast = useToast();
-  const empty = useDashState() === 'empty';
-  const stored = settingsStore.use().zones;
-  const zones = empty ? [] : stored;
-  const [edit, setEdit] = useState<{ d: ZoneDraft; prev: Zone | null } | null>(null);
-  const [del, setDel] = useState<Zone | null>(null);
-  const add = () => setEdit({ d: zoneDraft(null, lang, `z${Date.now()}`), prev: null });
+  const route = useRoute();
+  const state = useDashState();
+  const { setup, products } = useShipping();
+  const raw = route.query.get('tab') ?? 'methods';
+  const tab: ShipTab = (SHIP_TABS as string[]).includes(raw) ? (raw as ShipTab) : 'methods';
+  const s = summary(setup, products);
+
+  if (state === 'empty') {
+    return (
+      <Card><EmptyState as="h2" icon={<Truck className="size-6" aria-hidden="true" />} title={tx('لم يُجهَّز الشحن بعد', 'Shipping isn’t set up yet')}
+        action={<Button onClick={() => {
+          commitShipping(shippingFixture(), { ar: 'بدأ إعداد الشحن من القالب المقترح', en: 'Started shipping from the suggested setup' });
+          setDashState('live');
+        }}>{tx('ابدأ بالإعداد المقترح', 'Start with the suggested setup')}</Button>}>
+        {tx('بدون طريقة شحن ومنطقة لا يستطيع العملاء إتمام طلب يُشحن. نبدأ بطرق شائعة تعدّلها كما تريد.', 'Without a method and a zone shoppers can’t complete a shipped order. Start from common methods and adjust.')}
+      </EmptyState></Card>
+    );
+  }
 
   return (
     <>
-      <Section id="zn-h" flush title={tx('مناطق الشحن', 'Shipping zones')}
-        hint={<InfoHint>{tx('يختار العميل مدينته فيُطبَّق سعر أول منطقة تغطيها.', 'The shopper picks a city and the first zone that covers it sets the price.')}</InfoHint>}
-        action={zones.length > 0 && <Button size="sm" onClick={add}><Plus className="size-4" aria-hidden="true" />{tx('أضف منطقة', 'Add zone')}</Button>}>
-        {zones.length === 0 ? (
-          <EmptyState icon={<Truck className="size-6" aria-hidden="true" />} title={tx('لا مناطق شحن بعد', 'No shipping zones yet')}
-            action={<Button onClick={add}><Plus className="size-4" aria-hidden="true" />{tx('أضف أول منطقة', 'Add your first zone')}</Button>}>
-            {tx('بدون منطقة لا يستطيع العملاء إتمام طلب يُشحن.', 'Without a zone shoppers can’t complete a shipped order.')}
-          </EmptyState>
-        ) : (
-          <ul className="divide-y divide-border border-t border-border">
-            {zones.map((z) => (
-              <li key={z.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
-                <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted" aria-hidden="true"><MapPin className="size-5" /></span>
-                <div className="min-w-0 flex-1 basis-48">
-                  <p className="text-sm font-semibold text-fg">{z.name[lang]}</p>
-                  <p className="truncate text-xs text-muted">{z.cities[lang]}</p>
-                  <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-fg">
-                    {z.rateType === 'flat' ? <><span className="text-muted">{tx('ثابت', 'Flat')}</span><Money v={z.rate} /></>
-                      : <><span className="text-muted">{tx('بالوزن', 'By weight')}</span><Money v={z.rate} /><span className="text-muted">+</span><Money v={z.perKg} /><span className="text-muted">{tx('لكل كجم إضافي', 'per extra kg')}</span></>}
-                    {z.freeOver !== null && <Badge tone="green">{tx('مجاني فوق ', 'Free over ')}<Money v={z.freeOver} /></Badge>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <IconButton label={tx(`تعديل ${z.name.ar}`, `Edit ${z.name.en}`)} onClick={() => setEdit({ d: zoneDraft(z, lang, z.id), prev: z })}><Pencil className="size-4" aria-hidden="true" /></IconButton>
-                  <IconButton label={tx(`حذف ${z.name.ar}`, `Delete ${z.name.en}`)} onClick={() => setDel(z)}><Trash2 className="size-4" aria-hidden="true" /></IconButton>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      {edit && <ZoneDrawer draft={edit.d} prev={edit.prev} onClose={() => setEdit(null)} onSave={(z) => {
-        settingsStore.set((x) => ({ ...x, zones: upsertZone(x.zones, z) }));
-        if (empty) setDashState('live');
-        setEdit(null);
-        toast({ tone: 'ok', text: tx(`حُفظت ${z.name.ar}`, `${z.name.en} saved`) });
-      }} />}
-
-      {del && (
-        <Modal title={tx(`حذف ${del.name.ar}`, `Delete ${del.name.en}`)} onClose={() => setDel(null)}
-          description={tx('لن يستطيع العملاء في هذه المدن إتمام طلبات تُشحن حتى تغطيها منطقة أخرى. الطلبات الحالية لا تتأثر.', 'Shoppers in these cities can’t complete shipped orders until another zone covers them. Existing orders are unaffected.')}
-          footer={<><Button variant="secondary" onClick={() => setDel(null)}>{tx('إلغاء', 'Cancel')}</Button><Button variant="danger" onClick={() => {
-            settingsStore.set((x) => ({ ...x, zones: x.zones.filter((z) => z.id !== del.id) })); setDel(null);
-          }}>{tx('احذف المنطقة', 'Delete zone')}</Button></>} />
-      )}
+      <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          { k: tx('طرق مفعّلة', 'Active methods'), v: `${s.methodsOn}/${s.methods}`, href: shipHref('methods') },
+          { k: tx('قواعد مفعّلة', 'Active rules'), v: `${s.rulesOn}`, href: shipHref('rules') },
+          { k: tx('جاهز دوليًا', 'Ready abroad'), v: `${s.ready}/${s.physical}`, href: shipHref('intl') },
+          { k: tx('ناقل يحتاج إجراءً', 'Carriers needing action'), v: `${s.carriersAction}`, href: shipHref('methods'), warn: s.carriersAction > 0 },
+        ].map((x) => (
+          <a key={x.k} href={x.href} className="rounded-2xl border border-border bg-surface px-4 py-3 shadow-card transition-colors hover:border-brand-300">
+            <dt className="text-xs text-muted">{x.k}</dt>
+            <dd className={x.warn ? 'mt-1 text-lg font-bold tabular-nums text-amber-600 dark:text-amber-400' : 'mt-1 text-lg font-bold tabular-nums text-fg'}>{x.v}</dd>
+          </a>
+        ))}
+      </dl>
+      <Tabs label={tx('أقسام الشحن', 'Shipping sections')} items={SHIP_TABS.map((t) => ({ href: shipHref(t), label: LABEL[t][lang], current: t === tab }))} />
+      {tab === 'methods' && <MethodsTab />}
+      {tab === 'rules' && <RulesTab />}
+      {tab === 'zones' && <ZonesTab />}
+      {tab === 'simulate' && <SimulateTab />}
+      {tab === 'intl' && <IntlTab />}
+      {tab === 'options' && <OptionsTab />}
     </>
-  );
-}
-
-function ZoneDrawer({ draft, prev, onClose, onSave }: { draft: ZoneDraft; prev: Zone | null; onClose: () => void; onSave: (z: Zone) => void }) {
-  const tx = useTx();
-  const { lang } = useLang();
-  const [d, setD] = useState(draft);
-  const [tried, setTried] = useState(false);
-  const r = parseZone(d, prev, lang);
-  const e = tried && !r.ok ? r.errors : {};
-  const set = (p: Partial<ZoneDraft>) => setD({ ...d, ...p });
-  return (
-    <Drawer title={prev ? tx('تعديل المنطقة', 'Edit zone') : tx('منطقة جديدة', 'New zone')} onClose={onClose}
-      footer={<><Button className="flex-1" onClick={() => { setTried(true); if (r.ok) onSave(r.zone); }}>{tx('احفظ المنطقة', 'Save zone')}</Button><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button></>}>
-      <Field label={tx('اسم المنطقة', 'Zone name')} error={e.name ? tx('مطلوب', 'Required') : null}>{(p) => <Input {...p} value={d.name} onChange={(ev) => set({ name: ev.target.value })} />}</Field>
-      <Field label={tx('المدن', 'Cities')} hint={tx('افصل بفاصلة', 'Separate with commas')} error={e.cities ? tx('أضف مدينة واحدة على الأقل', 'Add at least one city') : null}>{(p) => <Input {...p} value={d.cities} onChange={(ev) => set({ cities: ev.target.value })} />}</Field>
-      <Field label={tx('طريقة التسعير', 'Pricing')}>{(p) => <Select {...p} value={d.rateType} onChange={(ev) => set({ rateType: ev.target.value as Zone['rateType'] })}><option value="flat">{tx('سعر ثابت', 'Flat rate')}</option><option value="weight">{tx('حسب الوزن', 'By weight')}</option></Select>}</Field>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label={d.rateType === 'flat' ? tx('السعر (ر.س)', 'Rate (SAR)') : tx('أول كجم (ر.س)', 'First kg (SAR)')} error={e.rate ? tx('مبلغ غير صالح', 'Invalid amount') : null}>{(p) => <Input {...p} dir="ltr" inputMode="decimal" value={d.rate} onChange={(ev) => set({ rate: ev.target.value })} />}</Field>
-        {d.rateType === 'weight' && <Field label={tx('لكل كجم إضافي', 'Per extra kg')} error={e.perKg ? tx('مبلغ أكبر من صفر', 'Above zero') : null}>{(p) => <Input {...p} dir="ltr" inputMode="decimal" value={d.perKg} onChange={(ev) => set({ perKg: ev.target.value })} />}</Field>}
-      </div>
-      <Field label={tx('شحن مجاني فوق (ر.س)', 'Free shipping over (SAR)')} optional error={e.free ? tx('مبلغ غير صالح', 'Invalid amount') : null}>{(p) => <Input {...p} dir="ltr" inputMode="decimal" value={d.free} onChange={(ev) => set({ free: ev.target.value })} />}</Field>
-      {r.ok && (
-        <div className="rounded-xl bg-surface-2 p-3 text-[13px]">
-          <p className="text-muted">{tx('مثال: طلب بـ 200 ر.س ووزن 2 كجم', 'Example: a SAR 200 order weighing 2 kg')}</p>
-          <p className="mt-1 font-semibold text-fg">{tx('الشحن: ', 'Shipping: ')}{shippingQuote(r.zone, SAMPLE.subtotal, SAMPLE.kg) === 0 ? tx('مجاني', 'Free') : <Money v={shippingQuote(r.zone, SAMPLE.subtotal, SAMPLE.kg)} />}</p>
-        </div>
-      )}
-    </Drawer>
   );
 }

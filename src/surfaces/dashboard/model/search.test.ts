@@ -36,7 +36,8 @@ describe('global search', () => {
   it('finds tools and settings by keywords in either language', () => {
     expect(toolHits('مدى', 'owner').map((h) => h.id)).toContain('payments');
     expect(toolHits('transfer', 'owner').map((h) => h.id)).toContain('inventory-transfers');
-    expect(toolHits('سلة متروكة', 'owner').map((h) => h.id)).toEqual(['carts']);
+    // The carts list comes first; the reminder sequence for abandoned carts is found by the same words.
+    expect(toolHits('سلة متروكة', 'owner').map((h) => h.id)).toEqual(['carts', 'cart-reminders']);
   });
   it('respects the role: hidden sections and tools never appear', () => {
     const r = globalSearch('عباية', { ...data, role: 'fulfilment', canSee: (s) => s !== 'products' });

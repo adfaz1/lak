@@ -4,10 +4,11 @@
 //   reserved  = units held for paid orders not yet fulfilled
 //   available = on hand − reserved (what can still be sold)
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
-import { LOC_IDS, allLocations, type L, type LocId } from '../../merchant/domain';
+//   plus awaiting payment, unavailable, safety reserve and outgoing (merchant/inventory.ts "Full stock states")
+import { LOC_IDS, allLocations, type L, type LocId, type Order } from '../../merchant/domain';
 import { normaliseDigits, skusOf, variantText, type Product } from '../../merchant/catalog';
 import {
-  MAX_THRESHOLD, available, coverage, levelOf, lowStock, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
+  MAX_THRESHOLD, available, breakdown, coverage, levelOf, lowStock, type Breakdown, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
 } from '../../merchant/inventory';
 
 export interface SkuInfo { productId: string | undefined; name: L; variant: L }
@@ -29,7 +30,7 @@ export const readTab = (v: string | null): Tab => (v === 'low' || v === 'transfe
 export const readLoc = (v: string | null): LocId | '' => (v && allLocations().some((l) => l.id === v) ? v : '');
 
 /** `unstocked`: the SKU has no record at this active location yet (e.g. a new branch); shown so it can be stocked. */
-export interface LevelRow extends Level { key: string; available: number; low: boolean; info: SkuInfo; unstocked?: boolean }
+export interface LevelRow extends Level { key: string; available: number; low: boolean; info: SkuInfo; unstocked?: boolean; /** Every stock state (outgoing needs transfers). */ states: Breakdown }
 export const levelKey = (l: Pick<Level, 'sku' | 'loc'>) => `${l.sku}@${l.loc}`;
 
 const matches = (q: string, sku: string, i: SkuInfo) => {
@@ -38,17 +39,18 @@ const matches = (q: string, sku: string, i: SkuInfo) => {
 };
 
 /** Levels per SKU and warehouse, filtered by search and warehouse; low rows only on the low-stock view. */
-export function levelRows(levels: Level[], info: Map<string, SkuInfo>, f: { q: string; loc: LocId | ''; lowOnly?: boolean }): LevelRow[] {
+export function levelRows(levels: Level[], info: Map<string, SkuInfo>, f: { q: string; loc: LocId | ''; lowOnly?: boolean; state?: StateFilter | '' }, transfers: Transfer[] = []): LevelRow[] {
   const have = new Set(levels.map(levelKey));
   const skus = [...new Set(levels.map((l) => l.sku))];
   // Active locations without a record for a tracked SKU (a branch added in this session) get an empty, unstocked row.
   const unstocked: LevelRow[] = f.lowOnly ? [] : LOC_IDS.flatMap((loc) => skus.filter((sku) => !have.has(`${sku}@${loc}`)).map((sku) => ({
     sku, loc, onHand: 0, reserved: 0, incoming: 0, version: 0, threshold: 0, key: `${sku}@${loc}`, available: 0, low: false, info: infoFor(info, sku), unstocked: true,
+    states: breakdown({ sku, loc, onHand: 0, reserved: 0, incoming: 0, version: 0, threshold: 0 }, transfers),
   })));
   const order = (loc: LocId) => { const i = LOC_IDS.indexOf(loc); return i < 0 ? 99 : i; };
   return [...levels
-    .map((l) => ({ ...l, key: levelKey(l), available: available(l), low: available(l) <= l.threshold, info: infoFor(info, l.sku) })), ...unstocked]
-    .filter((r) => (!f.loc || r.loc === f.loc) && (!f.lowOnly || r.low) && matches(f.q, r.sku, r.info))
+    .map((l) => ({ ...l, key: levelKey(l), available: available(l), low: available(l) <= l.threshold, info: infoFor(info, l.sku), states: breakdown(l, transfers) })), ...unstocked]
+    .filter((r) => (!f.loc || r.loc === f.loc) && (!f.lowOnly || r.low) && (!f.state || stateMatch(r.states, f.state)) && matches(f.q, r.sku, r.info))
     .sort((a, b) => (f.lowOnly ? a.available - b.available : 0) || a.sku.localeCompare(b.sku) || order(a.loc) - order(b.loc));
 }
 
@@ -77,7 +79,7 @@ export function adjustPreview(seen: Level, input: string): AdjustPreview {
   const after = seen.onHand + (delta ?? 0);
   return {
     delta, ready: delta !== null && delta !== 0 && after >= 0,
-    onHand: [seen.onHand, after], available: [available(seen), after - seen.reserved],
+    onHand: [seen.onHand, after], available: [available(seen), available({ ...seen, onHand: after })],
     belowZero: after < 0, oversold: delta !== null && delta < 0 && after >= 0 && after < seen.reserved,
   };
 }
@@ -166,11 +168,11 @@ export function parseThreshold(input: string): number | null {
   return n !== null && n >= 0 && n <= MAX_THRESHOLD ? n : null;
 }
 /** What a new reorder point would do to the chosen rows: how many become low, how many stop being low. */
-export function thresholdPreview(rows: Pick<Level, 'onHand' | 'reserved' | 'threshold'>[], threshold: number | null) {
+export function thresholdPreview(rows: Pick<Level, 'onHand' | 'reserved' | 'threshold' | 'awaitingPay' | 'unavailable' | 'safety'>[], threshold: number | null) {
   if (threshold === null) return { becomeLow: 0, leaveLow: 0, unchanged: rows.length };
   let becomeLow = 0, leaveLow = 0;
   for (const r of rows) {
-    const a = r.onHand - r.reserved;
+    const a = available(r as Level);
     const was = a <= r.threshold, will = a <= threshold;
     if (!was && will) becomeLow++; else if (was && !will) leaveLow++;
   }
@@ -199,8 +201,8 @@ export function locationRows(levels: Level[], transfers: Transfer[]): Map<LocId,
 
 /** Levels as CSV rows (one per SKU and location); headers match the count import. */
 export function levelsCsv(rows: LevelRow[], locName: (id: LocId) => string): (string | number)[][] {
-  return [['sku', 'product', 'variant', 'location_id', 'location', 'on_hand', 'reserved', 'available', 'incoming', 'reorder_point'],
-    ...rows.filter((r) => !r.unstocked).map((r) => [r.sku, r.info.name.en, r.info.variant.en, r.loc, locName(r.loc), r.onHand, r.reserved, r.available, r.incoming, r.threshold])];
+  return [['sku', 'product', 'variant', 'location_id', 'location', 'on_hand', 'reserved', 'available', 'incoming', 'reorder_point', 'awaiting_payment', 'unavailable', 'safety_reserve', 'outgoing'],
+    ...rows.filter((r) => !r.unstocked).map((r) => [r.sku, r.info.name.en, r.info.variant.en, r.loc, locName(r.loc), r.onHand, r.reserved, r.available, r.incoming, r.threshold, r.states.awaitingPay, r.states.unavailable, r.states.safety, r.states.outgoing])];
 }
 
 /* ---------- Count import (inventory CSV) ---------- */
@@ -233,4 +235,51 @@ export function checkCount(rows: string[][], headers: string[], levels: Level[],
     if (!problem) seen.add(`${sku}@${loc}`);
     return { line: i + 2, sku, loc, counted: n, before, delta: problem || n === null ? 0 : n - before, problem, raw };
   });
+}
+
+/* ---------- Full stock states on the screens ---------- */
+
+/** True when part of on hand is held back from sale by something other than paid orders (the "Held" quick view). */
+export const isHeld = (b: Breakdown) => b.awaitingPay + b.unavailable + b.safety > 0;
+export type StateFilter = 'held' | 'awaitingPay' | 'unavailable' | 'safety' | 'transit';
+export const STATE_FILTERS: StateFilter[] = ['held', 'awaitingPay', 'unavailable', 'safety', 'transit'];
+export const readStateFilter = (v: string | null): StateFilter | '' => (STATE_FILTERS as string[]).includes(v ?? '') ? (v as StateFilter) : '';
+export function stateMatch(b: Breakdown, f: StateFilter): boolean {
+  if (f === 'held') return isHeld(b);
+  if (f === 'transit') return b.incoming + b.outgoing > 0;
+  return b[f] > 0;
+}
+export type LevelCols = 'essential' | 'all';
+export const readCols = (v: string | null): LevelCols => (v === 'all' ? 'all' : 'essential');
+
+/** Paid orders holding units of a SKU at a location, from each order line's per-location reservation. */
+export function reservedBy(orders: Order[], sku: string, loc: LocId): { ref: string; qty: number }[] {
+  const out: { ref: string; qty: number }[] = [];
+  for (const o of orders) {
+    if (o.cancelled) continue;
+    const qty = o.items.filter((it) => it.sku === sku).reduce((s, it) => s + (it.reserved?.[loc] ?? 0), 0);
+    if (qty > 0) out.push({ ref: o.ref, qty });
+  }
+  return out;
+}
+
+/** Open transfers that bring units of a SKU into (incoming) or out of (outgoing) a location. */
+export function transfersFor(transfers: Transfer[], sku: string, loc: LocId): { incoming: { id: string; qty: number }[]; outgoing: { id: string; qty: number }[] } {
+  const live = transfers.filter((t) => t.status === 'sent' || t.status === 'partial');
+  const units = (t: Transfer) => t.lines.filter((l) => l.sku === sku).reduce((s, l) => s + l.qty - l.received, 0);
+  return {
+    incoming: live.filter((t) => t.to === loc && units(t) > 0).map((t) => ({ id: t.id, qty: units(t) })),
+    outgoing: live.filter((t) => t.from === loc && units(t) > 0).map((t) => ({ id: t.id, qty: units(t) })),
+  };
+}
+
+/** Next id for a state move in the stock log. */
+export const nextMoveId = (log: StockLog[]) => `ST-${Math.max(100, ...log.filter((x) => x.id.startsWith('ST-')).map((x) => Number(x.id.slice(3)) || 0)) + 1}`;
+
+/** Widths (percent) of each on-hand part for the composition bar; empty when nothing is on hand. */
+export function compositionBar(b: Breakdown): { part: 'available' | 'reserved' | 'awaitingPay' | 'unavailable' | 'safety'; pct: number }[] {
+  if (b.onHand <= 0) return [];
+  const parts = (['available', 'reserved', 'awaitingPay', 'unavailable', 'safety'] as const).map((part) => ({ part, n: Math.max(0, b[part]) }));
+  const total = parts.reduce((s, x) => s + x.n, 0) || 1;
+  return parts.filter((x) => x.n > 0).map((x) => ({ part: x.part, pct: Math.round((x.n * 1000) / total) / 10 }));
 }

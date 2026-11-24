@@ -3,7 +3,7 @@
 import { createStore } from '../../core/store';
 import { allOrders, bindLocations, locationFixtures, type Location } from './domain';
 import { categoryFixtures, collectionFixtures, productFixtures, skusOf, type Category, type Collection, type ProductDraft } from './catalog';
-import { initialLevels, syncStockAlerts, transferFixtures, type StockAlertEntry, type StockLog } from './inventory';
+import { initialLevels, syncStockAlerts, transferFixtures, withStateFixtures, type StockAlertEntry, type StockLog } from './inventory';
 import { financeFixtures, type BankDetails, type Plan } from './finance';
 import {
   automationFixtures, cartFixtures, couponFixtures, runFixtures, giftFixtures, loyaltyFixture, reviewFixtures, reviewSettingsFixture, syncEarned,
@@ -14,12 +14,14 @@ import {
   appFixtures, domainFixture, notifyFixture, policyFixtures, providerFixtures, setupFixture, statusFixture, storeFixture, teamFixture,
   themeFixture, zoneFixtures, customerFixtures, segmentFixtures, type Customer, type Member, type SavedSegment,
 } from './workspace';
+import { shippingFixture, type ShippingSetup } from './workspace';
 import type { Role } from './perms';
 
 export const ordersStore = createStore.key('merchant.ordersStore')(allOrders);
 export const productsStore = createStore.key('merchant.productsStore')(productFixtures);
 // Digital products (gift cards) have no warehouse stock.
-export const levelsStore = createStore.key('merchant.levelsStore')(() => initialLevels(productFixtures().filter((p) => p.type !== 'digital').flatMap(skusOf)));
+// withStateFixtures: a few demo holds (awaiting payment, damaged, safety reserve) so every stock state has an example.
+export const levelsStore = createStore.key('merchant.levelsStore')(() => withStateFixtures(initialLevels(productFixtures().filter((p) => p.type !== 'digital').flatMap(skusOf))));
 export const stockLogStore = createStore.key('merchant.stockLogStore')<StockLog[]>(() => [
   { id: 'ADJ-201', sku: 'OUD-100', loc: 'ryd', delta: -2, before: 6, after: 4, reason: 'damaged', who: 'فيصل', note: 'انكسرت أثناء التغليف' },
   { id: 'ADJ-200', sku: 'BAG-LTH-01', loc: 'ryd', delta: 5, before: 2, after: 7, reason: 'received', who: 'فيصل', note: 'توريد من المورّد' },
@@ -44,6 +46,8 @@ export const settingsStore = createStore.key('merchant.settingsStore')(() => ({
   storeLangs: { ar: true, en: true },
   /** Bank-transfer details shoppers pay into (BP-P03-PMT-002). Null until the merchant saves them. Older sessions may lack the key. */
   bank: null as BankDetails | null,
+  /** Shipping methods, carriers, rules, delivery promises, customs data and COD rules (dashboard → Settings → Shipping). Older sessions may lack the key. */
+  shipping: shippingFixture() as ShippingSetup | undefined,
 }));
 /** Customers: the fixtures plus anyone who orders from the online store with a new mobile/email. */
 export const customersStore = createStore.key('merchant.customersStore')<Customer[]>(customerFixtures);
@@ -97,3 +101,30 @@ export const segmentsStore = createStore.key('merchant.segmentsStore')<SavedSegm
 /** Things done to a customer record (block, unblock, consent withdrawn, points adjusted, imported), newest first. */
 export interface CustomerEvent { id: string; kind: 'blocked' | 'unblocked' | 'consentWithdrawn' | 'points' | 'imported' | 'giftCard'; text: string; by: string; at: number }
 export const customerEventsStore = createStore.key('merchant.customerEventsStore')<Record<string, CustomerEvent[]>>(() => ({}));
+
+/* ---------- Customer order messages (orders group; merchant/ops.ts recordNotices). Simulated: nothing is sent. ---------- */
+import { noticeFixture, recordNotices, type NoticeConfig, type NoticeCtx } from './ops';
+import type { Order as NoticeOrder } from './domain';
+/** Channels and bilingual templates per order state (Settings → Notifications → Customer messages). */
+export const noticesStore = createStore.key('merchant.noticesStore')<NoticeConfig>(noticeFixture);
+/** Orders whose next state change should not notify the customer (the merchant switched it off for that action). */
+export const noticeMute = new Set<string>();
+/** What the message layer needs for one order: store name, tracking-page base and the customer's addresses. */
+export function noticeCtx(o: NoticeOrder, now = Date.now()): NoticeCtx {
+  const c = customersStore.get().find((x) => x.id === o.customerId) ?? customersStore.get().find((x) => x.name.en === o.customer.en);
+  let base = '#/store/track/';
+  try { base = `${window.location.origin}${window.location.pathname}#/store/track/`; } catch { /* tests: no window */ }
+  return { store: settingsStore.get().store.name, trackBase: base, contact: { phone: o.contact?.phone ?? c?.phone, email: o.contact?.email ?? c?.email }, now };
+}
+{
+  // Every orders write, from any screen or the online store, records the messages its state changes send.
+  const write = ordersStore.set;
+  ordersStore.set = (next) => {
+    const before = ordersStore.get();
+    write(next);
+    const after = ordersStore.get();
+    const noted = recordNotices(before, after, noticesStore.get(), (o) => noticeCtx(o), noticeMute);
+    noticeMute.clear();
+    if (noted !== after) write(noted);
+  };
+}

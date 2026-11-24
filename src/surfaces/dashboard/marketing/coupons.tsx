@@ -48,7 +48,8 @@ export default function Coupons({ route, empty, canManage }: { route: Route; emp
   const { lang } = useLang();
   const ct = useCouponText();
   const toast = useToast();
-  const all = couponsStore.use();
+  // Single-use codes made by reminders are listed on the reminders page, not here.
+  const all = couponsStore.use().filter((c) => !c.origin);
   const orders = ordersStore.use();
   const list = empty ? [] : all;
   const [confirm, setConfirm] = useState<{ c: Coupon; to: 'activate' | 'pause' } | null>(null);

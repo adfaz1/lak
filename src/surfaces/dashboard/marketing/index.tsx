@@ -20,10 +20,11 @@ import Campaigns from './campaigns';
 import Loyalty from './loyalty';
 import GiftCards from './gift-cards';
 import Reviews from './reviews';
+import Reminders from './reminders';
 
-export type Tab = 'coupons' | 'carts' | 'campaigns' | 'loyalty' | 'gift-cards' | 'reviews';
+export type Tab = 'coupons' | 'carts' | 'reminders' | 'campaigns' | 'loyalty' | 'gift-cards' | 'reviews';
 export const mhref = (q?: Record<string, string | undefined>) => link('/dashboard/marketing', q);
-const SUB: Tab[] = ['loyalty', 'gift-cards', 'reviews'];
+const SUB: Tab[] = ['reminders', 'loyalty', 'gift-cards', 'reviews'];
 
 export default function Marketing({ route }: { route: Route }) {
   const tx = useTx();
@@ -61,8 +62,9 @@ export default function Marketing({ route }: { route: Route }) {
       <PageHeader title={tx('التسويق والعروض', 'Marketing & offers')} description={tx('عروض ورسائل وولاء، بمعاينة قبل أي أثر', 'Offers, messages and loyalty, previewed before any effect')} actions={actions} />
       <ReviewRole />
       <Tabs label={tx('أقسام التسويق', 'Marketing sections')} items={[
-        { href: mhref(), label: tx('الكوبونات والعروض', 'Coupons & offers'), current: tab === 'coupons', count: cnt(coupons.length) },
+        { href: mhref(), label: tx('الكوبونات والعروض', 'Coupons & offers'), current: tab === 'coupons', count: cnt(coupons.filter((c) => !c.origin).length) },
         { href: mhref({ tab: 'carts' }), label: tx('السلال المتروكة', 'Abandoned carts'), current: tab === 'carts', count: cnt(audience(carts, 'email', 4).eligible.length) },
+        { href: sublink('reminders'), label: tx('التذكيرات', 'Reminders'), current: tab === 'reminders' },
         { href: mhref({ tab: 'campaigns' }), label: tx('الحملات', 'Campaigns'), current: tab === 'campaigns', count: cnt(campaigns.length) },
         { href: sublink('loyalty'), label: tx('الولاء', 'Loyalty'), current: tab === 'loyalty' },
         { href: sublink('gift-cards'), label: tx('بطاقات الهدايا', 'Gift cards'), current: tab === 'gift-cards', count: cnt(cards.filter((g) => giftState(g) === 'active').length) },
@@ -85,6 +87,7 @@ export default function Marketing({ route }: { route: Route }) {
       {header}
       {tab === 'coupons' && <Coupons route={route} empty={empty} canManage={manage} />}
       {tab === 'carts' && <Carts route={route} empty={empty} canSend={send} />}
+      {tab === 'reminders' && <Reminders route={route} empty={empty} canManage={manage} canSend={send} />}
       {tab === 'campaigns' && <Campaigns route={route} empty={empty} canSend={send} />}
       {tab === 'loyalty' && <Loyalty route={route} empty={empty} canManage={manage} />}
       {tab === 'gift-cards' && <GiftCards route={route} empty={empty} canManage={manage} />}

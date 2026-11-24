@@ -18,7 +18,7 @@ export function StorefrontPage() {
   const [rollback, setRollback] = useState<number | null>(null);
   const [statusDlg, setStatusDlg] = useState<null | 'published' | 'accepting' | 'maintenance'>(null);
   const [published, setPublished] = useState<number | null>(null);
-  const kind = (k: SectionKind) => ({ announcement: tx('شريط إعلان', 'Announcement bar'), hero: tx('بانر رئيسي', 'Hero banner'), featured: tx('منتجات مميزة', 'Featured products'), categories: tx('التصنيفات', 'Categories'), offers: tx('العروض', 'Offers'), video: tx('فيديو', 'Video'), newsletter: tx('النشرة البريدية', 'Newsletter') })[k];
+  const kind = (k: SectionKind) => ({ announcement: tx('شريط إعلان', 'Announcement bar'), hero: tx('بانر رئيسي', 'Hero banner'), featured: tx('منتجات مميزة', 'Featured products'), categories: tx('التصنيفات', 'Categories'), offers: tx('العروض', 'Offers'), video: tx('فيديو', 'Video'), newsletter: tx('النشرة البريدية', 'Newsletter'), grid: tx('شبكة منتجات', 'Product grid'), banner: tx('بانر', 'Banner'), testimonials: tx('آراء العملاء', 'Testimonials'), richtext: tx('نص', 'Rich text') })[k];
   const changes = diffSections(theme.published.sections, theme.draft).filter((c) => c.kind !== 'unchanged');
   const setDraft = (draft: Section[]) => themeStore.set((t) => ({ ...t, draft }));
   const upd = (id: string, p: Partial<Section>) => setDraft(theme.draft.map((s) => (s.id === id ? { ...s, ...p } : s)));

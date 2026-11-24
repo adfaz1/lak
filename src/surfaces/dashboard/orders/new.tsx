@@ -206,7 +206,7 @@ export default function NewOrder() {
             <ul className="space-y-1.5 text-sm">{q.lines.map((l) => <li key={l.opt.sku} className="flex items-center justify-between gap-2"><span className="truncate text-fg">{l.opt.name[lang]}{l.opt.variant && ` · ${l.opt.variant[lang]}`}</span><b className="tabular-nums">× {l.qty}</b></li>)}</ul>
           </div>
           {d.pay === 'link' && <Alert tone="warn">{tx('يُحجز المخزون والطلب غير مدفوع. ألغِه إن لم يدفع العميل.', 'Stock is held while the order is unpaid. Cancel it if the customer does not pay.')}</Alert>}
-          <p className={cn('text-xs text-muted')}>{tx('لا رسالة للعميل من هنا. يُسجّل في سجل الطلب باسمك.', 'No message is sent to the customer. Logged on the order under your name.')}</p>
+          <p className={cn('text-xs text-muted')}>{tx('تصل العميل رسالة «استلام الطلب» حسب إعدادات إشعارات العملاء (محاكاة). يُسجّل في سجل الطلب باسمك.', 'The customer gets the “Order placed” message set in customer notifications (simulated). Logged on the order under your name.')}</p>
         </Modal>
       )}
     </div>

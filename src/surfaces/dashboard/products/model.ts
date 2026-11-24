@@ -116,7 +116,11 @@ export function bulkChanged(products: Product[], rows: BulkRow[]): string[] {
 export type StockBy = Record<LocId, string>;
 export interface EditVariant extends VariantDraft { stockBy: StockBy }
 /** The catalogue draft plus what this editor adds: category and initial stock per warehouse. */
-export interface EditDraft extends Omit<ProductDraft, 'variants'> { variants: EditVariant[]; category: L; stockBy: StockBy; tags: string[]; /** Name of the product this unsaved draft was copied from. */ copyOf?: string }
+export interface EditDraft extends Omit<ProductDraft, 'variants'> {
+  variants: EditVariant[]; category: L; stockBy: StockBy; tags: string[]; /** Name of the product this unsaved draft was copied from. */ copyOf?: string;
+  /** VAT applies (default). Older session drafts may lack it. */ taxable?: boolean;
+  /** Colour × size combinations the merchant removed on purpose, as `colour|size` keys (lower case); never re-added by a rebuild. */ skip?: string[];
+}
 
 export const CATEGORIES: L[] = [
   { ar: 'أزياء', en: 'Fashion' }, { ar: 'عطور', en: 'Fragrance' }, { ar: 'حقائب', en: 'Bags' }, { ar: 'منزل', en: 'Home' },
@@ -145,14 +149,15 @@ export function mediaOf(p: Product): Media[] {
 export const listPhoto = (p: Product) => (p.media.length ? mediaSrc(p.media[0]) : productPhoto(p.id));
 
 export function toEditDraft(p: Product | undefined): EditDraft {
-  if (!p) return { ...emptyDraft(), variants: [], category: CATEGORIES[0], stockBy: zeroStock(), tags: [] };
+  if (!p) return { ...emptyDraft(), variants: [], category: CATEGORIES[0], stockBy: zeroStock(), tags: [], taxable: true };
   const d = toDraft(p);
-  return { ...d, media: mediaOf(p), variants: d.variants.map((v) => ({ ...v, stockBy: zeroStock() })), category: p.category, stockBy: zeroStock(), tags: [...(p.tags ?? [])] };
+  return { ...d, media: mediaOf(p), variants: d.variants.map((v) => ({ ...v, stockBy: zeroStock() })), category: p.category, stockBy: zeroStock(), tags: [...(p.tags ?? [])], taxable: p.taxable !== false, skip: missingCombos(p.colors, p.sizes, p.variants) };
 }
 
 /** Rebuild the colour × size matrix (catalogue rule), keeping typed values and giving new rows per-warehouse stock. */
 export function rebuildEditVariants(d: EditDraft): EditVariant[] {
-  return rebuildVariants(d as ProductDraft).map((v) => ('stockBy' in v ? (v as EditVariant) : { ...v, stockBy: zeroStock() }));
+  const skip = new Set(d.skip ?? []);
+  return rebuildVariants(d as ProductDraft).filter((v) => !skip.has(comboKey(v.color, v.size))).map((v) => ('stockBy' in v ? (v as EditVariant) : { ...v, stockBy: zeroStock() }));
 }
 
 const okStock = (s: string | undefined) => { const n = parseIntStrict((s ?? '').trim() || '0'); return n !== null && n >= 0; };
@@ -192,7 +197,7 @@ export function sectionOf(k: string): SectionId {
 
 export function fromEditDraft(d: EditDraft, id: string, version: number): Product {
   const tags = normaliseTags(d.tags ?? []);
-  return { ...fromDraft(d as ProductDraft, id, version, d.media), category: d.category, ...(tags.length ? { tags } : {}) };
+  return { ...fromDraft(d as ProductDraft, id, version, d.media), category: d.category, ...(tags.length ? { tags } : {}), ...(d.taxable === false ? { taxable: false } : {}) };
 }
 
 /** Inventory levels for SKUs that do not exist yet, with the initial quantities typed per warehouse. */
@@ -654,4 +659,108 @@ export function pricingSummary(products: Product[]): { withCost: number; noCost:
   const live = products.filter((p) => p.status !== 'archived');
   const ms = live.map((p) => margin(p.price, p.cost)).filter((m): m is { amount: number; pct: number } => !!m);
   return { withCost: ms.length, noCost: live.length - ms.length, avgMarginPct: ms.length ? Math.round((ms.reduce((s, m) => s + m.pct, 0) / ms.length) * 10) / 10 : null };
+}
+
+/* ---------- Variant matrix: remove a combination safely, fill a column, image per colour (Salla audit #35) ---------- */
+
+export const comboKey = (color: string, size: string) => `${color.trim().toLowerCase()}|${size.trim().toLowerCase()}`;
+/** Combinations of the product's colours × sizes that have no variant (removed on purpose earlier). */
+export function missingCombos(colors: string[], sizes: string[], variants: { color: string; size: string }[]): string[] {
+  if (!colors.length || !sizes.length) return [];
+  const have = new Set(variants.map((v) => comboKey(v.color, v.size)));
+  return colors.flatMap((c) => sizes.map((s) => comboKey(c, s))).filter((k) => !have.has(k));
+}
+
+export interface VariantStock { onHand: number; available: number; held: number; incoming: number; byLoc: { loc: LocId; onHand: number; available: number }[] }
+/** Stock of one variant SKU across active locations. `held` = reserved + awaiting payment (orders depend on it). */
+export function variantStock(levels: Level[], sku: string): VariantStock {
+  const mine = levels.filter((l) => l.sku === sku.trim());
+  return {
+    onHand: mine.reduce((s, l) => s + l.onHand, 0), available: mine.reduce((s, l) => s + available(l), 0),
+    held: mine.reduce((s, l) => s + l.reserved + (l.awaitingPay ?? 0), 0), incoming: mine.reduce((s, l) => s + l.incoming, 0),
+    byLoc: LOC_IDS.map((loc) => { const l = levelOf(levels, sku.trim(), loc); return { loc, onHand: l?.onHand ?? 0, available: l ? available(l) : 0 }; }),
+  };
+}
+
+export type RemoveBlock = 'held' | 'incoming';
+export interface RemovalCheck { variants: EditVariant[]; blocked: { v: EditVariant; why: RemoveBlock; units: number }[]; withStock: { v: EditVariant; onHand: number }[] }
+/**
+ * Stock safety before variants leave the product. Units held for orders or on their way in a transfer block the
+ * removal (the orders and transfer need the SKU); units on the shelf only need confirming, since they stay in
+ * Inventory under the SKU until counted out. New, unsaved variants never block.
+ */
+export function checkRemoval(levels: Level[], variants: EditVariant[]): RemovalCheck {
+  const out: RemovalCheck = { variants, blocked: [], withStock: [] };
+  for (const v of variants) {
+    if (v.isNew) continue;
+    const s = variantStock(levels, v.sku);
+    if (s.held > 0) out.blocked.push({ v, why: 'held', units: s.held });
+    else if (s.incoming > 0) out.blocked.push({ v, why: 'incoming', units: s.incoming });
+    else if (s.onHand > 0) out.withStock.push({ v, onHand: s.onHand });
+  }
+  return out;
+}
+/** Variants that removing one colour or size value would drop. */
+export function variantsWithValue(d: EditDraft, kind: 'colors' | 'sizes', i: number): EditVariant[] {
+  const val = (d[kind][i] ?? '').trim().toLowerCase();
+  return d.variants.filter((v) => (kind === 'colors' ? v.color : v.size).trim().toLowerCase() === val);
+}
+/** Drop one combination and remember it, so adding another colour or size does not bring it back. */
+export function removeCombo(d: EditDraft, i: number): Pick<EditDraft, 'variants' | 'skip'> {
+  const v = d.variants[i];
+  if (!v) return { variants: d.variants, skip: d.skip };
+  return { variants: d.variants.filter((_, j) => j !== i), skip: [...new Set([...(d.skip ?? []), comboKey(v.color, v.size)])] };
+}
+/** Put a removed combination back at its place in the matrix (undo, or "add back"). */
+export function restoreCombo(d: EditDraft, v: EditVariant): Pick<EditDraft, 'variants' | 'skip'> {
+  const k = comboKey(v.color, v.size);
+  const skip = (d.skip ?? []).filter((x) => x !== k);
+  if (d.variants.some((x) => comboKey(x.color, x.size) === k)) return { variants: d.variants, skip };
+  const order = rebuildVariants({ ...(d as ProductDraft), variants: [...d.variants, v] }).map((x) => comboKey(x.color, x.size));
+  return { variants: [...d.variants, v].sort((a, b) => order.indexOf(comboKey(a.color, a.size)) - order.indexOf(comboKey(b.color, b.size))), skip };
+}
+
+export type FillCol = 'price' | 'sku' | `stock.${string}`;
+export interface FillScope { color?: string; size?: string }
+export type FillError = 'money' | 'stock' | 'base';
+/**
+ * Fill one column for every variant in scope (all, or one colour / one size). Price takes an amount; SKU rebuilds
+ * each SKU from the base SKU; stock fills a location's initial quantity for new SKUs only (existing stock changes
+ * in Inventory, with a reason). Returns the rows that changed and those skipped.
+ */
+export function fillColumn(d: EditDraft, col: FillCol, value: string, scope: FillScope, known: Set<string>): { variants: EditVariant[]; changed: number; skipped: number; error?: FillError } {
+  const inScope = (v: EditVariant) => (!scope.color || v.color === scope.color) && (!scope.size || v.size === scope.size);
+  if (col === 'price' && !parseMoney(value)) return { variants: d.variants, changed: 0, skipped: 0, error: 'money' };
+  if (col === 'sku' && !/^[A-Za-z0-9-]{3,32}$/.test(d.sku.trim())) return { variants: d.variants, changed: 0, skipped: 0, error: 'base' };
+  if (col.startsWith('stock.')) { const n = parseIntStrict(value.trim()); if (n === null || n < 0) return { variants: d.variants, changed: 0, skipped: 0, error: 'stock' }; }
+  let changed = 0, skipped = 0;
+  const variants = d.variants.map((v) => {
+    if (!inScope(v)) return v;
+    if (col === 'price') { const p = normaliseDigits(value); if (v.price === p) return v; changed++; return { ...v, price: p }; }
+    if (col === 'sku') {
+      if (!v.isNew) { skipped++; return v; }
+      const sku = variantSku(d.sku.trim(), v.color, v.size);
+      if (v.sku === sku) return v;
+      changed++; return { ...v, sku };
+    }
+    const loc = col.slice(6);
+    if (known.has(v.sku.trim())) { skipped++; return v; }
+    const n = String(parseIntStrict(value.trim()));
+    if (v.stockBy[loc] === n) return v;
+    changed++; return { ...v, stockBy: { ...v.stockBy, [loc]: n } };
+  });
+  return { variants, changed, skipped };
+}
+
+/** The image shown for a colour: the first image assigned to it, else the main image. */
+export function imageForColor(media: Media[], color: string): Media | undefined {
+  return media.find((m) => (m.variant ?? '').toLowerCase() === color.toLowerCase()) ?? media[0];
+}
+/** Assign an image to a colour (or clear the colour's own image with ''). Other colours keep theirs. */
+export function setColorImage(media: Media[], color: string, mediaId: string): Media[] {
+  return media.map((m) => {
+    const mine = (m.variant ?? '').toLowerCase() === color.toLowerCase();
+    if (m.id === mediaId) return { ...m, variant: color };
+    return mine ? { ...m, variant: undefined } : m;
+  });
 }

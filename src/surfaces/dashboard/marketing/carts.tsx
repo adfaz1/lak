@@ -19,6 +19,8 @@ import {
 } from './model';
 import { SendProgress, SendReview, sendStore, type SendSpec } from './send';
 import { Locked } from './access';
+import { sequenceStore, deliveriesStore, sequenceStats, reminderProblems } from './reminders-model';
+import { StatusBadge } from './reminders-parts';
 
 const V_TONE: Record<Exclude<CartView, 'all'>, Tone> = { open: 'amber', recovered: 'green', purchased: 'gray' };
 
@@ -50,7 +52,7 @@ export default function Carts({ route, empty, canSend }: { route: Route; empty: 
   );
 
   // Discount: an existing code-based coupon live today, or a new one-use code for this send.
-  const usable = coupons.filter((c) => !c.auto && c.type !== 'bogo' && (couponState(c) === 'active'));
+  const usable = coupons.filter((c) => !c.auto && !c.origin && c.type !== 'bogo' && (couponState(c) === 'active'));
   const discCoupon = disc.kind === 'existing' ? coupons.find((c) => c.code === disc.code) : disc.kind === 'new' ? recoveryCoupon(disc.code, disc.pct, a.eligible.length) : undefined;
   const dErr = recoveryError(disc, coupons);
   const fullText = discCoupon ? `${text.trim()} ${tx(`كود الخصم: ${discCoupon.code}`, `Discount code: ${discCoupon.code}`)}` : text;
@@ -85,6 +87,7 @@ export default function Carts({ route, empty, canSend }: { route: Route; empty: 
   return (
     <div className="space-y-6">
       {active && <SendProgress />}
+      <SequenceStrip />
       <CartList route={route} carts={carts} />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2" aria-labelledby="h-aud">
@@ -257,4 +260,24 @@ function CartList({ route, carts }: { route: Route; carts: Cart[] }) {
         )}
       </Card>
     );
+}
+
+/** The automatic sequence at a glance, so one-off sends and the sequence are seen together. */
+function SequenceStrip() {
+  const tx = useTx();
+  const seq = sequenceStore.use();
+  const deliveries = deliveriesStore.use();
+  const coupons = couponsStore.use();
+  const st = sequenceStats(seq, deliveries).reduce((a, x) => ({ sent: a.sent + x.stats.sent, recovered: a.recovered + x.stats.recovered, revenue: a.revenue + x.stats.revenue }), { sent: 0, recovered: 0, revenue: 0 });
+  const bad = reminderProblems(seq, [], deliveries, coupons).length;
+  return (
+    <Card className="flex flex-wrap items-center gap-3 px-5 py-4">
+      <span className="grid size-9 place-items-center rounded-xl bg-brand-500/10 text-brand-700 dark:text-brand-300"><Send className="size-4" aria-hidden="true" /></span>
+      <div className="min-w-0 flex-1">
+        <p className="flex flex-wrap items-center gap-2 font-semibold text-fg">{tx('تذكيرات تلقائية', 'Automatic reminders')}<StatusBadge status={seq.status} />{bad > 0 && <Badge tone="red">{tx(`${bad} تحتاجك`, `${bad} need you`)}</Badge>}</p>
+        <p className="flex flex-wrap items-center gap-1 text-xs text-muted">{seq.status === 'draft' ? tx(`${seq.steps.length} خطوات جاهزة للمراجعة`, `${seq.steps.length} steps ready to review`) : <>{tx(`${st.sent} رسالة · ${st.recovered} سلة استُرجعت ·`, `${st.sent} messages · ${st.recovered} carts recovered ·`)} <Money v={st.revenue} /></>}</p>
+      </div>
+      <LinkButton variant={seq.status === 'draft' ? 'soft' : 'secondary'} size="sm" href={link('/dashboard/marketing/reminders')}>{seq.status === 'draft' ? tx('جهّز التذكيرات', 'Set up reminders') : tx('افتح التذكيرات', 'Open reminders')}</LinkButton>
+    </Card>
+  );
 }

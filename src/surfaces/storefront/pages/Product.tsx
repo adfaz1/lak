@@ -12,7 +12,8 @@ import {
 import { Crumbs, H2, PANEL, Price, ProductPhoto, Stepper, Swatch, WRAP, sizeLabel, to, useS, variantLabel } from '../kit';
 import { accountStore, cartStore, toggleWish } from '../state';
 import { useCatalog, useCategories, useConfig } from '../data';
-import { deliverableCities, standardFor } from '../bridge';
+import { deliverableCities, shipOptions } from '../bridge';
+import { locationsStore } from '../../merchant/stores';
 import { ProductGrid } from './Listing';
 import { ProductReviews } from '../../dashboard/marketing/storefront-reviews';
 
@@ -29,6 +30,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const [err, setErr] = useState<('color' | 'size')[]>([]);
   const [added, setAdded] = useState<string | null>(null);
   const [city, setCity] = useState<CityId>('riyadh');
+  const locations = locationsStore.use();
   const [notify, setNotify] = useState<string[]>([]);
   const colorRef = useRef<HTMLFieldSetElement>(null);
   const sizeRef = useRef<HTMLFieldSetElement>(null);
@@ -53,7 +55,9 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const cat = cats.find((c) => c.id === p.cat) ?? { id: p.cat, name: p.catName };
   const isPerfume = p.cat === 'fragrance';
   const cities = deliverableCities(cfg.zones);
-  const std = standardFor(cfg.zones, city, p.weight ?? 0);
+  // Delivery methods the merchant's shipping setup offers for one unit to this city; the promise shown is the fastest.
+  const shipList = shipOptions(cfg, city, [{ productId: p.id, cat: p.cat, qty: 1, amount: Math.min(...p.variants.map((v) => v.price)), weight: p.weight }], { now: Date.now(), locations });
+  const std = [...shipList].sort((a, b) => (a.handling ?? 1) + (a.transit[a.zones[0]]?.[1] ?? 0) - ((b.handling ?? 1) + (b.transit[b.zones[0]]?.[1] ?? 0)))[0];
   const est = std && deliveryEstimate(std, city, Date.now());
   const price = variant?.price ?? Math.min(...p.variants.map((v) => v.price));
   const sameCat = products.filter((x) => x.cat === p.cat && x.id !== p.id);
@@ -202,7 +206,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
               </Select>
             </label>
             {est && <p className="font-semibold">{est.from === est.to ? t.estimateSame(dl(est.from)) : t.estimate(dl(est.from), dl(est.to))}</p>}
-            {std ? <p className="text-[13px] text-muted">{l(std.name)} · {l(std.note)} · {std.cost ? m(std.cost) : t.free}{std.freeFrom ? ` · ${t.freeFromT(m(std.freeFrom))}` : ''}</p>
+            {shipList.length ? <ul className="space-y-0.5">{shipList.map((o) => <li key={o.id} className="text-[13px] text-muted">{l(o.name)} · {o.cost ? m(o.cost) : t.free}{o.freeFrom ? ` · ${t.freeFromT(m(o.freeFrom))}` : ''}</li>)}</ul>
               : <p className="text-[13px] text-muted">{t.noShipZone}</p>}
           </section>}
 

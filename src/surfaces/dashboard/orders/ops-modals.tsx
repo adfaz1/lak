@@ -16,6 +16,8 @@ import { Alert, Field, Input, Modal, Simulated, Textarea } from '../../../ds/kit
 import { Button, Money, ProductImage, Ref, cn, useTx } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { Qty, Row, applyEffects, saveOrder, useActor } from './ui';
+import { noticeMute } from '../../merchant/stores';
+import { NoticeNote } from './notices-ui';
 
 const REASONS = ['customer', 'stock', 'fraud', 'payment', 'other'] as const;
 type CancelReason = (typeof REASONS)[number];
@@ -26,6 +28,7 @@ export function CancelModal({ o, onClose }: { o: Order; onClose: (msg?: string) 
   const [reason, setReason] = useState<CancelReason | ''>(o.cancelRequest?.state === 'open' ? 'customer' : '');
   const [note, setNote] = useState('');
   const [err, setErr] = useState(false);
+  const [notify, setNotify] = useState(true);
   const plan = cancelPlan(o);
   const block = cancelBlock(o);
   const label: Record<CancelReason, string> = { customer: tx('طلب العميل', 'Customer asked'), stock: tx('نفاد المخزون', 'Out of stock'), fraud: tx('اشتباه احتيال', 'Suspected fraud'), payment: tx('مشكلة في الدفع', 'Payment problem'), other: tx('سبب آخر', 'Other') };
@@ -34,6 +37,7 @@ export function CancelModal({ o, onClose }: { o: Order; onClose: (msg?: string) 
     if (!reason || (reason === 'other' && !note.trim())) { setErr(true); return; }
     const r = cancelOrder(o, text, who, Date.now());
     if (r.order === o) return;
+    if (!notify) noticeMute.add(o.ref);
     saveOrder(r.order);
     applyEffects(r.effects, who, o.ref, 'CX');
     const rf = r.order.refunds.length > o.refunds.length ? r.order.refunds[r.order.refunds.length - 1] : undefined;
@@ -65,8 +69,9 @@ export function CancelModal({ o, onClose }: { o: Order; onClose: (msg?: string) 
         {plan.voidLabels.length > 0 && <Row label={tx('الملصقات', 'Labels')}><span className="flex flex-wrap items-center justify-end gap-1.5">{tx('تُلغى لدى الناقل', 'Voided at the carrier')} {plan.voidLabels.map((r) => <Ref key={r}>{r}</Ref>)}<Simulated /></span></Row>}
         {plan.restock.length > 0 && <Row label={tx('تعود للرف', 'Back on the shelf')}>{plan.restock.map((e) => `${e.onHand} · ${LOCATIONS[e.loc].ar}`).join('، ')}</Row>}
       </dl>
+      <NoticeNote o={o} event="cancelled" notify={notify} onNotify={setNotify} />
       <p className="flex flex-wrap items-center gap-2 text-xs text-muted">
-        {plan.refund ? tx('يبقى الاسترداد «بانتظار المزوّد» حتى يؤكده. لا تُرسل رسالة للعميل من هنا.', 'The refund stays “awaiting provider” until confirmed. No message is sent from here.') : tx('لا رسالة للعميل من هنا. لا يمكن التراجع عن الإلغاء.', 'No message is sent from here. Cancelling cannot be undone.')}
+        {plan.refund ? tx('يبقى الاسترداد «بانتظار المزوّد» حتى يؤكده.', 'The refund stays “awaiting provider” until confirmed.') : tx('لا يمكن التراجع عن الإلغاء.', 'Cancelling cannot be undone.')}
         {plan.refund > 0 && <Simulated />}
       </p>
     </Modal>
@@ -95,6 +100,7 @@ export function ShipModal({ o, to, onClose }: { o: Order; to: 'transit' | 'deliv
   const parcels = parcelsAt(o, from);
   const [pick, setPick] = useState<number[]>(parcels);
   const [tracking, setTracking] = useState('');
+  const [notify, setNotify] = useState(true);
   const cod = payView(o) === 'cod_due';
   const all = pick.length === parcels.length;
   const lastOpen = o.fulfilments.length ? o.fulfilments.every((_, i) => pick.includes(i) || parcelShip(o, i) === 'delivered') : true;
@@ -102,6 +108,7 @@ export function ShipModal({ o, to, onClose }: { o: Order; to: 'transit' | 'deliv
     const now = Date.now();
     const next = to === 'transit' ? markShipped(o, parcels.includes(-1) ? 'all' : pick, who, now, tracking) : markDelivered(o, parcels.includes(-1) ? 'all' : pick, who, now);
     if (next === o) return;
+    if (!notify) noticeMute.add(o.ref);
     saveOrder(next);
     onClose(to === 'transit' ? tx('سُجّل التسليم للناقل', 'Marked as handed to the carrier') : tx('سُجّل التسليم للعميل', 'Marked as delivered'));
   };
@@ -129,6 +136,7 @@ export function ShipModal({ o, to, onClose }: { o: Order; to: 'transit' | 'deliv
         {to === 'delivered' && cod && lastOpen && <Row label={tx('الدفع عند الاستلام', 'Cash on delivery')}><span className="inline-flex items-center gap-1">{tx('يُسجّل التحصيل', 'Recorded as collected')} <Money v={o.items.reduce((s, i) => s + i.qty * i.unit, 0) - (o.discount ?? 0) + o.fee} className="font-semibold text-fg" /></span></Row>}
         <Row label={tx('العميل', 'Customer')}>{tx('يرى الحالة الجديدة في صفحة طلبه', 'Sees the new state on their order page')}</Row>
       </dl>
+      {(to === 'transit' || lastOpen) && <NoticeNote o={o} event={to === 'transit' ? 'shipped' : 'delivered'} notify={notify} onNotify={setNotify} />}
       <p className="text-xs text-muted">{tx('للناقل غير المربوط. التحديث الآلي من الناقل يحتاج ربطًا من الخادم.', 'For carriers that are not connected. Automatic carrier updates need a server integration.')}</p>
     </Modal>
   );
@@ -180,11 +188,13 @@ export function TransferModal({ o, onClose }: { o: Order; onClose: (msg?: string
   const tx = useTx();
   const who = useActor();
   const [note, setNote] = useState('');
+  const [notify, setNotify] = useState(true);
   const total = o.items.reduce((s, i) => s + i.qty * i.unit, 0) - (o.discount ?? 0) + o.fee;
   const run = () => {
     const r = confirmTransferWithStock(o, levelsStore.get(), who, Date.now(), note);
     if (r.order === o) return;
     levelsStore.set(r.levels);
+    if (!notify) noticeMute.add(o.ref);
     saveOrder(r.order);
     onClose(tx('أُكّد التحويل وأصبح الطلب مدفوعًا', 'Transfer confirmed; the order is paid'));
   };
@@ -199,6 +209,7 @@ export function TransferModal({ o, onClose }: { o: Order; onClose: (msg?: string
         <Row label={tx('التالي', 'Next')}>{tx('التجهيز', 'Fulfilment')}</Row>
       </dl>
       <Field label={tx('مرجع التحويل', 'Transfer reference')} optional>{(p) => <Input {...p} dir="ltr" value={note} onChange={(e) => setNote(e.target.value.slice(0, 60))} />}</Field>
+      <NoticeNote o={o} event="paid" notify={notify} onNotify={setNotify} />
     </Modal>
   );
 }

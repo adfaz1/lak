@@ -1,7 +1,7 @@
 // Products section (`#/dashboard/products`): list with filters, tabs, selection and bulk edit; editor and CSV import
 // live in their own files. View only: every rule comes from ./model and merchant/catalog.
 import { lazy, useMemo, useState } from 'react';
-import { Plus, Upload, Download, PackageOpen, SearchX, Pencil, Globe2, Smartphone, Store, Layers } from 'lucide-react';
+import { Plus, Upload, Download, PackageOpen, SearchX, Pencil, Globe2, Smartphone, Store, Layers, Bookmark, BookmarkPlus } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { canSee, can } from '../../merchant/perms';
@@ -15,8 +15,13 @@ import {
   DEFAULT_EXPORT, EXPORT_COLS, STATUSES, activeChannels, allTags, bulkChanged, bulkCheck, bulkRowsFor, categoryOptions, exportRows, filterProducts, listPhoto, lowSkuCount,
   paginate, priceRange, readChannel, readTab, selectionScope, stockOf, tabCounts, type ExportCol, type StatusTab,
 } from './model';
+import { sortProducts } from './views';
 import { BulkOpModal, UndoBanner, rememberUndo, useUndo } from './bulk';
 import { CatalogNav } from './common';
+import { ColumnsIcon, ColumnsModal, QualityDrawer, QualityPill, QuickBar, SaveViewModal, SortSelect, ViewsDrawer } from './views-ui';
+import { applyQuick, quickCounts, readCols, readQuick, readSort, sameQuery, toggleQuick, viewQuery, viewsFor, writeCols, writeQuick, type ColKey } from './views';
+import { productViewsStore } from './views-store';
+import { currentActor } from '../../merchant/stores';
 import { NoAccess, ReviewTools, STATUS_TONE, downloadText, phref, roleBadge, useNames, useRole } from './common';
 
 const Editor = lazy(() => import('./editor'));
@@ -32,7 +37,7 @@ export default function Products({ route }: { route: Route }) {
   if (sub === 'import') return <ImportWizard />;
   if (sub === 'categories') return <Categories />;
   if (sub === 'collections') return <Collections id={route.path[1]} />;
-  if (sub) return <Editor key={sub} id={sub} />;
+  if (sub) return <Editor key={sub} id={sub} focus={route.query.get('focus')} />;
   return <ProductList route={route} />;
 }
 
@@ -55,13 +60,33 @@ function ProductList({ route }: { route: Route }) {
   const category = route.query.get('cat') ?? '';
   const channel = readChannel(route.query.get('ch'));
   const tag = route.query.get('tag') ?? '';
+  const qf = readQuick(route.query.get('qf'));
+  const sort = readSort(route.query.get('sort'));
+  const cols = readCols(route.query.get('cols'));
+  const viewId = route.query.get('view') ?? '';
   const f = { q, tab, category, channel, tag };
-  const query = { q: q || undefined, tab: tab === 'all' ? undefined : tab, cat: category || undefined, ch: channel || undefined, tag: tag || undefined };
+  const query = {
+    q: q || undefined, tab: tab === 'all' ? undefined : tab, cat: category || undefined, ch: channel || undefined, tag: tag || undefined,
+    qf: writeQuick(qf), sort: sort === 'catalogue' ? undefined : sort, cols: writeCols(cols), view: viewId || undefined,
+  };
   const go = (patch: Record<string, string | undefined>) => replace(phref('', { ...query, ...patch, page: undefined }));
 
   const storeCats = categoriesStore.use();
-  const rows = useMemo(() => filterProducts(products, f, storeCats), [products, q, tab, category, channel, tag, storeCats]); // eslint-disable-line react-hooks/exhaustive-deps
-  const counts = tabCounts(products, f, storeCats);
+  const ctx = { levels, cats: storeCats };
+  const quickBase = useMemo(() => applyQuick(products, qf, { levels, cats: storeCats }), [products, qf.join(), levels, storeCats]); // eslint-disable-line react-hooks/exhaustive-deps
+  const rows = useMemo(() => sortProducts(filterProducts(quickBase, f, storeCats), sort, { levels, cats: storeCats }, lang), [quickBase, q, tab, category, channel, tag, storeCats, sort, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = tabCounts(quickBase, f, storeCats);
+  const qCounts = quickCounts(filterProducts(products, f, storeCats), ctx);
+  const allViews = productViewsStore.use();
+  const myViews = viewsFor(allViews, currentActor().id);
+  const current = viewQuery((k) => route.query.get(k));
+  const openView = myViews.find((v) => v.id === viewId);
+  const viewEdited = !!openView && !sameQuery(openView.query, current);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [viewsOpen, setViewsOpen] = useState(false);
+  const [colsOpen, setColsOpen] = useState(false);
+  const [qualityOf, setQualityOf] = useState<Product | null>(null);
+  const show = (c: ColKey) => cols.includes(c);
   const cats = categoryOptions(storeCats, products);
   const tags = allTags(products);
   const [ops, setOps] = useState(false);
@@ -70,7 +95,7 @@ function ProductList({ route }: { route: Route }) {
   const pg = paginate(rows, route.query.get('page'));
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<BulkRow[] | null>(null);
-  const filtered = !!(q || category || channel || tag);
+  const filtered = !!(q || category || channel || tag || qf.length);
 
   const pageIds = pg.rows.map((p) => p.id);
   const allIds = rows.map((p) => p.id);
@@ -146,11 +171,13 @@ function ProductList({ route }: { route: Route }) {
 
   const columns: Column<Product>[] = [
     { key: 'name', header: tx('المنتج', 'Product'), cell: nameCell, className: 'max-w-72' },
-    { key: 'sku', header: 'SKU', cell: (p) => <span className="text-xs text-muted"><Ref>{p.sku}</Ref></span>, hideBelow: 'lg' },
-    { key: 'status', header: tx('الحالة', 'Status'), cell: (p) => <Badge tone={STATUS_TONE[p.status]}>{names.status(p.status)}</Badge> },
-    { key: 'price', header: tx('السعر', 'Price'), align: 'end', cell: priceCell },
-    { key: 'stock', header: <span className="inline-flex items-center gap-1">{tx('المتاح', 'Available')}<InfoHint>{tx('مجموع المتاح في كل المستودعات (الموجود − المحجوز). البرتقالي: عند حد إعادة الطلب في مستودع واحد على الأقل.', 'Sum of available across warehouses (on hand − reserved). Amber: at the reorder point in at least one warehouse.')}</InfoHint></span>, align: 'end', cell: stockCell },
-    { key: 'ch', header: tx('القنوات', 'Channels'), cell: channelsCell, hideBelow: 'lg' },
+    ...(show('sku') ? [{ key: 'sku', header: 'SKU', cell: (p: Product) => <span className="text-xs text-muted"><Ref>{p.sku}</Ref></span>, hideBelow: 'lg' as const }] : []),
+    ...(show('status') ? [{ key: 'status', header: tx('الحالة', 'Status'), cell: (p: Product) => <Badge tone={STATUS_TONE[p.status]}>{names.status(p.status)}</Badge> }] : []),
+    ...(show('category') ? [{ key: 'cat', header: tx('الفئة', 'Category'), cell: (p: Product) => <span className="text-muted">{p.category[lang]}</span>, hideBelow: 'lg' as const }] : []),
+    ...(show('price') ? [{ key: 'price', header: tx('السعر', 'Price'), align: 'end' as const, cell: priceCell }] : []),
+    ...(show('stock') ? [{ key: 'stock', header: <span className="inline-flex items-center gap-1">{tx('المتاح', 'Available')}<InfoHint>{tx('مجموع المتاح في كل المستودعات: الموجود ناقص المحجوز والموقوف (بانتظار الدفع، التالف، الاحتياطي). البرتقالي: عند حد إعادة الطلب في مستودع واحد على الأقل.', 'Sum of available across warehouses: on hand minus reserved and held (awaiting payment, damaged, safety reserve). Amber: at the reorder point in at least one warehouse.')}</InfoHint></span>, align: 'end' as const, cell: stockCell }] : []),
+    ...(show('quality') ? [{ key: 'q', header: <span className="inline-flex items-center gap-1">{tx('الجودة', 'Quality')}<InfoHint>{tx('اكتمال بيانات المنتج: الصور والوصف والفئة والسعر والتكلفة والوزن والباركود ووصف البحث. اضغط النسبة لترى ما ينقص بالضبط وتصلحه.', 'How complete the product is: images, description, category, price, cost, weight, barcode and search description. Click the score to see exactly what is missing and fix it.')}</InfoHint></span>, cell: (p: Product) => <QualityPill p={p} cats={storeCats} onOpen={setQualityOf} />, hideBelow: 'md' as const }] : []),
+    ...(show('channels') ? [{ key: 'ch', header: tx('القنوات', 'Channels'), cell: channelsCell, hideBelow: 'lg' as const }] : []),
   ];
 
   const startBulk = () => setBulk(bulkRowsFor(all, visibleSel));
@@ -162,10 +189,16 @@ function ProductList({ route }: { route: Route }) {
       <UndoBanner />
       <Card>
         <div className="px-4 pt-2 sm:px-5">
-          <Tabs label={tx('حالة المنتج', 'Product status')} items={(['all', ...STATUSES] as StatusTab[]).map((t) => ({
-            href: phref('', { ...query, tab: t === 'all' ? undefined : t }), current: tab === t, count: counts[t],
-            label: t === 'all' ? tx('الكل', 'All') : names.status(t),
-          }))} />
+          <Tabs label={tx('حالة المنتج والعروض المحفوظة', 'Product status and saved views')} items={[
+            ...(['all', ...STATUSES] as StatusTab[]).map((t) => ({
+              href: phref('', { ...query, tab: t === 'all' ? undefined : t, view: undefined }), current: !openView && tab === t, count: counts[t],
+              label: t === 'all' ? tx('الكل', 'All') : names.status(t),
+            })),
+            ...myViews.filter((v) => v.pinned).map((v) => ({
+              href: phref('', { ...v.query, view: v.id }), current: openView?.id === v.id,
+              label: <span className="inline-flex items-center gap-1.5"><Bookmark className="size-3.5" aria-hidden="true" />{v.name}{openView?.id === v.id && viewEdited && <span className="text-xs font-normal text-amber-700 dark:text-amber-300">{tx('· معدّل', '· edited')}</span>}</span>,
+            })),
+          ]} />
         </div>
         <div className="space-y-3 p-4 sm:px-5">
           {visibleSel.size > 0 && canEdit ? (
@@ -183,9 +216,17 @@ function ProductList({ route }: { route: Route }) {
               <FilterChip label={tx('الفئة', 'Category')} value={category} onChange={(v) => go({ cat: v || undefined })} options={cats.map((c) => ({ value: c.key, label: `${c.depth ? '— ' : ''}${c.name[lang]}` }))} />
               {tags.length > 0 && <FilterChip label={tx('الوسم', 'Tag')} value={tag} onChange={(v) => go({ tag: v || undefined })} options={tags.map((t) => ({ value: t, label: t }))} />}
               <FilterChip label={tx('القناة', 'Channel')} value={channel} onChange={(v) => go({ ch: v || undefined })} options={(['online', 'market', 'app'] as Channel[]).map((c) => ({ value: c, label: names.channel(c) }))} />
-              {filtered && <a href={phref('', { tab: query.tab })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
+              <SortSelect value={sort} onChange={(v) => go({ sort: v === 'catalogue' ? undefined : v })} />
+              <Button variant="secondary" onClick={() => setColsOpen(true)} aria-label={tx('أعمدة الجدول', 'Table columns')} title={tx('أعمدة الجدول', 'Table columns')}><ColumnsIcon className="size-4" aria-hidden="true" /><span className="hidden xl:inline">{tx('الأعمدة', 'Columns')}</span></Button>
+              {filtered && <a href={phref('', { tab: query.tab, sort: query.sort, cols: query.cols })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
+              <span className="ms-auto flex items-center gap-2">
+                <Button variant="ghost" onClick={() => setViewsOpen(true)}><Bookmark className="size-4" aria-hidden="true" />{tx(`العروض (${myViews.length})`, `Views (${myViews.length})`)}</Button>
+                {(!openView || viewEdited) && (filtered || sort !== 'catalogue' || !!query.cols || tab !== 'all') && <Button variant="secondary" onClick={() => setSaveOpen(true)}><BookmarkPlus className="size-4" aria-hidden="true" />{openView ? tx('احفظ التغييرات', 'Save changes') : tx('احفظ العرض', 'Save view')}</Button>}
+              </span>
             </div>
           )}
+          {!(visibleSel.size > 0 && canEdit) && <QuickBar value={qf} counts={qCounts} onToggle={(x) => go({ qf: writeQuick(toggleQuick(qf, x)) })} />}
+          {openView && viewEdited && <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted">{tx(`عدّلت العرض «${openView.name}» ولم يُحفظ.`, `You changed “${openView.name}” and it is not saved.`)}<a className="font-semibold text-brand-700 hover:underline dark:text-brand-300" href={phref('', { ...openView.query, view: openView.id })}>{tx('ارجع لما حُفظ', 'Back to saved')}</a></p>}
         </div>
         {rows.length === 0 ? (
           <EmptyState icon={<SearchX className="size-6" aria-hidden="true" />} title={tx('لا منتجات تطابق', 'No matching products')}
@@ -203,7 +244,7 @@ function ProductList({ route }: { route: Route }) {
                     <span className="min-w-0 flex-1">
                       <span className="flex items-start justify-between gap-2"><span className="truncate text-sm font-semibold text-fg">{p.name[lang]}</span>{priceCell(p)}</span>
                       <span className="mt-0.5 block text-xs text-muted"><Ref>{p.sku}</Ref></span>
-                      <span className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted"><Badge tone={STATUS_TONE[p.status]}>{names.status(p.status)}</Badge>{stockOf(p, levels) !== null && <span>{tx('المتاح', 'Available')} {stockCell(p)}</span>}</span>
+                      <span className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted"><Badge tone={STATUS_TONE[p.status]}>{names.status(p.status)}</Badge>{stockOf(p, levels) !== null && <span>{tx('المتاح', 'Available')} {stockCell(p)}</span>}{show('quality') && <QualityPill p={p} cats={storeCats} onOpen={setQualityOf} />}</span>
                     </span>
                   </span>
                 )} />
@@ -216,6 +257,11 @@ function ProductList({ route }: { route: Route }) {
       {bulk && <BulkModal rows={bulk} setRows={setBulk} onClose={() => setBulk(null)} onSaved={(n) => { setBulk(null); setSel(new Set()); toast({ tone: 'ok', text: tx(`حُفظت تعديلات ${n} منتجات`, `Saved changes to ${n} products`), action: { label: tx('تراجع', 'Undo'), run: undo } }); }} />}
       {ops && <BulkOpModal ids={[...visibleSel]} onClose={() => setOps(false)} onDone={() => { setOps(false); setSel(new Set()); }} />}
       {exp && <ExportModal rows={rows} onClose={() => setExp(false)} />}
+      {saveOpen && <SaveViewModal query={current} cats={storeCats} editing={openView && viewEdited ? openView : undefined} onClose={() => setSaveOpen(false)}
+        onSaved={(v) => { setSaveOpen(false); toast({ tone: 'ok', text: v.pinned ? tx(`حُفظ «${v.name}» وثُبّت كتبويب`, `Saved “${v.name}” and pinned it as a tab`) : tx(`حُفظ «${v.name}» في العروض`, `Saved “${v.name}” to your views`) }); go({ view: v.id }); }} />}
+      {viewsOpen && <ViewsDrawer cats={storeCats} onClose={() => setViewsOpen(false)} />}
+      {colsOpen && <ColumnsModal value={cols} onApply={(c) => go({ cols: writeCols(c) })} onClose={() => setColsOpen(false)} />}
+      {qualityOf && <QualityDrawer p={qualityOf} cats={storeCats} onClose={() => setQualityOf(null)} />}
     </div>
   );
 }

@@ -35,6 +35,8 @@ export interface Product {
   version: number;
   /** Free-form labels used by filters, bulk actions and smart collections. */
   tags?: string[];
+  /** VAT applies unless this is false (e.g. a zero-rated item). Absent on older products = taxable. */
+  taxable?: boolean;
 }
 
 const CH_ALL: Record<Channel, boolean> = { online: true, market: true, app: true };

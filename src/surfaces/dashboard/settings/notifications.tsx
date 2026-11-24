@@ -1,5 +1,10 @@
-// Merchant notifications: per event, email and SMS.
+// Notifications: the merchant's own alerts (per event, email and SMS) and, under ?tab=customers, the messages
+// customers get when their order changes state (customer-notices.tsx).
 import { useState } from 'react';
+import { BellRing, Users } from 'lucide-react';
+import { link, useRoute } from '../../../core/router';
+import { cn } from '../../../ds/ui';
+import CustomerNotices from './customer-notices';
 import { settingsStore } from '../../merchant/stores';
 import { NOTIFY_EVENTS, type Notify, type NotifyEvent } from '../../merchant/workspace';
 import { InfoHint, useTx } from '../../../ds/ui';
@@ -13,6 +18,28 @@ const EVENT: Record<NotifyEvent, [string, string]> = {
 };
 
 export default function NotificationsPage() {
+  const tx = useTx();
+  const tab = useRoute().query.get('tab') === 'customers' ? 'customers' : 'mine';
+  const tabs = [
+    { id: 'mine', href: link('/dashboard/settings/notifications'), label: tx('تنبيهاتك', 'Your alerts'), I: BellRing },
+    { id: 'customers', href: link('/dashboard/settings/notifications', { tab: 'customers' }), label: tx('إشعارات العملاء', 'Customer messages'), I: Users },
+  ];
+  return (
+    <>
+      <nav aria-label={tx('نوع الإشعارات', 'Notification type')} className="inline-flex max-w-full rounded-xl bg-surface-2 p-1">
+        {tabs.map((t) => (
+          <a key={t.id} href={t.href} aria-current={tab === t.id ? 'page' : undefined}
+            className={cn('inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[13px] font-semibold transition-colors', tab === t.id ? 'bg-surface text-fg shadow-sm' : 'text-muted hover:text-fg')}>
+            <t.I className="size-4" aria-hidden="true" />{t.label}
+          </a>
+        ))}
+      </nav>
+      {tab === 'customers' ? <CustomerNotices /> : <MerchantAlerts />}
+    </>
+  );
+}
+
+function MerchantAlerts() {
   const tx = useTx();
   const saved = settingsStore.use().notify;
   const [n, setN] = useState<Notify>(saved);

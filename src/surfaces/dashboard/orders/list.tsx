@@ -1,6 +1,6 @@
 // Orders list (`#/dashboard/orders`): saved views, search, filters, sort and page in the URL; selection and bulk actions.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { AlarmClock, Ban, CheckCheck, Download, FileText, Hourglass, Lock, PackageCheck, Plus, Printer, RotateCcw, SearchX, ShoppingBag, SlidersHorizontal, ArrowUpDown, Tag, Truck, UserRound } from 'lucide-react';
+import { AlarmClock, Ban, CheckCheck, Download, FileText, Hourglass, Lock, PackageCheck, Plus, Printer, RotateCcw, SearchX, ShoppingBag, SlidersHorizontal, ArrowUpDown, Tag, Truck, UserRound, Send, Link2, CalendarClock, Receipt, PackageX, Tags } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, navigate, type Route } from '../../../core/router';
 import { formatInt } from '../../../core/format';
@@ -8,13 +8,19 @@ import { logAction, ordersStore, teamStore, testStore } from '../../merchant/sto
 const BULK_AR: Record<string, string> = { confirm: 'تأكيد', labels: 'إصدار ملصقات', shipped: 'شُحن', invoices: 'فواتير', slips: 'قوائم تعبئة', export: 'تصدير CSV' };
 import { LOCATIONS, LOC_IDS, total, type Order } from '../../merchant/domain';
 import { openReturns, payView } from '../../merchant/ops';
-import { BulkBar, DataTable, Drawer, FilterChip, Input, PageHeader, Pagination, SearchInput, Select, Field, Tabs, useToast, type Column } from '../../../ds/kit';
+import { BulkBar, DataTable, Drawer, FilterChip, Input, PageHeader, Pagination, SearchInput, Select, Field, useToast, type Column } from '../../../ds/kit';
 import { Badge, Button, Card, EmptyState, ErrorState, LinkButton, Money, ProductImage, Ref, Skeleton, InfoHint, useTx, cn } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { setDashState, useDashState } from '../review';
 import { CHANNELS, FULS, LIST_VIEWS, NO_FILTERS, PAYS, PAY_METHODS, SHIPS, SORTS, activeFilters, exceptions, listOrders, orderPerms, readQuery, selectionRefs, toParams, undoConfirm, type ListQuery, type OpsBulk } from './model';
 import { FulBadge, PayBadge, ShipBadge, ohref, useActor, useAge, useLabels } from './ui';
 import { BulkModal, type BulkOutcome } from './bulk';
+import { MoreBulkModal, type MoreOutcome } from './bulk-more';
+import { Menu, MenuButtonLabel, MenuItem, MenuNote } from './ui';
+import { SavedViewsBar } from './saved-views-ui';
+import { savedViewsStore } from './saved-views';
+import { can } from '../../merchant/perms';
+import type { MoreBulk } from './bulk-more-model';
 
 /** Scroll position per list URL, restored when coming back from an order. */
 const scrollMemo = new Map<string, number>();
@@ -44,7 +50,12 @@ export default function OrdersList({ route }: { route: Route }) {
   const last = useRef(scope);
   useEffect(() => { if (last.current !== scope) { last.current = scope; setSel(new Set()); setAllMatching(false); } }, [scope]);
   const [bulk, setBulk] = useState<OpsBulk | null>(null);
+  const [more, setMore] = useState<MoreBulk | null>(null);
+  const role = testStore.use().role;
+  const canMessage = can(role, 'customer.message');
+
   const who = useActor();
+  const views = savedViewsStore.use()[who.name] ?? [];
   const members = teamStore.use().members.filter((m) => m.status === 'active');
   const tags = useMemo(() => [...new Set(stored.flatMap((o) => o.tags ?? []))].sort(), [stored]);
   const [drawer, setDrawer] = useState(false);
@@ -104,6 +115,18 @@ export default function OrdersList({ route }: { route: Route }) {
     else if ((o.action === 'labels' || o.action === 'shipped') && o.ok.length) toast({ tone: 'ok', text: o.action === 'labels' ? tx(`صدر ${formatInt(o.ok.length)} ملصقًا`, `${formatInt(o.ok.length)} labels issued`) : tx(`سُجّل ${formatInt(o.ok.length)} كمشحون`, `${formatInt(o.ok.length)} marked shipped`) });
   };
 
+  const onMoreDone = (o: MoreOutcome | null) => {
+    setMore(null);
+    if (!o) return;
+    if (!o.ok.length) return;
+    clear();
+    const T: Record<MoreBulk, [string, string]> = {
+      assign: ['أُسندت', 'Assigned'], tagAdd: ['وُسمت', 'Tagged'], tagRemove: ['حُذف الوسم من', 'Untagged'], voidLabels: ['أُلغيت ملصقات', 'Labels voided on'],
+      payLink: ['أُرسل رابط دفع لـ', 'Payment link sent to'], extendDue: ['مُددت مهلة', 'Deadline extended on'], sendInvoice: ['أُرسلت فاتورة لـ', 'Invoice sent to'], cancel: ['أُلغي', 'Cancelled'],
+    };
+    toast({ tone: 'ok', text: tx(`${T[o.action][0]} ${formatInt(o.ok.length)} طلبًا`, `${T[o.action][1]} ${formatInt(o.ok.length)} orders`), action: o.undo ? { label: tx('تراجع', 'Undo'), run: o.undo } : undefined });
+  };
+
   const chips = [
     { key: 'ch' as const, label: tx('القناة', 'Channel'), options: CHANNELS.map((v) => ({ value: v, label: L.channel(v) })) },
     { key: 'pay' as const, label: tx('الدفع', 'Payment'), options: PAYS.map((v) => ({ value: v, label: L.pay(v) })) },
@@ -139,11 +162,39 @@ export default function OrdersList({ route }: { route: Route }) {
         {allMatching && <button type="button" className="font-semibold text-brand-700 hover:underline dark:text-brand-300" onClick={() => { setAllMatching(false); setSel(new Set(r.pageRows.map((o) => o.ref))); }}>{tx('هذه الصفحة فقط', 'This page only')}</button>}
       </span>}>
       <Button size="sm" variant="secondary" onClick={() => setBulk('confirm')}><CheckCheck className="size-4" aria-hidden="true" />{tx('تأكيد', 'Confirm')}</Button>
-      <Button size="sm" variant="secondary" onClick={() => setBulk('labels')}><Printer className="size-4" aria-hidden="true" />{tx('ملصقات', 'Labels')}</Button>
-      <Button size="sm" variant="secondary" onClick={() => setBulk('shipped')}><Truck className="size-4" aria-hidden="true" />{tx('شُحن', 'Shipped')}</Button>
-      <Button size="sm" variant="secondary" onClick={() => setBulk('invoices')}><FileText className="size-4" aria-hidden="true" />{tx('فواتير', 'Invoices')}</Button>
-      <Button size="sm" variant="secondary" onClick={() => setBulk('slips')}><Printer className="size-4" aria-hidden="true" />{tx('قوائم التعبئة', 'Packing slips')}</Button>
-      <Button size="sm" variant="secondary" onClick={() => setBulk('export')}><Download className="size-4" aria-hidden="true" />CSV</Button>
+      <Menu label={tx('الشحن', 'Shipping')} size="sm" button={<MenuButtonLabel icon={<Truck className="size-4" aria-hidden="true" />}>{tx('الشحن', 'Shipping')}</MenuButtonLabel>}>
+        {(close) => <>
+          <MenuItem icon={<Printer className="size-4" />} onClick={() => { close(); setBulk('labels'); }}>{tx('أصدر ملصقات الشحن', 'Issue shipping labels')}</MenuItem>
+          <MenuItem icon={<Truck className="size-4" />} onClick={() => { close(); setBulk('shipped'); }}>{tx('سُلّم للناقل', 'Mark as shipped')}</MenuItem>
+          <MenuItem icon={<PackageX className="size-4" />} onClick={() => { close(); setMore('voidLabels'); }}>{tx('ألغِ الملصقات', 'Void labels')}</MenuItem>
+        </>}
+      </Menu>
+      <Menu label={tx('تنظيم', 'Organise')} size="sm" button={<MenuButtonLabel icon={<Tags className="size-4" aria-hidden="true" />}>{tx('تنظيم', 'Organise')}</MenuButtonLabel>}>
+        {(close) => <>
+          <MenuItem icon={<UserRound className="size-4" />} onClick={() => { close(); setMore('assign'); }}>{tx('أسند إلى عضو', 'Assign to a member')}</MenuItem>
+          <MenuItem icon={<Tag className="size-4" />} onClick={() => { close(); setMore('tagAdd'); }}>{tx('أضف وسمًا', 'Add a tag')}</MenuItem>
+          <MenuItem icon={<Tag className="size-4" />} onClick={() => { close(); setMore('tagRemove'); }}>{tx('احذف وسمًا', 'Remove a tag')}</MenuItem>
+        </>}
+      </Menu>
+      <Menu label={tx('طباعة وتصدير', 'Print & export')} size="sm" button={<MenuButtonLabel icon={<Printer className="size-4" aria-hidden="true" />}>{tx('طباعة وتصدير', 'Print & export')}</MenuButtonLabel>}>
+        {(close) => <>
+          <MenuItem icon={<FileText className="size-4" />} onClick={() => { close(); setBulk('invoices'); }}>{tx('اطبع الفواتير', 'Print invoices')}</MenuItem>
+          <MenuItem icon={<Printer className="size-4" />} onClick={() => { close(); setBulk('slips'); }}>{tx('اطبع قوائم التعبئة', 'Print packing slips')}</MenuItem>
+          <MenuItem icon={<Download className="size-4" />} onClick={() => { close(); setBulk('export'); }}>{tx('صدّر CSV', 'Export CSV')}</MenuItem>
+          <MenuNote>{tx('لا يصل شيء للعميل من هنا', 'Nothing here reaches the customer')}</MenuNote>
+        </>}
+      </Menu>
+      <span className="flex items-center gap-1 rounded-xl border border-dashed border-amber-500/50 bg-amber-500/5 p-1" role="group" aria-label={tx('يصل للعميل', 'Reaches the customer')}>
+        <Menu label={tx('إرسال للعميل', 'Send to customer')} size="sm" variant="ghost" button={<MenuButtonLabel icon={<Send className="size-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />}>{tx('إرسال للعميل', 'Send to customer')}</MenuButtonLabel>}>
+          {(close) => canMessage ? <>
+            <MenuItem icon={<Link2 className="size-4" />} onClick={() => { close(); setMore('payLink'); }}>{tx('أرسل رابط دفع', 'Send a payment link')}</MenuItem>
+            <MenuItem icon={<CalendarClock className="size-4" />} onClick={() => { close(); setMore('extendDue'); }}>{tx('مدّد مهلة الدفع وأبلغ', 'Extend payment deadline')}</MenuItem>
+            <MenuItem icon={<Receipt className="size-4" />} onClick={() => { close(); setMore('sendInvoice'); }}>{tx('أرسل الفاتورة للعميل', 'Send invoice to customer')}</MenuItem>
+            <MenuNote>{tx('تعاين الرسالة بلغة كل عميل قبل الإرسال', 'You preview the message in each customer’s language first')}</MenuNote>
+          </> : <MenuNote>{tx('مراسلة العملاء تحتاج دور المالك', 'Messaging customers needs the owner role')}</MenuNote>}
+        </Menu>
+        <Button size="sm" variant="ghost" className="text-red-700 hover:bg-red-500/10 dark:text-red-400" onClick={() => setMore('cancel')}><Ban className="size-4" aria-hidden="true" />{tx('إلغاء الطلبات', 'Cancel orders')}</Button>
+      </span>
     </BulkBar>
   ) : (
     <div className="flex flex-wrap items-center gap-2">
@@ -197,7 +248,7 @@ export default function OrdersList({ route }: { route: Route }) {
       {header}
       <Card>
         <div className="px-4 pt-2 sm:px-5">
-          <Tabs label={tx('العروض المحفوظة', 'Saved views')} items={LIST_VIEWS.map((v) => ({ href: ohref('', toParams(lq, { view: v, page: 1 })), label: L.view(v), current: lq.view === v, count: r.counts[v] }))} />
+          <SavedViewsBar lq={lq} all={all} views={views} viewer={who.name} builtin={LIST_VIEWS.map((v) => ({ href: ohref('', toParams(lq, { view: v, page: 1 })), label: L.view(v), current: lq.view === v, count: r.counts[v] }))} />
         </div>
         <div className="space-y-3 p-4 sm:px-5">
           {toolbar}
@@ -236,6 +287,7 @@ export default function OrdersList({ route }: { route: Route }) {
         </Drawer>
       )}
       {bulk && <BulkModal action={bulk} orders={selectedOrders} allMatching={allMatching} onClose={onBulkDone} />}
+      {more && <MoreBulkModal action={more} orders={selectedOrders} allMatching={allMatching} canRefund={perms.refund} tags={tags} onClose={onMoreDone} />}
     </div>
   );
 }

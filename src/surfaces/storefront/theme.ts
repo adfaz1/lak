@@ -3,8 +3,14 @@
    sections, their order, visibility and headings come from the merchant's published theme (merchant/workspace.ts).
    Pure functions only. */
 import type { L, Lang } from '../../core/lang';
-import type { Section, SectionKind, ThemeState } from '../merchant/workspace';
+import { identityFixture, type ButtonStyle, type Section, type SectionKind, type StoreFont, type StoreIdentity, type ThemeState } from '../merchant/workspace';
+import { collectionMembers, type Collection, type Product as MProduct } from '../merchant/catalog';
+import type { Review, ReviewSettings } from '../merchant/growth';
+import type { Level } from '../merchant/inventory';
 import { STORE_PALETTE } from '../dashboard/storefront/model';
+import type { MediaLib } from '../dashboard/storefront/state';
+import { sellable } from './bridge';
+import type { Product } from './domain';
 
 type Rgb = [number, number, number];
 const toRgb = (hex: string): Rgb => {
@@ -43,14 +49,14 @@ export function contrast(a: string, b: string): number {
 export interface Palette { accent: string; bg: string; surface: string; surface2: string; border: string; fg: string; muted: string; subtle: string }
 
 /** The merchant's light palette, straight from the store theme. */
-export function lightPalette(p = STORE_PALETTE): Palette {
-  return { accent: p.accent, bg: p.bg, surface: p.paper, surface2: p.sand, border: p.line, fg: p.ink, muted: p.muted, subtle: '#8f8478' };
+export function lightPalette(p = STORE_PALETTE, accent: string = p.accent): Palette {
+  return { accent, bg: p.bg, surface: p.paper, surface2: p.sand, border: p.line, fg: p.ink, muted: p.muted, subtle: '#8f8478' };
 }
 /** A warm dark counterpart built from the same ink and accent, for shoppers who prefer dark mode. */
-export function darkPalette(p = STORE_PALETTE): Palette {
+export function darkPalette(p = STORE_PALETTE, accent: string = p.accent): Palette {
   const ink = toRgb(p.ink);
   return {
-    accent: p.accent,
+    accent,
     bg: toHex(mix(ink, [0, 0, 0], 0.35)), surface: toHex(mix(ink, [255, 255, 255], 0.03)), surface2: toHex(mix(ink, [255, 255, 255], 0.08)),
     border: toHex(mix(ink, [255, 255, 255], 0.16)), fg: '#f3ede6', muted: '#bcb0a2', subtle: '#8a7f73',
   };
@@ -66,8 +72,66 @@ function vars(p: Palette): string {
  * CSS that re-skins every `.lak` element while the storefront is mounted (body[data-sf]).
  * Scoped to the body attribute so dialogs portalled to <body> wear the merchant brand too.
  */
-export function storeCss(): string {
-  return `body[data-sf] .lak{${vars(lightPalette())}}body[data-sf] .lak.dark{${vars(darkPalette())}}`;
+export function storeCss(id: StoreIdentity = identityFixture()): string {
+  const accent = isHex(id.accent) ? id.accent : STORE_PALETTE.accent;
+  const font = FONT_STACK[id.font] ?? FONT_STACK.plex;
+  const radius = BUTTON_RADIUS[id.button];
+  return `body[data-sf] .lak{${vars(lightPalette(STORE_PALETTE, accent))};--font-sans:${font};font-family:${font}}body[data-sf] .lak.dark{${vars(darkPalette(STORE_PALETTE, accent))}}`
+    + (radius ? `body[data-sf] .lak :is(a,button).select-none.inline-flex{border-radius:${radius}}` : '');
+}
+
+/* ───────────── Store identity (BP-P03-STP-004/005) ───────────── */
+
+export const isHex = (v: string) => /^#[0-9a-f]{6}$/i.test(v.trim());
+/** Typefaces the store can wear without a new font host: one bundled with LAK, two from the shopper's device. */
+export const FONT_STACK: Record<StoreFont, string> = {
+  plex: '"IBM Plex Sans Arabic",ui-sans-serif,system-ui,sans-serif',
+  system: 'system-ui,-apple-system,"Segoe UI",Tahoma,"Noto Sans Arabic",sans-serif',
+  naskh: '"Noto Naskh Arabic","Geeza Pro","Traditional Arabic","Times New Roman",serif',
+};
+/** Button corner shape; "soft" keeps the design-system default. */
+export const BUTTON_RADIUS: Record<ButtonStyle, string | null> = { soft: null, pill: '9999px', square: '4px' };
+
+/** The identity shoppers see: the published version's, or the starting look for versions saved before identity existed. */
+export const liveIdentity = (t: ThemeState): StoreIdentity => t.published.identity ?? identityFixture();
+
+/** An uploaded picture's address, from a "m:<id>" reference. Product references ("p:") are resolved by the caller. */
+export const mediaSrc = (ref: string | null | undefined, lib: MediaLib): string | undefined =>
+  ref?.startsWith('m:') ? lib[ref.slice(2)]?.url : undefined;
+export const productRef = (ref: string | null | undefined): string | undefined => (ref?.startsWith('p:') ? ref.slice(2) : undefined);
+
+/** Riyadh calendar day (yyyy-mm-dd) for a timestamp. */
+export const riyadhDay = (now: number) => new Date(now + 3 * 3600_000).toISOString().slice(0, 10);
+/** Whether a scheduled section is on for the Riyadh day of `now` (start and end inclusive; blank = open-ended). */
+export const inSchedule = (s: Pick<Section, 'start' | 'end'>, now: number) => {
+  const d = riyadhDay(now);
+  return (!s.start || s.start <= d) && (!s.end || d <= s.end);
+};
+/** The announcement bar shoppers see now: published, visible and inside its schedule. */
+export function liveAnnouncement(t: ThemeState, now: number): Section | undefined {
+  const a = sectionOf(t, 'announcement');
+  return a && inSchedule(a, now) ? a : undefined;
+}
+
+/** Products for a product-grid section: a storefront category ("cat:<slug>") or a merchant collection ("col:<id>"). */
+export function gridProducts(source: string | undefined, store: Product[], merchant: MProduct[], levels: Level[], collections: Collection[]): Product[] {
+  if (source?.startsWith('cat:')) return store.filter((p) => p.cat === source.slice(4));
+  if (source?.startsWith('col:')) {
+    const c = collections.find((x) => x.id === source.slice(4));
+    if (!c || !c.visible) return [];
+    const stockOf = (p: MProduct) => (p.type === 'digital' ? null : (p.variants.length ? p.variants.map((v) => v.sku) : [p.sku]).reduce((n, sku) => n + sellable(levels, sku), 0));
+    return collectionMembers(c, merchant, stockOf).map((m) => store.find((p) => p.id === m.id)).filter((p): p is Product => !!p);
+  }
+  return [];
+}
+
+export interface Testimonial { id: string; text: string; rating: number; author: L; productId: string; verified: boolean }
+/** Real, published product reviews only (4★ and up, newest first); names masked when the merchant masks them. Never invented. */
+export function testimonials(reviews: Review[], settings: Pick<ReviewSettings, 'maskNames'>, limit = 3): Testimonial[] {
+  const mask = (n: string) => { const [a, ...r] = n.trim().split(/\s+/); return r.length ? `${a} ${r[r.length - 1].slice(0, 1)}.` : a; };
+  return reviews.filter((r) => r.kind === 'review' && r.status === 'published' && (r.rating ?? 0) >= 4 && r.text.trim())
+    .sort((a, b) => b.at.localeCompare(a.at)).slice(0, limit)
+    .map((r) => ({ id: r.id, text: r.text, rating: r.rating ?? 0, productId: r.productId, verified: r.verified, author: settings.maskNames ? { ar: mask(r.author.ar), en: mask(r.author.en) } : r.author }));
 }
 
 /* ───────────── Homepage sections from the published theme ───────────── */

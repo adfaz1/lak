@@ -24,6 +24,7 @@ import { ContactModal, RefundModal } from './refund';
 import { CancelModal, DeclineCancelModal, OpenReturnModal, ShipModal, TransferModal } from './ops-modals';
 import { printHref } from './print-link';
 import { rhref } from './returns-link';
+import { MessagesCard, useNoticeName } from './notices-ui';
 
 type Dialog = 'fulfil' | 'refund' | 'contact' | 'cancel' | 'decline' | 'ship' | 'deliver' | 'return' | 'transfer' | null;
 
@@ -188,13 +189,13 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
                 {o.fulfilments.map((f, i) => {
                   const n = f.qty.reduce((a, b) => a + b, 0);
                   const st = parcelShip(o, i);
-                  const voided = !!o.cancelled && st === 'none';
+                  const voided = (!!o.cancelled && st === 'none') || !!f.voided;
                   return (
                     <li key={f.ref} className="flex flex-wrap items-center gap-3 px-5 py-3">
                       <span className="grid size-9 place-items-center rounded-xl bg-sky-500/10 text-sky-700 dark:text-sky-300" aria-hidden="true"><Truck className="size-4" /></span>
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-semibold text-fg"><Ref>{f.ref}</Ref>{f.tracking && <span className="ms-2 text-xs font-normal text-muted">{tx('تتبّع', 'Tracking')} <Ref>{f.tracking}</Ref></span>}</p>
-                        <p className="text-xs text-muted">{LOCATIONS[f.loc][lang]} · {tx(`${n} قطع`, `${n} ${n === 1 ? 'item' : 'items'}`)}{f.carrier && ` · ${CARRIERS[f.carrier].name[lang]}`}</p>
+                        <p className="text-xs text-muted">{LOCATIONS[f.loc][lang]}{!f.voided && <> · {tx(`${n} قطع`, `${n} ${n === 1 ? 'item' : 'items'}`)}</>}{f.carrier && ` · ${CARRIERS[f.carrier].name[lang]}`}</p>
                       </div>
                       {voided ? <Badge tone="gray">{tx('أُلغي الملصق', 'Label voided')}</Badge> : <Badge tone={SHIP_TONE[st]}>{L.ship(st)}</Badge>}
                       {!voided && st !== 'none' && <a className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300" href={link(`/store/track/${o.ref}`)} target="_blank" rel="noreferrer">{tx('رابط التتبع', 'Tracking link')}<ExternalLink className="size-3" aria-hidden="true" /></a>}
@@ -254,6 +255,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
             </Card>
           )}
 
+          <MessagesCard o={o} />
           <Timeline o={o} />
         </div>
 
@@ -491,9 +493,13 @@ function Timeline({ o }: { o: Order }) {
       case 'exchangeShipped': return ['sky', <>{tx('شُحن البديل', 'Replacement shipped')}{ref}</>];
       case 'transferConfirmed': return ['green', <>{tx('أُكّد استلام التحويل البنكي ', 'Bank transfer confirmed received: ')}<Money v={a.amount ?? 0} />{a.text && ` · ${a.text}`}</>];
       case 'exchangeCollect': return ['amber', <>{tx('فرق سعر يُحصّل من العميل ', 'Price difference to collect: ')}<Money v={a.amount ?? 0} />{ref}</>];
+      case 'customerMessaged': return ['brand', <>{tx('أُرسلت رسالة للعميل: ', 'Message sent to the customer: ')}{noticeName(a.text?.split(':')[0] ?? '')}</>];
+      case 'payDueExtended': return ['amber', tx(`مُددت مهلة الدفع ${a.text} يوم`, `Payment deadline extended by ${a.text} days`)];
+      case 'labelVoidedOnly': return ['gray', <>{tx('أُلغي الملصق وعاد الطلب للتجهيز', 'Label voided; order back to fulfil')}{ref}</>];
     }
   };
-  const SIM = new Set(['labelIssued', 'labelFailed', 'partialFulfilled', 'refundRequested', 'refundConfirmed', 'refundFailed', 'slipPrinted', 'labelVoided', 'returnApproved', 'exchangeShipped']);
+  const noticeName = useNoticeName();
+  const SIM = new Set(['customerMessaged', 'labelVoidedOnly', 'labelIssued', 'labelFailed', 'partialFulfilled', 'refundRequested', 'refundConfirmed', 'refundFailed', 'slipPrinted', 'labelVoided', 'returnApproved', 'exchangeShipped']);
   const list = entries(o, Date.now()).reverse();
   const shown = allRows ? list : list.slice(0, 12);
   const actor = (x: Entry) => (x.actor === 'system' ? tx('النظام', 'System') : x.actor === 'customer' ? tx('العميل', 'Customer') : x.actor === 'you' ? tx('أنت', 'You') : x.actor);

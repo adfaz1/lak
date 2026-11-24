@@ -3,7 +3,7 @@
    checkout form, the account (saved addresses, wishlist) and the checkout record of each order placed here (payment
    attempts, address, returns). Simulated state for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
-import { couponsStore, customersStore, financeStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { couponsStore, customersStore, financeStore, levelsStore, locationsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
 import { CUSTOMER as CUSTOMER_ACTOR, cancelBlock, cancelOrder, requestCancel } from '../merchant/ops';
 import { applyStockEffects } from '../merchant/inventory';
 import { refundTx } from '../merchant/finance';
@@ -15,7 +15,7 @@ import {
   type Address, type Cart, type CityId, type Draft, type Order, type Outcome, type PayEvent, type PayMethod, type Product, type ShipId,
 } from './domain';
 import {
-  autoOfferResult, cartWeight, couponUses, matchCustomer, scopedResult, nextStoreRef, phoneKey, standardFor, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
+  autoOfferResult, couponUses, matchCustomer, scopedResult, nextStoreRef, phoneKey, shipFrom, shipOptions, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
   mirrorReturns, withMerchant, type StoreConfig,
 } from './bridge';
 
@@ -100,12 +100,16 @@ export function buildDraft(): Draft {
   const c = couponResult(cart, products);
   const signed = co.mode === 'account' && acc.signedIn;
   const city = co.addr.city as CityId | undefined;
+  // The delivery method the shopper picked among those the merchant's shipping setup offers for this city and bag.
+  const discount = c?.status === 'valid' ? c.discount : 0;
+  const opts = shipOptions(cfg, city, lines, { now: Date.now(), goods: lines.reduce((s, l) => s + l.amount, 0) - discount, cod: co.method === 'cod', locations: locationsStore.get() });
+  const chosen = opts.find((x) => x.id === co.ship) ?? opts[0];
   return {
     sessionId: co.sessionId, lines, coupon: c?.status === 'valid' ? c.code : undefined, discount: c?.status === 'valid' ? c.discount : 0,
-    freeShip: c?.status === 'valid' && c.freeShip, ship: co.ship, city, method: co.method,
+    freeShip: c?.status === 'valid' && c.freeShip, ship: chosen?.id ?? co.ship, city, method: co.method,
     address: co.addr as Address, contact: { phone: co.addr.phone ?? '', email: co.email || undefined },
     customerId: signed ? CUSTOMER.id : undefined, codFee: cfg.codFee,
-    shipMethod: standardFor(cfg.zones, city, cartWeight(lines)),
+    shipMethod: chosen,
     ref: nextStoreRef(merchantOrders.get(), ordersStore.get()),
   };
 }
@@ -180,7 +184,7 @@ export function payEvent(ref: string, e: PayEvent, method: PayMethod): Order | u
   updateOrder(ref, () => order);
   const book = syncOrder(
     { orders: merchantOrders.get(), levels: levelsStore.get(), customers: customersStore.get(), coupons: couponsStore.get() },
-    before, order, { products: liveCatalog(), now: Date.now(), gift: order.key.startsWith(checkoutStore.get().sessionId) && checkoutStore.get().gift ? { message: checkoutStore.get().giftMsg.trim() || undefined } : undefined },
+    before, order, { products: liveCatalog(), now: Date.now(), prefer: shipFrom(liveConfig(), order.address?.city, locationsStore.get()), gift: order.key.startsWith(checkoutStore.get().sessionId) && checkoutStore.get().gift ? { message: checkoutStore.get().giftMsg.trim() || undefined } : undefined },
   );
   if (book.customers !== customersStore.get()) customersStore.set(book.customers);
   if (book.levels !== levelsStore.get()) levelsStore.set(book.levels);

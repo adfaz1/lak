@@ -193,10 +193,35 @@ export const seatsUsed = (m: Member[]) => m.filter((x) => x.status !== 'expired'
 
 /* ---------- Themes ---------- */
 
-export type SectionKind = 'announcement' | 'hero' | 'featured' | 'categories' | 'offers' | 'video' | 'newsletter';
-export interface Section { id: string; kind: SectionKind; visible: boolean; heading: string }
-export interface ThemeVersion { version: number; sections: Section[]; note: string }
-export interface ThemeState { published: ThemeVersion; draft: Section[]; history: ThemeVersion[] }
+export type SectionKind = 'announcement' | 'hero' | 'featured' | 'categories' | 'offers' | 'video' | 'newsletter'
+  | 'grid' | 'banner' | 'testimonials' | 'richtext';
+export interface Section {
+  id: string; kind: SectionKind; visible: boolean; heading: string;
+  /* Additive, per kind (store identity, BP-P03-STP-004/005/006). Absent on sections saved earlier. */
+  /** Short text under the heading (hero, banner) or the paragraphs of a rich-text section. */
+  body?: string;
+  /** Where the section leads: a store path ("/c/abayas") or an https:// link. */
+  link?: string;
+  /** Picture: "p:<productId>" (a product photo) or "m:<mediaId>" (an upload kept in the session). */
+  image?: string;
+  /** Product grid source: "cat:<slug>" or "col:<collectionId>". */
+  source?: string;
+  /** Announcement bar colours (#rrggbb) and schedule (yyyy-mm-dd, Riyadh day, inclusive). */
+  bg?: string; fg?: string; start?: string; end?: string;
+}
+/** The store's look (BP-P03-STP-004/005): logo, favicon, brand colour, button shape, typeface and header layout. */
+export type ButtonStyle = 'soft' | 'pill' | 'square';
+export type StoreFont = 'plex' | 'system' | 'naskh';
+export type HeaderLayout = 'classic' | 'centered' | 'minimal';
+export interface StoreIdentity {
+  /** "m:<mediaId>" references to session uploads, or null for the store name / default icon. */
+  logo: string | null; favicon: string | null;
+  accent: string; button: ButtonStyle; font: StoreFont; header: HeaderLayout;
+}
+export const identityFixture = (): StoreIdentity => ({ logo: null, favicon: null, accent: '#84603d', button: 'soft', font: 'plex', header: 'classic' });
+/** `identity` and `draftIdentity` are optional so sessions saved before identity existed keep working (fixture look). */
+export interface ThemeVersion { version: number; sections: Section[]; note: string; identity?: StoreIdentity }
+export interface ThemeState { published: ThemeVersion; draft: Section[]; history: ThemeVersion[]; draftIdentity?: StoreIdentity }
 
 export function themeFixture(): ThemeState {
   const sections: Section[] = [
@@ -233,15 +258,16 @@ export function moveSection(list: Section[], id: string, dir: -1 | 1): Section[]
   return next;
 }
 export function publishTheme(t: ThemeState, note: string): ThemeState {
-  const v: ThemeVersion = { version: Math.max(...t.history.map((h) => h.version)) + 1, sections: t.draft.map((s) => ({ ...s })), note };
-  return { published: v, draft: t.draft, history: [v, ...t.history] };
+  const identity = t.draftIdentity ?? t.published.identity;
+  const v: ThemeVersion = { version: Math.max(...t.history.map((h) => h.version)) + 1, sections: t.draft.map((s) => ({ ...s })), note, ...(identity ? { identity: { ...identity } } : {}) };
+  return { ...t, published: v, draft: t.draft, history: [v, ...t.history] };
 }
 /** Roll back by publishing a copy of an earlier version as a new version; history is never rewritten. */
 export function rollbackTheme(t: ThemeState, version: number): ThemeState {
   const old = t.history.find((h) => h.version === version);
   if (!old) return t;
-  const v: ThemeVersion = { version: Math.max(...t.history.map((h) => h.version)) + 1, sections: old.sections.map((s) => ({ ...s })), note: `Rollback to v${version}` };
-  return { published: v, draft: old.sections.map((s) => ({ ...s })), history: [v, ...t.history] };
+  const v: ThemeVersion = { version: Math.max(...t.history.map((h) => h.version)) + 1, sections: old.sections.map((s) => ({ ...s })), note: `Rollback to v${version}`, ...(old.identity ? { identity: { ...old.identity } } : {}) };
+  return { published: v, draft: old.sections.map((s) => ({ ...s })), history: [v, ...t.history], ...(old.identity ? { draftIdentity: { ...old.identity } } : {}) };
 }
 
 /* ---------- Apps ---------- */
@@ -351,4 +377,111 @@ export function segmentsOf(c: Customer, s: { paidCount: number; spent: number })
   if (s.spent >= 1000000) out.push('highValue');
   if (c.consent.email) out.push('emailConsent');
   return out;
+}
+
+/* ---------- Shipping setup: methods, carriers, rules, delivery promises, international readiness, COD ---------- */
+// Additive (shipping group). The rules engine lives in dashboard/settings/shipping-model.ts; the online store reads
+// the same setup at checkout and on product pages (storefront/bridge.ts). Carriers are simulated.
+
+/** Delivery categories a method belongs to. `sameday` = same-day in selected cities; `cold` = refrigerated. */
+export type ShipCat = 'standard' | 'express' | 'economy' | 'sameday' | 'cold' | 'intl' | 'pickup';
+export const SHIP_CATS: ShipCat[] = ['standard', 'express', 'economy', 'sameday', 'cold', 'intl', 'pickup'];
+/** A carrier as the store knows it (simulated account): cities served ('*' = all of Saudi Arabia), countries, base price, typical transit. */
+export interface Carrier {
+  id: string; name: L;
+  /** City ids served in Saudi Arabia; ['*'] = every city. */
+  cities: string[];
+  /** ISO country codes served abroad; [] = domestic only. */
+  countries: string[];
+  /** Base price (halalas) for the first kg and each extra started kg. */
+  price: number; perKg: number;
+  /** Typical transit in business days after handover. */
+  eta: [number, number];
+  cod: boolean; cold: boolean;
+  /** Connection state of the simulated account. */
+  state: 'connected' | 'action_required';
+}
+export interface ShipMethodCfg {
+  id: string; cat: ShipCat; name: L; on: boolean;
+  /** Carrier id; null for showroom pickup. */
+  carrier: string | null;
+  /** Halalas for the first kg; null = the price of the shipping zone that covers the city. */
+  price: number | null;
+  perKg: number;
+  /** Goods value (after discount) from which this method is free; null = never. */
+  freeOver: number | null;
+  /** Restrict to these city ids; [] = wherever the carrier goes. */
+  cities: string[];
+  /** Shown only when the cart holds one of these product categories (category keys); [] = any cart. */
+  onlyCats: string[];
+  /** Heaviest cart (kg) the method takes; null = no limit. */
+  maxKg: number | null;
+  /** Cash on delivery offered with this method (the carrier must also support it). */
+  cod: boolean;
+  /** Pickup only: the location shoppers collect from. */
+  pickupLoc?: string;
+}
+/** When a rule applies: every condition given must hold. Money in halalas, weight in kg, categories as keys. */
+export interface ShipWhen { cities?: string[]; cartMin?: number; cartMax?: number; kgMin?: number; kgMax?: number; cats?: string[]; cod?: boolean }
+export type ShipThen = { kind: 'hide' } | { kind: 'free' } | { kind: 'price'; v: number } | { kind: 'surcharge'; v: number };
+export interface ShipRule { id: string; name: L; on: boolean; /** Method ids; [] = every method. */ methods: string[]; when: ShipWhen; then: ShipThen }
+/** Delivery promise per shipping zone: preparation days before handover, and extra transit days for remote areas. */
+export interface ShipPromise { zoneId: string; handling: number; extra: number }
+/** Customs data per product for international shipping. Weight comes from the product itself. */
+export interface IntlData { hs: string; origin: string; descAr: string; descEn: string }
+export interface CodRules { exceptCities: string[]; exceptCats: string[]; maxKg: number | null }
+export interface ShippingSetup {
+  carriers: Carrier[];
+  methods: ShipMethodCfg[];
+  rules: ShipRule[];
+  promises: ShipPromise[];
+  /** Same-day orders placed before this Riyadh hour leave today. */
+  sameDayCutoff: number;
+  intl: Record<string, IntlData>;
+  cod: CodRules;
+  /** Pick the shipping warehouse by the customer's zone. */
+  autoWarehouse: boolean;
+  warehouseByZone: Record<string, string>;
+  /** Ask the recipient to confirm their mobile by code before a COD order is accepted (simulated). */
+  verifyPhone: boolean;
+}
+
+export function shippingFixture(): ShippingSetup {
+  const k = (ar: string, en: string): L => ({ ar, en });
+  return {
+    carriers: [
+      { id: 'ca', name: k('ناقل تجريبي أ', 'Test carrier A'), cities: ['*'], countries: [], price: 2500, perKg: 500, eta: [2, 4], cod: true, cold: false, state: 'connected' },
+      { id: 'cb', name: k('ناقل تجريبي ب', 'Test carrier B'), cities: ['riyadh', 'jeddah', 'dammam', 'khobar', 'makkah', 'madinah'], countries: [], price: 3900, perKg: 700, eta: [1, 1], cod: true, cold: false, state: 'connected' },
+      { id: 'cc', name: k('مندوب المدينة', 'City courier'), cities: ['riyadh', 'jeddah'], countries: [], price: 4900, perKg: 0, eta: [0, 0], cod: false, cold: false, state: 'connected' },
+      { id: 'cd', name: k('ناقل تجريبي ج · مبرّد', 'Test carrier C · chilled'), cities: ['riyadh', 'jeddah', 'dammam', 'khobar'], countries: [], price: 3500, perKg: 800, eta: [1, 2], cod: false, cold: true, state: 'connected' },
+      { id: 'ce', name: k('ناقل تجريبي د · دولي', 'Test carrier D · international'), cities: [], countries: ['AE', 'KW', 'BH', 'QA', 'OM', 'JO', 'GB', 'US'], price: 6500, perKg: 2500, eta: [4, 7], cod: false, cold: false, state: 'action_required' },
+    ],
+    methods: [
+      { id: 'standard', cat: 'standard', name: k('توصيل عادي', 'Standard delivery'), on: true, carrier: 'ca', price: null, perKg: 0, freeOver: null, cities: [], onlyCats: [], maxKg: null, cod: true },
+      { id: 'express', cat: 'express', name: k('توصيل سريع', 'Express delivery'), on: true, carrier: 'cb', price: 3900, perKg: 700, freeOver: null, cities: [], onlyCats: [], maxKg: 20, cod: true },
+      { id: 'economy', cat: 'economy', name: k('توصيل اقتصادي', 'Economy delivery'), on: false, carrier: 'ca', price: 1500, perKg: 300, freeOver: null, cities: [], onlyCats: [], maxKg: null, cod: false },
+      { id: 'sameday', cat: 'sameday', name: k('توصيل في نفس اليوم', 'Same-day delivery'), on: true, carrier: 'cc', price: 4900, perKg: 0, freeOver: null, cities: ['riyadh'], onlyCats: [], maxKg: 10, cod: false },
+      { id: 'cold', cat: 'cold', name: k('توصيل مبرّد للعطور', 'Chilled delivery for fragrance'), on: false, carrier: 'cd', price: 3500, perKg: 800, freeOver: null, cities: [], onlyCats: ['fragrance'], maxKg: 15, cod: false },
+      { id: 'intl', cat: 'intl', name: k('شحن دولي', 'International shipping'), on: false, carrier: 'ce', price: 6500, perKg: 2500, freeOver: null, cities: [], onlyCats: [], maxKg: 30, cod: false },
+      { id: 'pickup', cat: 'pickup', name: k('استلام من المعرض', 'Showroom pickup'), on: false, carrier: null, price: 0, perKg: 0, freeOver: null, cities: [], onlyCats: [], maxKg: null, cod: false, pickupLoc: 'ryd' },
+    ],
+    rules: [
+      { id: 'r1', name: k('سريع مجاني فوق 500 ر.س في الرياض', 'Free express over SAR 500 in Riyadh'), on: true, methods: ['express'], when: { cities: ['riyadh'], cartMin: 50000 }, then: { kind: 'free' } },
+      { id: 'r2', name: k('إخفاء السريع للطلبات الثقيلة', 'Hide express for heavy carts'), on: true, methods: ['express'], when: { kgMin: 15 }, then: { kind: 'hide' } },
+    ],
+    promises: [
+      { zoneId: 'z1', handling: 1, extra: 0 },
+      { zoneId: 'z2', handling: 1, extra: 0 },
+      { zoneId: 'z3', handling: 2, extra: 1 },
+    ],
+    sameDayCutoff: 14,
+    intl: {
+      p1: { hs: '6204.49', origin: 'SA', descAr: 'عباية نسائية من الكتان', descEn: 'Women’s linen abaya' },
+      p3: { hs: '7013.99', origin: 'SA', descAr: '', descEn: 'Glass perfume bottle' },
+    },
+    cod: { exceptCities: [], exceptCats: ['gifts'], maxKg: null },
+    autoWarehouse: true,
+    warehouseByZone: { z1: 'ryd', z2: 'jed', z3: 'ryd' },
+    verifyPhone: false,
+  };
 }

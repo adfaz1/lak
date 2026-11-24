@@ -19,6 +19,8 @@ import { skuPhoto } from '../model/media';
 import { setDashState, useDashState } from '../review';
 import { bestStockLoc, orderPerms, siblings, skuOptions } from './model';
 import { Qty, Row, applyEffects, ohref, saveOrder, useActor, useAge, useLabels } from './ui';
+import { noticeMute } from '../../merchant/stores';
+import { NoticeNote } from './notices-ui';
 import { When } from './detail';
 import { rhref } from './returns-link';
 
@@ -211,8 +213,10 @@ function StepModal({ o, r, kind, onClose }: { o: Order; r: OrderReturn; kind: 'a
   const { lang } = useLang();
   const who = useActor();
   const amount = returnRefundAmount(o, r);
+  const [notify, setNotify] = useState(true);
   const run = () => {
     const now = Date.now();
+    if (!notify) noticeMute.add(o.ref);
     if (kind === 'approve') { saveOrder(approveReturn(o, r.id, who, now)); onClose(tx('وُوفق على المرتجع', 'Return approved')); return; }
     if (kind === 'receive') { saveOrder(receiveReturn(o, r.id, who, now)); onClose(tx('سُجّل استلام المرتجع', 'Return marked received')); return; }
     if (kind === 'shipEx') { const x = shipExchange(o, r.id, who, now); saveOrder(x.order); applyEffects(x.effects, who, o.ref, 'EX'); onClose(tx(`شُحن البديل ${x.ref}`, `Replacement shipped ${x.ref}`)); return; }
@@ -247,7 +251,8 @@ function StepModal({ o, r, kind, onClose }: { o: Order; r: OrderReturn; kind: 'a
   return (
     <Modal title={T[0]} onClose={() => onClose()} footer={<><Button variant="secondary" onClick={() => onClose()}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={run}>{T[1]}</Button></>}>
       <dl className="divide-y divide-border !rounded-xl !border !border-border !px-4">{T[2].map(([k, v], i) => <Row key={i} label={k}>{v}</Row>)}</dl>
-      {kind === 'refund' && <p className="flex items-center gap-2 text-xs text-muted">{tx('لا رسالة للعميل من هنا.', 'No message is sent from here.')}<Simulated /></p>}
+      {(kind === 'approve' || kind === 'receive') && <NoticeNote o={o} event={kind === 'approve' ? 'returnApproved' : 'returnReceived'} notify={notify} onNotify={setNotify} />}
+      {kind === 'refund' && <p className="flex items-center gap-2 text-xs text-muted">{tx('تصل العميل رسالة «تم الاسترداد» عند تأكيد المزوّد.', 'The customer gets the “Refunded” message once the provider confirms.')}<Simulated /></p>}
     </Modal>
   );
 }
@@ -256,11 +261,13 @@ function RejectModal({ o, r, onClose }: { o: Order; r: OrderReturn; onClose: (ms
   const tx = useTx();
   const who = useActor();
   const [why, setWhy] = useState('');
+  const [notify, setNotify] = useState(true);
   return (
     <Modal title={tx('رفض المرتجع', 'Reject the return')} onClose={() => onClose()}
-      footer={<><Button variant="secondary" onClick={() => onClose()}>{tx('رجوع', 'Back')}</Button><Button variant="danger" disabled={!why.trim()} onClick={() => { saveOrder(rejectReturn(o, r.id, why, who, Date.now())); onClose(tx('رُفض المرتجع وسُجّل السبب', 'Return rejected; reason logged')); }}>{tx('ارفض', 'Reject')}</Button></>}>
+      footer={<><Button variant="secondary" onClick={() => onClose()}>{tx('رجوع', 'Back')}</Button><Button variant="danger" disabled={!why.trim()} onClick={() => { if (!notify) noticeMute.add(o.ref); saveOrder(rejectReturn(o, r.id, why, who, Date.now())); onClose(tx('رُفض المرتجع وسُجّل السبب', 'Return rejected; reason logged')); }}>{tx('ارفض', 'Reject')}</Button></>}>
       <Alert tone="info">{tx('لا يتغير المال ولا المخزون. يرى العميل أن الطلب أُغلق.', 'Money and stock do not change. The customer sees the request closed.')}</Alert>
       <Field label={tx('السبب', 'Reason')}>{(p) => <Input {...p} value={why} onChange={(e) => setWhy(e.target.value)} placeholder={tx('مثال: خارج مدة الإرجاع', 'e.g. outside the return window')} />}</Field>
+      <NoticeNote o={o} event="returnRejected" notify={notify} onNotify={setNotify} />
     </Modal>
   );
 }

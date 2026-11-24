@@ -1,7 +1,7 @@
 // Inventory section (`#/dashboard/inventory`): levels per SKU and warehouse, low stock, transfers, stock log.
 // Every rule comes from merchant/inventory.ts through ./model; this file is layout and interaction.
 import { lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Boxes, SearchX, SlidersHorizontal, ArrowLeftRight, Truck, History, Plus, CheckCircle2, ArrowLeft, Warehouse, Download, Upload, BellRing, Gauge } from 'lucide-react';
+import { Boxes, SearchX, SlidersHorizontal, ArrowLeftRight, Truck, History, Plus, CheckCircle2, ArrowLeft, Warehouse, Download, Upload, BellRing, Gauge, Layers } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
@@ -10,7 +10,7 @@ import { toCsv } from '../../merchant/catalog';
 import { ADJ_REASONS, adjust, bumpBySomeoneElse, historyFixtures, levelOf, syncStockAlerts, type AdjReason, type Level, type StockAlertEntry, type StockLog, type Transfer } from '../../merchant/inventory';
 import { can, canSee } from '../../merchant/perms';
 import { levelsStore, logAction, locationsStore, productsStore, stockAlertsStore, stockLogStore, transfersStore } from '../../merchant/stores';
-import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
+import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, BulkBar, DataTable, Field, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Simulated, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
@@ -18,8 +18,10 @@ import { paginate } from '../products/model';
 import { NoAccess, ReviewTools, downloadText, ihref, roleBadge, useRole } from '../products/common';
 import { SkuCell, T_TONE, useInvNames } from './parts';
 import {
-  adjustPreview, coverFor, infoFor, isOpen, levelRows, levelsCsv, logRows, nextAdjId, readLoc, readTab, skuInfo, tabCounts, units, type LevelRow, type SkuInfo,
+  STATE_FILTERS, adjustPreview, coverFor, infoFor, isOpen, levelRows, levelsCsv, logRows, nextAdjId, readCols, readLoc, readStateFilter, readTab, skuInfo, tabCounts, units,
+  type LevelCols, type LevelRow, type SkuInfo,
 } from './model';
+import { CompositionBar, StateHead, StatesModal, useStateNames } from './states';
 
 const TransferDetail = lazy(() => import('./transfer'));
 const Locations = lazy(() => import('./locations'));
@@ -56,11 +58,15 @@ function InventoryHome({ route }: { route: Route }) {
   const tab = readTab(route.query.get('tab'));
   const q = route.query.get('q') ?? '';
   const loc = readLoc(route.query.get('loc'));
-  const query = { tab: tab === 'levels' ? undefined : tab, q: q || undefined, loc: loc || undefined };
+  const st = readStateFilter(route.query.get('state'));
+  const cols = readCols(route.query.get('cols'));
+  const query = { tab: tab === 'levels' ? undefined : tab, q: q || undefined, loc: loc || undefined, state: st || undefined, cols: cols === 'all' ? 'all' : undefined };
   const go = (patch: Record<string, string | undefined>) => replace(ihref('', { ...query, ...patch, page: undefined }));
   const counts = tabCounts(levels, transfers, log);
   const [adj, setAdj] = useState<Level | null>(null);
   const [thr, setThr] = useState<Level[] | null>(null);
+  const [states, setStates] = useState<Level | null>(null);
+  const sn = useStateNames();
   const [sel, setSel] = useState<Set<string>>(new Set());
   locationsStore.use();
   // Keep low-stock alerts in step with every level change (adjustments, transfers, orders): one alert per crossing.
@@ -68,7 +74,7 @@ function InventoryHome({ route }: { route: Route }) {
     const r = syncStockAlerts(allLevels, stockAlertsStore.get(), 'now', Date.now());
     if (r.raised.length || r.resolved) stockAlertsStore.set(r.alerts);
   }, [allLevels]);
-  const exportLevels = () => downloadText('inventory.csv', toCsv(levelsCsv(levelRows(levels, info, { q, loc }), (id) => LOCATIONS[id][lang])));
+  const exportLevels = () => downloadText('inventory.csv', toCsv(levelsCsv(levelRows(levels, info, { q, loc, state: st }, transfers), (id) => LOCATIONS[id][lang])));
 
   const header = (
     <PageHeader title={tx('المخزون', 'Inventory')}
@@ -87,7 +93,7 @@ function InventoryHome({ route }: { route: Route }) {
   const tabs = (
     <div className="px-4 pt-2 sm:px-5">
       <Tabs label={tx('أقسام المخزون', 'Inventory views')} items={[
-        { href: ihref('', { q: query.q, loc: query.loc }), label: tx('المستويات', 'Levels'), current: tab === 'levels' },
+        { href: ihref('', { q: query.q, loc: query.loc, state: query.state, cols: query.cols }), label: tx('المستويات', 'Levels'), current: tab === 'levels' },
         { href: ihref('', { ...query, tab: 'low' }), label: tx('منخفض', 'Low stock'), current: tab === 'low', count: counts.low },
         { href: ihref('', { tab: 'transfers' }), label: tx('التحويلات', 'Transfers'), current: tab === 'transfers', count: counts.transfers },
         { href: ihref('', { ...query, tab: 'log' }), label: tx('سجل الحركة', 'Stock log'), current: tab === 'log' },
@@ -98,7 +104,9 @@ function InventoryHome({ route }: { route: Route }) {
     <div className="flex flex-wrap items-center gap-2 p-4 sm:px-5">
       <div className="flex w-full sm:w-auto sm:flex-1 sm:max-w-xs"><SearchInput value={q} onChange={(v) => go({ q: v || undefined })} placeholder={tx('ابحث بالمنتج أو SKU', 'Search product or SKU')} /></div>
       <FilterChip label={tx('الموقع', 'Location')} value={loc} onChange={(v) => go({ loc: v || undefined })} options={LOC_IDS.map((l) => ({ value: l, label: LOCATIONS[l][lang] }))} />
-      {(q || loc) && <a href={ihref('', { tab: query.tab })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
+      {tab === 'levels' && <FilterChip label={tx('الحالة', 'State')} value={st} onChange={(v) => go({ state: v || undefined })} options={STATE_FILTERS.map((f) => ({ value: f, label: f === 'held' ? tx('موقوف عن البيع', 'Held back from sale') : f === 'transit' ? tx('في الطريق', 'In transit') : sn.label(f) }))} />}
+      {tab === 'levels' && <span className="ms-auto hidden items-center gap-1 sm:inline-flex"><Segmented label={tx('الأعمدة', 'Columns')} value={cols} onChange={(v: LevelCols) => go({ cols: v === 'all' ? 'all' : undefined })} options={[{ value: 'essential', label: tx('الأساسية', 'Essential') }, { value: 'all', label: tx('كل الحالات', 'All states') }]} /><InfoHint>{tx('«كل الحالات» تعرض: بانتظار الدفع، غير المتاح، الاحتياطي، الوارد والصادر. تُحفظ في الرابط.', '“All states” shows awaiting payment, unavailable, safety reserve, incoming and outgoing. Kept in the link.')}</InfoHint></span>}
+      {(q || loc || st) && <a href={ihref('', { tab: query.tab, cols: query.cols })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
     </div>
   );
   const noResults = (
@@ -115,15 +123,15 @@ function InventoryHome({ route }: { route: Route }) {
     body = <EmptyState icon={<Boxes className="size-6" aria-hidden="true" />} title={tx('لا مخزون متتبَّع بعد', 'No tracked stock yet')} action={<LinkButton href={sectionHref('products', 'new')}>{tx('أضف منتجًا', 'Add a product')}</LinkButton>}>{tx('أضف منتجًا ملموسًا بكمياته في كل مستودع.', 'Add a physical product with its quantity per warehouse.')}</EmptyState>;
   } else {
     const low = tab === 'low';
-    const rows = levelRows(levels, info, { q, loc, lowOnly: low });
+    const rows = levelRows(levels, info, { q, loc, lowOnly: low, state: low ? '' : st }, transfers);
     const pg = paginate(rows, route.query.get('page'));
     body = (
       <>
         {toolbar}
-        {rows.length === 0 ? (low && !q && !loc ? <EmptyState icon={<CheckCircle2 className="size-6" aria-hidden="true" />} title={tx('لا شيء منخفض', 'Nothing is running low')}>{tx('كل الأصناف فوق حد إعادة الطلب.', 'Every SKU is above its reorder point.')}</EmptyState> : noResults) : (
+        {rows.length === 0 ? (low && !q && !loc && !st ? <EmptyState icon={<CheckCircle2 className="size-6" aria-hidden="true" />} title={tx('لا شيء منخفض', 'Nothing is running low')}>{tx('كل الأصناف فوق حد إعادة الطلب.', 'Every SKU is above its reorder point.')}</EmptyState> : noResults) : (
           <>
             {low ? <LowList rows={pg.rows} levels={levels} canTransfer={canTransfer} onThreshold={canAdjust ? (r) => setThr([r]) : undefined} />
-              : <LevelTable rows={pg.rows} onAdjust={canAdjust ? setAdj : undefined} onThreshold={canAdjust ? (r) => setThr([r]) : undefined}
+              : <LevelTable rows={pg.rows} cols={cols} onStates={setStates} onAdjust={canAdjust ? setAdj : undefined} onThreshold={canAdjust ? (r) => setThr([r]) : undefined}
                 selected={canAdjust ? sel : undefined} onSelect={canAdjust ? (k, on) => setSel((x) => { const n = new Set(x); if (on) n.add(k); else n.delete(k); return n; }) : undefined}
                 bulk={sel.size > 0 ? <BulkBar count={sel.size} onClear={() => setSel(new Set())} scope={tx('صفوف (صنف × موقع)', 'rows (SKU × location)')}>
                   <Button size="sm" onClick={() => setThr(levels.filter((l) => sel.has(`${l.sku}@${l.loc}`)))}><Gauge className="size-3.5" aria-hidden="true" />{tx('حد إعادة الطلب', 'Reorder point')}</Button>
@@ -142,39 +150,55 @@ function InventoryHome({ route }: { route: Route }) {
       <Card>{tabs}{body}</Card>
       <ReviewTools />
       {adj && <AdjustModal key={`${adj.sku}@${adj.loc}`} level={adj} info={infoFor(info, adj.sku)} onClose={() => setAdj(null)} />}
+      {states && <StatesModal key={`${states.sku}@${states.loc}`} level={states} info={infoFor(info, states.sku)} canMove={canAdjust} onClose={() => setStates(null)} />}
       {thr && <ThresholdModal rows={thr} info={(sku) => infoFor(info, sku)} onClose={() => setThr(null)} onSaved={() => setSel(new Set())} />}
     </div>
   );
 }
 
-function DefHint({ k }: { k: 'onHand' | 'reserved' | 'available' | 'incoming' }) {
-  const tx = useTx();
-  const text = {
-    onHand: tx('وحدات موجودة فعليًا في المستودع.', 'Units physically in the warehouse.'),
-    reserved: tx('محجوزة لطلبات مدفوعة لم تُجهّز بعد.', 'Held for paid orders not yet fulfilled.'),
-    available: tx('الموجود − المحجوز. ما يمكن بيعه الآن.', 'On hand − reserved. What can be sold now.'),
-    incoming: tx('في تحويل مُرسل لم يُستلم. لا يُباع تلقائيًا.', 'In a sent transfer, not yet received. Never sold automatically.'),
-  }[k];
-  return <InfoHint>{text}</InfoHint>;
-}
-
-function LevelTable({ rows, onAdjust, onThreshold, selected, onSelect, bulk }: { rows: LevelRow[]; onAdjust?: (l: Level) => void; onThreshold?: (l: Level) => void; selected?: Set<string>; onSelect?: (key: string, on: boolean) => void; bulk?: ReactNode }) {
+function LevelTable({ rows, cols, onStates, onAdjust, onThreshold, selected, onSelect, bulk }: { rows: LevelRow[]; cols: LevelCols; onStates: (l: Level) => void; onAdjust?: (l: Level) => void; onThreshold?: (l: Level) => void; selected?: Set<string>; onSelect?: (key: string, on: boolean) => void; bulk?: ReactNode }) {
   const tx = useTx();
   const { lang } = useLang();
-  const h = (label: string, k: 'onHand' | 'reserved' | 'available' | 'incoming') => <span className="inline-flex items-center gap-0.5">{label}<DefHint k={k} /></span>;
+  const all = cols === 'all';
+  const num = (v: number, muted = true) => <span className={cn('tabular-nums', muted && 'text-muted', v === 0 && 'text-subtle')}>{v || '—'}</span>;
+  const held = (r: LevelRow) => r.states.awaitingPay + r.states.unavailable + r.states.safety;
   const avail = (r: LevelRow) => r.unstocked ? <span className="text-xs text-subtle">{tx('غير مخزّن', 'Not stocked')}</span> : <span className={cn('font-bold tabular-nums', r.available <= 0 ? 'text-red-600 dark:text-red-400' : r.low ? 'text-amber-700 dark:text-amber-300' : 'text-fg')}>{r.available}</span>;
   const thr = (r: LevelRow) => r.unstocked ? <span className="text-subtle">—</span> : onThreshold
     ? <button type="button" onClick={() => onThreshold(r)} className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-semibold tabular-nums text-fg hover:bg-surface-2" aria-label={tx(`حد إعادة الطلب ${r.threshold} · عدّل`, `Reorder point ${r.threshold} · edit`)}>{r.threshold}<Gauge className="size-3 text-subtle" aria-hidden="true" /></button>
     : <span className="tabular-nums">{r.threshold}</span>;
+  const statesBtn = (r: LevelRow, label?: boolean) => (
+    <Button variant={label ? 'secondary' : 'ghost'} size="sm" className={label ? undefined : 'size-9 shrink-0 px-0'} title={label ? undefined : tx('حالات المخزون', 'Stock states')} onClick={() => onStates(r)} disabled={r.unstocked} aria-label={tx(`حالات المخزون: ${r.sku} في ${LOCATIONS[r.loc].ar}`, `Stock states: ${r.sku} at ${LOCATIONS[r.loc].en}`)}>
+      <Layers className="size-4 shrink-0" aria-hidden="true" />{label && tx('الحالات', 'States')}
+    </Button>
+  );
+  const heldCell = (r: LevelRow) => {
+    const h = held(r);
+    if (!h) return <span className="text-subtle">—</span>;
+    const bits = ([['awaitingPay', tx('دفع', 'pay')], ['unavailable', tx('تالف', 'dmg')], ['safety', tx('احتياطي', 'safety')]] as const).filter(([k]) => r.states[k] > 0).map(([k, l]) => `${r.states[k]} ${l}`);
+    return <button type="button" onClick={() => onStates(r)} className="inline-flex flex-col items-end rounded-md px-1.5 py-0.5 leading-tight hover:bg-surface-2"><span className="font-semibold tabular-nums text-fg">{h}</span><span className="text-[11px] text-muted">{bits.join(' · ')}</span></button>;
+  };
   const columns: Column<LevelRow>[] = [
-    { key: 'p', header: tx('المنتج', 'Product'), cell: (r) => <SkuCell sku={r.sku} info={r.info} />, className: 'max-w-80' },
-    { key: 'loc', header: tx('الموقع', 'Location'), cell: (r) => <span className="text-muted">{LOCATIONS[r.loc][lang]}</span> },
-    { key: 'oh', header: h(tx('الموجود', 'On hand'), 'onHand'), align: 'end', cell: (r) => <span className="tabular-nums">{r.onHand}</span> },
-    { key: 'rs', header: h(tx('المحجوز', 'Reserved'), 'reserved'), align: 'end', cell: (r) => <span className="tabular-nums text-muted">{r.reserved}</span>, hideBelow: 'lg' },
-    { key: 'av', header: h(tx('المتاح', 'Available'), 'available'), align: 'end', cell: avail },
-    { key: 'in', header: h(tx('الوارد', 'Incoming'), 'incoming'), align: 'end', cell: (r) => <span className="tabular-nums text-muted">{r.incoming || '—'}</span>, hideBelow: 'lg' },
-    { key: 'th', header: <span className="inline-flex items-center gap-0.5">{tx('حد الطلب', 'Reorder at')}<InfoHint>{tx('منخفض عندما يصل المتاح إلى هذا الرقم. اضغطه لتعديله.', 'Low when available reaches this number. Click to change it.')}</InfoHint></span>, align: 'end', cell: thr, hideBelow: 'md' },
-    ...(onAdjust ? [{ key: 'a', header: <span className="sr-only">{tx('إجراء', 'Action')}</span>, align: 'end' as const, cell: (r: LevelRow) => <Button variant="secondary" size="sm" onClick={() => onAdjust(r)} aria-label={tx(`عدّل ${r.sku} في ${LOCATIONS[r.loc].ar}`, `Adjust ${r.sku} at ${LOCATIONS[r.loc].en}`)}><SlidersHorizontal className="size-3.5" aria-hidden="true" />{tx('عدّل', 'Adjust')}</Button> }] : []),
+    { key: 'p', header: tx('المنتج', 'Product'), cell: (r) => <SkuCell sku={r.sku} info={r.info} sub={all ? LOCATIONS[r.loc][lang] : undefined} />, className: all ? 'max-w-64' : 'max-w-72' },
+    ...(all ? [] : [{ key: 'loc', header: tx('الموقع', 'Location'), cell: (r: LevelRow) => <span className="text-muted">{LOCATIONS[r.loc][lang]}</span> }]),
+    { key: 'oh', header: <StateHead s="onHand" />, align: 'end', cell: (r) => <span className="inline-flex flex-col items-end gap-1"><span className="tabular-nums">{r.onHand}</span>{!r.unstocked && r.onHand > 0 && r.available !== r.onHand && <CompositionBar b={r.states} className="h-1.5 w-12" />}</span> },
+    { key: 'av', header: <StateHead s="available" />, align: 'end', cell: avail },
+    { key: 'rs', header: <StateHead s="reserved" />, align: 'end', cell: (r) => num(r.reserved), hideBelow: 'lg' },
+    ...(all ? [
+      { key: 'ap', header: <StateHead s="awaitingPay" />, align: 'end' as const, cell: (r: LevelRow) => num(r.states.awaitingPay), hideBelow: 'lg' as const },
+      { key: 'un', header: <StateHead s="unavailable" />, align: 'end' as const, cell: (r: LevelRow) => num(r.states.unavailable), hideBelow: 'lg' as const },
+      { key: 'sf', header: <StateHead s="safety" />, align: 'end' as const, cell: (r: LevelRow) => num(r.states.safety), hideBelow: 'lg' as const },
+    ] : [
+      { key: 'hd', header: <span className="inline-flex items-center gap-0.5">{tx('موقوف', 'Held')}<InfoHint>{tx('بانتظار الدفع + غير المتاح + الاحتياطي: قطع موجودة لا تُباع. اضغط الرقم للتفاصيل.', 'Awaiting payment + unavailable + safety reserve: units on hand that are not sold. Click the number for details.')}</InfoHint></span>, align: 'end' as const, cell: heldCell, hideBelow: 'lg' as const },
+    ]),
+    { key: 'in', header: <StateHead s="incoming" />, align: 'end', cell: (r) => num(r.incoming), hideBelow: 'lg' },
+    ...(all ? [{ key: 'out', header: <StateHead s="outgoing" />, align: 'end' as const, cell: (r: LevelRow) => num(r.states.outgoing), hideBelow: 'lg' as const }] : []),
+    ...(all ? [] : [{ key: 'th', header: <span className="inline-flex items-center gap-0.5">{tx('حد الطلب', 'Reorder at')}<InfoHint>{tx('منخفض عندما يصل المتاح إلى هذا الرقم. اضغطه لتعديله.', 'Low when available reaches this number. Click to change it.')}</InfoHint></span>, align: 'end' as const, cell: thr, hideBelow: 'md' as const }]),
+    { key: 'a', header: <span className="sr-only">{tx('إجراء', 'Action')}</span>, align: 'end', className: 'whitespace-nowrap', cell: (r) => (
+      <span className="inline-flex shrink-0 items-center gap-1">
+        {statesBtn(r)}
+        {onAdjust && <Button variant="secondary" size="sm" className={all ? 'size-9 shrink-0 px-0' : 'shrink-0'} title={all ? tx('عدّل', 'Adjust') : undefined} onClick={() => onAdjust(r)} aria-label={tx(`عدّل ${r.sku} في ${LOCATIONS[r.loc].ar}`, `Adjust ${r.sku} at ${LOCATIONS[r.loc].en}`)}><SlidersHorizontal className="size-3.5 shrink-0" aria-hidden="true" />{!all && tx('عدّل', 'Adjust')}</Button>}
+      </span>
+    ) },
   ];
   return (
     <div className="border-t border-border">
@@ -185,9 +209,15 @@ function LevelTable({ rows, onAdjust, onThreshold, selected, onSelect, bulk }: {
           <div className="space-y-2">
             <div className="flex items-start justify-between gap-2"><SkuCell sku={r.sku} info={r.info} sub={LOCATIONS[r.loc][lang]} /></div>
             <dl className="grid grid-cols-4 gap-2 rounded-xl bg-surface-2 p-2 text-center text-xs">
-              {([[tx('موجود', 'On hand'), r.onHand], [tx('محجوز', 'Reserved'), r.reserved], [tx('متاح', 'Available'), avail(r)], [tx('وارد', 'Incoming'), r.incoming]] as const).map(([l, v]) => <div key={l}><dt className="text-muted">{l}</dt><dd className="mt-0.5 font-semibold tabular-nums text-fg">{v}</dd></div>)}
+              {([[tx('موجود', 'On hand'), r.onHand], [tx('متاح', 'Available'), avail(r)], [tx('محجوز', 'Reserved'), r.reserved], [tx('موقوف', 'Held'), held(r)]] as const).map(([l, v]) => <div key={l}><dt className="text-muted">{l}</dt><dd className="mt-0.5 font-semibold tabular-nums text-fg">{v}</dd></div>)}
             </dl>
-            {onAdjust && <div className="flex gap-2"><Button variant="secondary" size="sm" className="flex-1" onClick={() => onAdjust(r)}><SlidersHorizontal className="size-3.5" aria-hidden="true" />{r.unstocked ? tx('أدخل كمية', 'Add stock') : tx('عدّل الكمية', 'Adjust quantity')}</Button>{onThreshold && !r.unstocked && <Button variant="ghost" size="sm" onClick={() => onThreshold(r)}><Gauge className="size-3.5" aria-hidden="true" />{tx(`الحد ${r.threshold}`, `Reorder ${r.threshold}`)}</Button>}</div>}
+            {!r.unstocked && r.onHand > 0 && r.available !== r.onHand && <CompositionBar b={r.states} />}
+            {(r.incoming > 0 || r.states.outgoing > 0) && <p className="text-xs text-muted">{[r.incoming > 0 && tx(`وارد ${r.incoming}`, `Incoming ${r.incoming}`), r.states.outgoing > 0 && tx(`صادر ${r.states.outgoing}`, `Outgoing ${r.states.outgoing}`)].filter(Boolean).join(' · ')}</p>}
+            <div className="flex flex-wrap gap-2">
+              {onAdjust && <Button variant="secondary" size="sm" className="flex-1" onClick={() => onAdjust(r)}><SlidersHorizontal className="size-3.5" aria-hidden="true" />{r.unstocked ? tx('أدخل كمية', 'Add stock') : tx('عدّل الكمية', 'Adjust quantity')}</Button>}
+              {!r.unstocked && statesBtn(r, true)}
+              {onThreshold && !r.unstocked && <Button variant="ghost" size="sm" onClick={() => onThreshold(r)}><Gauge className="size-3.5" aria-hidden="true" />{tx(`الحد ${r.threshold}`, `Reorder ${r.threshold}`)}</Button>}
+            </div>
           </div>
         )} />
     </div>
@@ -252,12 +282,13 @@ function LogTable({ rows }: { rows: (StockLog & { info: SkuInfo })[] }) {
   const tx = useTx();
   const { lang } = useLang();
   const names = useInvNames();
+  const sn = useStateNames();
   const delta = (x: StockLog) => <bdi dir="ltr" className={cn('font-bold tabular-nums', x.delta > 0 ? 'text-emerald-700 dark:text-emerald-400' : x.delta < 0 ? 'text-red-600 dark:text-red-400' : 'text-muted')}>{x.delta > 0 ? '+' : ''}{x.delta}</bdi>;
   const columns: Column<StockLog & { info: SkuInfo }>[] = [
     { key: 'p', header: tx('المنتج', 'Product'), cell: (x) => <SkuCell sku={x.sku} info={x.info} sub={LOCATIONS[x.loc][lang]} />, className: 'max-w-80' },
     { key: 'd', header: tx('التغيير', 'Change'), align: 'end', cell: delta },
     { key: 'ba', header: tx('قبل ← بعد', 'Before → after'), align: 'end', cell: (x) => <bdi dir="ltr" className="tabular-nums text-muted">{x.before} → {x.after}</bdi>, hideBelow: 'md' },
-    { key: 'r', header: tx('السبب', 'Reason'), cell: (x) => <span><span className="block text-fg">{names.reason(x.reason)}</span>{x.note && <span className="block max-w-56 truncate text-xs text-muted">{x.note}</span>}</span> },
+    { key: 'r', header: tx('السبب', 'Reason'), cell: (x) => <span><span className="block text-fg">{x.state ? sn.move(x.state.move) : names.reason(x.reason)}</span>{x.state && <span className="block text-xs text-muted">{x.state.qty} · {sn.label(x.state.from)} {tx('←', '→')} {sn.label(x.state.to)} · {sn.reason(x.state.reason)}</span>}{x.note && <span className="block max-w-56 truncate text-xs text-muted">{x.note}</span>}</span> },
     { key: 'w', header: tx('بواسطة', 'By'), cell: (x) => <span className="text-muted">{x.who === 'You' ? tx('أنت', 'You') : x.who}</span>, hideBelow: 'lg' },
     { key: 'id', header: tx('المرجع', 'Ref'), cell: (x) => x.ref ? <a className="font-medium text-brand-700 hover:underline dark:text-brand-300" href={ihref(`transfers/${x.ref}`)}><Ref>{x.id}</Ref></a> : <span className="text-xs text-muted"><Ref>{x.id}</Ref></span>, hideBelow: 'lg' },
   ];
@@ -267,7 +298,7 @@ function LogTable({ rows }: { rows: (StockLog & { info: SkuInfo })[] }) {
         card={(x) => (
           <div className="space-y-1">
             <div className="flex items-start justify-between gap-2"><SkuCell sku={x.sku} info={x.info} />{delta(x)}</div>
-            <p className="text-xs text-muted">{names.reason(x.reason)} · {LOCATIONS[x.loc][lang]} · <bdi dir="ltr">{x.before} → {x.after}</bdi> · <Ref>{x.id}</Ref></p>
+            <p className="text-xs text-muted">{x.state ? `${sn.move(x.state.move)} (${x.state.qty})` : names.reason(x.reason)} · {LOCATIONS[x.loc][lang]} · <bdi dir="ltr">{x.before} → {x.after}</bdi> · <Ref>{x.id}</Ref></p>
           </div>
         )} />
     </div>

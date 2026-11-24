@@ -17,7 +17,8 @@ export type OpKind =
   | 'shipped' | 'delivered' | 'codCollected' | 'noteAdded' | 'messageCopied' | 'invoicePrinted' | 'labelPrinted' | 'exported'
   | 'tagAdded' | 'tagRemoved' | 'assigned' | 'stockReserved' | 'stockReleased' | 'stockShipped'
   | 'returnRequested' | 'returnApproved' | 'returnRejected' | 'returnReceived' | 'returnInspected' | 'returnRefunded'
-  | 'exchangeReserved' | 'exchangeShipped' | 'exchangeCollect' | 'transferConfirmed';
+  | 'exchangeReserved' | 'exchangeShipped' | 'exchangeCollect' | 'transferConfirmed'
+  | 'customerMessaged' | 'payDueExtended' | 'labelVoidedOnly';
 
 export interface Activity {
   kind: OpKind; at: number; actor: string; role: string;
@@ -436,3 +437,256 @@ export function zatcaTlv(seller: string, vatNo: string, isoTime: string, totalHa
 }
 /** Saudi VAT registration number: 15 digits, starting and ending with 3. */
 export const validVatNo = (s: string) => /^3\d{13}3$/.test(s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/\s/g, ''));
+
+/* ---------- Customer order messages (simulated: nothing leaves the browser) ---------- */
+
+/** Order states the customer can hear about. The last three are sent only by an explicit merchant action. */
+export type NoticeEvent =
+  | 'placed' | 'paid' | 'payFailed' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'refunded'
+  | 'returnRequested' | 'returnApproved' | 'returnRejected' | 'returnReceived'
+  | 'payLink' | 'payReminder' | 'invoice';
+export const ORDER_NOTICES: NoticeEvent[] = ['placed', 'paid', 'payFailed', 'ready', 'shipped', 'delivered', 'cancelled', 'refunded'];
+export const RETURN_NOTICES: NoticeEvent[] = ['returnRequested', 'returnApproved', 'returnRejected', 'returnReceived'];
+export const MANUAL_NOTICES: NoticeEvent[] = ['payLink', 'payReminder', 'invoice'];
+export const NOTICE_EVENTS: NoticeEvent[] = [...ORDER_NOTICES, ...RETURN_NOTICES, ...MANUAL_NOTICES];
+export type NoticeChannel = 'email' | 'sms' | 'whatsapp';
+export const NOTICE_CHANNELS: NoticeChannel[] = ['email', 'sms', 'whatsapp'];
+export const NOTICE_VARS = ['customer', 'order', 'total', 'refund', 'tracking', 'payLink', 'deadline', 'returnRef', 'store'] as const;
+export type NoticeVar = (typeof NOTICE_VARS)[number];
+/** Variables a template should carry for its message to make sense. */
+export const NOTICE_NEEDS: Partial<Record<NoticeEvent, NoticeVar[]>> = { shipped: ['tracking'], payFailed: ['payLink'], payLink: ['payLink'], payReminder: ['payLink', 'deadline'], refunded: ['refund'] };
+
+export interface NoticeTemplate { subject: L; body: L }
+export interface NoticeConfig {
+  channels: Record<NoticeEvent, Record<NoticeChannel, boolean>>;
+  templates: Record<NoticeEvent, NoticeTemplate>;
+  /** Language for customers whose order does not record one. */
+  defaultLang: 'ar' | 'en';
+  /** Review mode only: every message on this channel fails, to show failed states and resending. */
+  simFail?: NoticeChannel | null;
+}
+
+const ch = (email: boolean, sms: boolean, whatsapp = false) => ({ email, sms, whatsapp });
+export const DEFAULT_TEMPLATES: Record<NoticeEvent, NoticeTemplate> = {
+  placed: { subject: { ar: 'وصلنا طلبك {order}', en: 'We have your order {order}' }, body: { ar: 'أهلًا {customer}، وصلنا طلبك {order} بقيمة {total}. نبلغك بكل خطوة. {store}', en: 'Hi {customer}, we have your order {order} ({total}). We will tell you at every step. {store}' } },
+  paid: { subject: { ar: 'استلمنا دفعتك للطلب {order}', en: 'Payment received for {order}' }, body: { ar: 'استلمنا دفعتك للطلب {order} ({total}). نبدأ تجهيزه الآن.', en: 'We received your payment for {order} ({total}). We are preparing it now.' } },
+  payFailed: { subject: { ar: 'لم يكتمل دفع الطلب {order}', en: 'Payment for {order} did not go through' }, body: { ar: '{customer}، لم يكتمل دفع الطلب {order} ولم يُخصم منك شيء. أكمل الدفع من هنا: {payLink}', en: '{customer}, payment for {order} did not go through and nothing was charged. Complete it here: {payLink}' } },
+  ready: { subject: { ar: 'طلبك {order} جاهز', en: 'Your order {order} is packed' }, body: { ar: 'طلبك {order} جاهز وصدر ملصق شحنه. نرسل لك رابط التتبع عند تسليمه للناقل.', en: 'Your order {order} is packed and labelled. We will send the tracking link once the carrier has it.' } },
+  shipped: { subject: { ar: 'طلبك {order} في الطريق', en: 'Your order {order} is on its way' }, body: { ar: 'طلبك {order} في الطريق إليك. تتبّعه من هنا: {tracking}', en: 'Your order {order} is on its way. Track it here: {tracking}' } },
+  delivered: { subject: { ar: 'وصل طلبك {order}', en: 'Your order {order} was delivered' }, body: { ar: 'وصل طلبك {order}. نتمنى أن يعجبك، ويسعدنا سماع رأيك.', en: 'Your order {order} was delivered. We hope you love it and would like to hear what you think.' } },
+  cancelled: { subject: { ar: 'أُلغي طلبك {order}', en: 'Your order {order} was cancelled' }, body: { ar: 'أُلغي طلبك {order}. إن كنت دفعت، نعيد {refund} إلى وسيلة دفعك.', en: 'Your order {order} was cancelled. If you paid, {refund} goes back to your payment method.' } },
+  refunded: { subject: { ar: 'أعدنا مبلغًا للطلب {order}', en: 'Refund for order {order}' }, body: { ar: 'أعدنا {refund} للطلب {order} إلى وسيلة دفعك. يظهر حسب مدة بنكك.', en: 'We refunded {refund} for order {order} to your payment method. Your bank decides when it shows.' } },
+  returnRequested: { subject: { ar: 'استلمنا طلب الإرجاع {returnRef}', en: 'Return request {returnRef} received' }, body: { ar: 'استلمنا طلب الإرجاع {returnRef} للطلب {order}. نراجعه ونرد عليك.', en: 'We received return request {returnRef} for order {order}. We will review it and reply.' } },
+  returnApproved: { subject: { ar: 'وافقنا على الإرجاع {returnRef}', en: 'Return {returnRef} approved' }, body: { ar: 'وافقنا على الإرجاع {returnRef}. ملصق الإرجاع جاهز؛ سلّم الطرد للناقل.', en: 'Return {returnRef} is approved. Your return label is ready; hand the parcel to the carrier.' } },
+  returnRejected: { subject: { ar: 'بخصوص الإرجاع {returnRef}', en: 'About return {returnRef}' }, body: { ar: 'نعتذر، لم نقبل طلب الإرجاع {returnRef}. راسلنا إن احتجت مساعدة.', en: 'Sorry, we could not accept return {returnRef}. Write to us if you need help.' } },
+  returnReceived: { subject: { ar: 'وصلنا المرتجع {returnRef}', en: 'Return {returnRef} arrived' }, body: { ar: 'وصلنا المرتجع {returnRef}. نفحصه ونبلغك بالنتيجة.', en: 'Return {returnRef} arrived. We will inspect it and tell you the outcome.' } },
+  payLink: { subject: { ar: 'رابط دفع الطلب {order}', en: 'Payment link for {order}' }, body: { ar: '{customer}، رابط دفع طلبك {order} بقيمة {total}: {payLink} صالح حتى {deadline}.', en: '{customer}, here is the payment link for {order} ({total}): {payLink} Valid until {deadline}.' } },
+  payReminder: { subject: { ar: 'مددنا مهلة دفع الطلب {order}', en: 'More time to pay for {order}' }, body: { ar: 'مددنا مهلة دفع الطلب {order} حتى {deadline}. ادفع من هنا: {payLink}', en: 'You now have until {deadline} to pay for {order}. Pay here: {payLink}' } },
+  invoice: { subject: { ar: 'فاتورة الطلب {order}', en: 'Invoice for {order}' }, body: { ar: 'فاتورتك الضريبية للطلب {order} ({total}) مرفقة. شكرًا لتسوقك من {store}.', en: 'Your tax invoice for {order} ({total}) is attached. Thank you for shopping with {store}.' } },
+};
+export function noticeFixture(): NoticeConfig {
+  return {
+    channels: {
+      placed: ch(true, true), paid: ch(true, false), payFailed: ch(true, true), ready: ch(false, false), shipped: ch(true, true, true), delivered: ch(false, true),
+      cancelled: ch(true, true), refunded: ch(true, false), returnRequested: ch(true, false), returnApproved: ch(true, true), returnRejected: ch(true, false), returnReceived: ch(true, false),
+      payLink: ch(false, true, true), payReminder: ch(false, true), invoice: ch(true, false),
+    },
+    templates: DEFAULT_TEMPLATES, defaultLang: 'ar', simFail: null,
+  };
+}
+
+/** `{name}` placeholders in a template, in order of appearance. */
+export const varsIn = (text: string): string[] => [...text.matchAll(/\{([^{}\s]+)\}/g)].map((m) => m[1]);
+export interface TemplateIssues { unknown: string[]; missing: NoticeVar[]; empty: boolean }
+/** Unknown placeholders (typos), required ones left out, and empty text, for one language of a template. */
+export function templateIssues(event: NoticeEvent, body: string): TemplateIssues {
+  const used = varsIn(body);
+  return {
+    unknown: [...new Set(used.filter((v) => !(NOTICE_VARS as readonly string[]).includes(v)))],
+    missing: (NOTICE_NEEDS[event] ?? []).filter((v) => !used.includes(v)),
+    empty: !body.trim(),
+  };
+}
+/** SMS parts: Arabic (UCS-2) 70 characters, 67 per part when split; Latin 160 and 153. */
+export function smsParts(text: string): number {
+  const ucs = /[^\u0000-\u007f]/.test(text);
+  const n = [...text].length;
+  if (!n) return 0;
+  const [one, many] = ucs ? [70, 67] : [160, 153];
+  return n <= one ? 1 : Math.ceil(n / many);
+}
+
+export type NoticeVars = Partial<Record<NoticeVar, string>>;
+/** Fill `{var}` placeholders; unknown ones stay as typed so the merchant sees them in the preview. */
+export const renderNotice = (text: string, vars: NoticeVars): string => text.replace(/\{([^{}\s]+)\}/g, (m, k: string) => vars[k as NoticeVar] ?? m);
+
+/** What the message layer needs to know about the store and the customer. */
+export interface NoticeCtx { store: string; trackBase: string; contact: { phone?: string; email?: string }; now: number }
+const money = (h: number, lang: 'ar' | 'en') => (lang === 'ar' ? `${(h / 100).toFixed(2)} ر.س` : `SAR ${(h / 100).toFixed(2)}`);
+const DAY = 86_400_000;
+/** When an unpaid order (awaiting a transfer or a payment link) stops waiting: recorded, else placed + 3 days. */
+export const payDeadline = (o: Order, now: number) => o.payDue ?? placedAt(o, now) + 3 * DAY;
+/** Orders a payment link or a deadline applies to: not cancelled and still waiting for money. */
+export const awaitingPayment = (o: Order) => !o.cancelled && ['bank_due', 'link', 'failed'].includes(payView(o));
+export const customerLang = (o: Order, cfg: NoticeConfig) => o.lang ?? cfg.defaultLang;
+export const payLinkOf = (o: Order) => `https://pay.example/SIM-${o.ref}`;
+
+export function noticeVars(o: Order, ctx: NoticeCtx, lang: 'ar' | 'en', extra: NoticeVars = {}): NoticeVars {
+  const parcel = [...o.fulfilments].reverse().find((f) => !f.voided && f.ship !== 'none');
+  const lastRefund = [...o.refunds].reverse().find((r) => r.status !== 'failed');
+  const fmt = new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { day: 'numeric', month: 'long', timeZone: 'Asia/Riyadh' });
+  return {
+    customer: lang === 'ar' ? o.customer.ar.split(' ')[0] : o.customer.en.split(' ')[0],
+    order: `#${o.ref}`, total: money(total(o), lang), refund: money(lastRefund?.amount ?? refundableNow(o), lang),
+    tracking: `${ctx.trackBase}${o.ref}${parcel?.tracking ? `?t=${parcel.tracking}` : ''}`, payLink: payLinkOf(o), deadline: fmt.format(payDeadline(o, ctx.now)),
+    returnRef: [...(o.returns ?? [])].reverse()[0]?.id ?? '', store: ctx.store, ...extra,
+  };
+}
+
+export type MessageStatus = 'sent' | 'failed' | 'skipped';
+export type SkipReason = 'noPhone' | 'noEmail' | 'muted';
+export interface CustomerMessage {
+  id: string; event: NoticeEvent; channel: NoticeChannel; lang: 'ar' | 'en'; to?: string; subject?: string; body: string; at: number;
+  status: MessageStatus; reason?: SkipReason; actor: string; role: string;
+  /** Resend of an earlier message (its id). */
+  retryOf?: string;
+}
+
+/** Order state changes the customer hears about, from `before` (undefined for a new order) to `after`. */
+export function noticeEvents(before: Order | undefined, after: Order): { event: NoticeEvent; returnRef?: string }[] {
+  const out: { event: NoticeEvent; returnRef?: string }[] = [];
+  const pv = payView(after);
+  if (!before) {
+    out.push({ event: pv === 'failed' ? 'payFailed' : 'placed' });
+    return out;
+  }
+  const was = payView(before);
+  if (was !== 'paid' && pv === 'paid' && !after.cancelled) out.push({ event: 'paid' });
+  if (was !== 'failed' && pv === 'failed' && !after.cancelled) out.push({ event: 'payFailed' });
+  const labelled = (o: Order) => (o.fulfilments.length ? o.fulfilments.filter((f) => !f.voided).length : o.ship !== 'none' ? 1 : 0);
+  if (!after.cancelled && labelled(after) > labelled(before) && after.ship !== 'transit' && after.ship !== 'delivered') out.push({ event: 'ready' });
+  const moving = (o: Order) => (o.fulfilments.length ? o.fulfilments.filter((_, i) => ['transit', 'delivered'].includes(parcelShip(o, i))).length : ['transit', 'delivered'].includes(o.ship) ? 1 : 0);
+  if (moving(after) > moving(before) && after.ship !== 'delivered') out.push({ event: 'shipped' });
+  if (before.ship !== 'delivered' && after.ship === 'delivered') out.push({ event: 'delivered' });
+  if (!before.cancelled && after.cancelled) out.push({ event: 'cancelled' });
+  const confirmed = (o: Order) => o.refunds.filter((r) => r.status === 'confirmed').length;
+  if (confirmed(after) > confirmed(before)) out.push({ event: 'refunded' });
+  const stageEvent: Partial<Record<ReturnStage, NoticeEvent>> = { requested: 'returnRequested', approved: 'returnApproved', rejected: 'returnRejected', received: 'returnReceived' };
+  for (const r of after.returns ?? []) {
+    const prev = before.returns?.find((x) => x.id === r.id);
+    const e = stageEvent[r.stage];
+    if (e && prev?.stage !== r.stage) out.push({ event: e, returnRef: r.id });
+  }
+  return out;
+}
+
+/**
+ * One message per enabled channel for an event, in the customer's language. A channel without the customer's
+ * address is recorded as skipped; nothing is sent anywhere (simulated).
+ */
+export function composeNotice(o: Order, event: NoticeEvent, cfg: NoticeConfig, ctx: NoticeCtx, who: Actor, opts: { only?: NoticeChannel[]; muted?: boolean; extra?: NoticeVars; lang?: 'ar' | 'en' } = {}): CustomerMessage[] {
+  const lang = opts.lang ?? customerLang(o, cfg);
+  const tpl = cfg.templates[event] ?? DEFAULT_TEMPLATES[event];
+  const vars = noticeVars(o, ctx, lang, opts.extra);
+  const chans = opts.only ?? NOTICE_CHANNELS.filter((c) => cfg.channels[event]?.[c]);
+  const base = (o.messages ?? []).length;
+  return chans.map((c, i) => {
+    const to = c === 'email' ? ctx.contact.email : ctx.contact.phone;
+    const status: MessageStatus = opts.muted || !to ? 'skipped' : cfg.simFail === c ? 'failed' : 'sent';
+    return {
+      id: `MSG-${o.ref}-${base + i + 1}`, event, channel: c, lang, to, at: ctx.now, actor: who.name, role: who.role, status,
+      reason: opts.muted ? 'muted' : !to ? (c === 'email' ? 'noEmail' : 'noPhone') : undefined,
+      subject: c === 'email' ? renderNotice(tpl.subject[lang], vars) : undefined, body: renderNotice(tpl.body[lang], vars),
+    };
+  });
+}
+
+/** Append messages to an order (ids stay unique per order). */
+export const withMessages = (o: Order, msgs: CustomerMessage[]): Order => (msgs.length ? { ...o, messages: [...(o.messages ?? []), ...msgs] } : o);
+
+/**
+ * After an orders write: every order whose state changed records the messages its new state sends. Orders in `muted`
+ * record them as skipped (the merchant chose not to notify for that action). Returns `after` itself when nothing changed.
+ */
+export function recordNotices(before: Order[], after: Order[], cfg: NoticeConfig, ctxFor: (o: Order) => NoticeCtx, muted: ReadonlySet<string> = new Set()): Order[] {
+  if (before === after) return after;
+  const prev = new Map(before.map((o) => [o.ref, o]));
+  let changed = false;
+  const next = after.map((o) => {
+    const b = prev.get(o.ref);
+    if (b === o) return o;
+    const evs = noticeEvents(b, o);
+    if (!evs.length) return o;
+    const ctx = ctxFor(o);
+    let x = o;
+    for (const e of evs) x = withMessages(x, composeNotice(x, e.event, cfg, ctx, SYSTEM, { muted: muted.has(o.ref), extra: e.returnRef ? { returnRef: e.returnRef } : undefined }));
+    if (x !== o) changed = true;
+    return x;
+  });
+  return changed ? next : after;
+}
+
+/** A message the merchant sends on purpose (payment link, invoice, resend). Logged on the order with who sent it. */
+export function sendNotice(o: Order, event: NoticeEvent, cfg: NoticeConfig, ctx: NoticeCtx, who: Actor, opts: { only?: NoticeChannel[]; retryOf?: string } = {}): Order {
+  const msgs = composeNotice(o, event, cfg, ctx, who, { only: opts.only }).map((m) => (opts.retryOf ? { ...m, retryOf: opts.retryOf } : m));
+  if (!msgs.length) return o;
+  const sent = msgs.filter((m) => m.status === 'sent').map((m) => m.channel);
+  return act(withMessages(o, msgs), 'customerMessaged', who, ctx.now, { text: `${event}:${sent.join('+') || '-'}` });
+}
+
+/** Resend one failed or skipped message on its channel. */
+export function resendMessage(o: Order, id: string, cfg: NoticeConfig, ctx: NoticeCtx, who: Actor): Order {
+  const m = o.messages?.find((x) => x.id === id);
+  if (!m || m.status === 'sent') return o;
+  return sendNotice(o, m.event, cfg, ctx, who, { only: [m.channel], retryOf: m.id });
+}
+
+/** Give an unpaid order more time to pay. Days count from the later of now and the current deadline. */
+export function extendPayDue(o: Order, days: number, who: Actor, now: number): Order {
+  if (!awaitingPayment(o) || !Number.isInteger(days) || days < 1 || days > 30) return o;
+  const due = Math.max(now, payDeadline(o, now)) + days * DAY;
+  return act({ ...o, payDue: due }, 'payDueExtended', who, now, { text: String(days) });
+}
+
+/* ---------- Voiding labels without cancelling ---------- */
+
+/** Labels that can be voided: issued and not yet with the carrier, on an order that is not cancelled. */
+export function voidableLabels(o: Order): string[] {
+  if (o.cancelled) return [];
+  if (o.fulfilments.some((_, i) => ['transit', 'delivered'].includes(parcelShip(o, i))) || o.ship === 'transit' || o.ship === 'delivered') return [];
+  if (!o.fulfilments.length) return o.ship === 'label' ? [shipmentRefOf(o)] : [];
+  return o.fulfilments.filter((f, i) => !f.voided && parcelShip(o, i) === 'label').map((f) => f.ref);
+}
+const shipmentRefOf = (o: Order) => `SIM-${o.ref}-1`;
+
+/**
+ * Void every issued label of an order (simulated at the carrier). The order goes back to "to fulfil": its units
+ * return to the shelf and, where the order held stock, the hold is restored so they are not sold to someone else.
+ */
+export function voidLabels(o: Order, who: Actor, now: number): { order: Order; effects: StockEffect[]; refs: string[] } {
+  const refs = voidableLabels(o);
+  if (!refs.length) return { order: o, effects: [], refs };
+  const effects: StockEffect[] = [];
+  let items = o.items;
+  const back = (loc: LocId, qty: number[]) => {
+    items = items.map((it, i) => {
+      const q = qty[i] ?? 0;
+      if (!q) return it;
+      effects.push({ sku: it.sku, loc, reserved: it.reserved ? q : 0, onHand: q });
+      return { ...it, ...(it.reserved ? { reserved: { ...it.reserved, [loc]: (it.reserved[loc] ?? 0) + q } } : {}), ...(it.stock ? { stock: { ...it.stock, [loc]: (it.stock[loc] ?? 0) + q } } : {}) };
+    });
+  };
+  let fulfilments = o.fulfilments;
+  if (!o.fulfilments.length) back('ryd', o.items.map((it) => it.qty));
+  else {
+    fulfilments = o.fulfilments.map((f) => {
+      if (!refs.includes(f.ref)) return f;
+      back(f.loc, f.qty);
+      return { ...f, qty: f.qty.map(() => 0), ship: 'none' as Ship, voided: true };
+    });
+  }
+  const anyLeft = fulfilments.some((f) => !f.voided && f.qty.some((q) => q > 0));
+  let next: Order = { ...o, items, fulfilments, ship: anyLeft ? o.ship : 'none', ful: anyLeft ? 'partial' : 'none' };
+  for (const ref of refs) next = act(next, 'labelVoidedOnly', who, now, { ref });
+  return { order: next, effects, refs };
+}

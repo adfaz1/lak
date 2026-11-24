@@ -20,6 +20,8 @@ export interface Coupon {
   scope?: OfferScope;
   /** Buy-X-get-Y: for every `buy` units in scope, the next `get` cheapest units are `pct`% off (100 = free). */
   bogo?: { buy: number; get: number; pct: number };
+  /** Made by a reminder (single-use code for one customer), not by hand. Absent = made by the merchant. */
+  origin?: 'reminder';
 }
 
 export function couponFixtures(): Coupon[] {
@@ -156,7 +158,7 @@ export interface Cart {
   /** Customer record (C-…) and the items left in the cart. Value = sum of items. */
   customerId?: string; items?: CartItem[];
   /** Set when a recovery message led to the order (simulated attribution). */
-  recovered?: { campaign: string; revenue: number; discount: number; coupon?: string };
+  recovered?: { campaign: string; revenue: number; discount: number; coupon?: string; step?: string };
 }
 const CART_ITEMS: CartItem[] = [
   { sku: 'ABY-LIN-BLA-M', name: { ar: 'عباية سوداء مطرّزة', en: 'Embroidered black abaya' }, qty: 1, unit: 29000 },
@@ -659,11 +661,324 @@ export function couponRedemptions(orders: Order[], coupons: Coupon[], today = '2
     const r = seeded(Number(o.ref) || 1)();
     if (r > 0.14) continue;
     const day = new Date(t0 - Math.floor(o.hoursAgo / 24) * 86400000).toISOString().slice(0, 10);
-    const live = coupons.filter((c) => c.status !== 'draft' && c.starts <= day && (!c.ends || c.ends >= day) && sub >= c.minSpend);
+    const live = coupons.filter((c) => c.status !== 'draft' && !c.origin && c.starts <= day && (!c.ends || c.ends >= day) && sub >= c.minSpend);
     if (!live.length) continue;
     const c = live[Math.floor(r * 1000) % live.length];
     const discount = c.type === 'percent' ? Math.round((sub * c.value) / 100) : c.type === 'fixed' ? Math.min(c.value, sub) : o.fee;
     out.push({ code: c.code, orderRef: o.ref, hoursAgo: o.hoursAgo, discount, revenue: sub + o.fee - discount, demo: true });
   }
   return out;
+}
+
+/* ---------- Reminders: multi-step abandoned-cart sequence and reorder reminders (Salla audit #65, #76) ---------- */
+// A reminder is a message the store sends on its own after an event (a cart left, a purchase N days ago). Rules here
+// are pure: who is due, what they receive, what it may cost. Sending is simulated; consent is always required and
+// the sequence stops for a customer as soon as they buy.
+
+/** Discount in a reminder: none, an existing code-based coupon, or a single-use code made for each customer. */
+export type ReminderDiscount = { kind: 'none' } | { kind: 'existing'; code: string } | { kind: 'generated'; pct: number; validDays: number };
+export interface ReminderStep {
+  id: string;
+  /** Hours after the cart was left. */
+  afterHours: number;
+  channel: MsgChannel;
+  /** Template per language; placeholders: {name} {store} {items} {code} {expiry}. */
+  text: L;
+  discount: ReminderDiscount;
+  on: boolean;
+}
+/** Hours of the day (Riyadh, 0–23) when nothing is sent; messages wait until `to`. `from > to` wraps midnight. */
+export interface QuietHours { on: boolean; from: number; to: number }
+export type ReminderStatus = 'active' | 'paused' | 'draft';
+export interface CartSequence { status: ReminderStatus; steps: ReminderStep[]; quiet: QuietHours; version: number; by: string; at: string }
+
+export const REMINDER_HOURS = [1, 2, 4, 12, 24, 48, 72, 120];
+export const MAX_STEPS = 4;
+/** Carts older than this are not messaged: the customer has moved on. */
+export const CART_MAX_AGE_H = 168;
+
+export const cartSequenceFixture = (): CartSequence => ({
+  status: 'draft', version: 0, by: '', at: '',
+  quiet: { on: true, from: 22, to: 9 },
+  steps: [
+    { id: 'st1', afterHours: 1, channel: 'email', on: true, discount: { kind: 'none' },
+      text: { ar: 'مرحبًا {name}، تركت في سلتك: {items}. أكمل طلبك من {store} متى ناسبك.', en: 'Hi {name}, you left {items} in your cart. Complete your order at {store} whenever suits you.' } },
+    { id: 'st2', afterHours: 24, channel: 'email', on: true, discount: { kind: 'generated', pct: 10, validDays: 3 },
+      text: { ar: '{name}، سلتك ما زالت محفوظة. خصم 10% بالكود {code} حتى {expiry}.', en: '{name}, your cart is still saved. 10% off with {code} until {expiry}.' } },
+    { id: 'st3', afterHours: 72, channel: 'sms', on: true, discount: { kind: 'none' },
+      text: { ar: 'آخر تذكير من {store}: سلتك تنتظرك.', en: 'Last reminder from {store}: your cart is waiting.' } },
+  ],
+});
+
+export const inQuiet = (q: QuietHours, hour: number) => q.on && q.from !== q.to && (q.from < q.to ? hour >= q.from && hour < q.to : hour >= q.from || hour < q.to);
+
+/** Fill a template. Unknown placeholders stay visible so the merchant notices them. */
+export function renderTemplate(text: string, v: Partial<Record<'name' | 'store' | 'items' | 'code' | 'expiry', string>>): string {
+  return text.replace(/\{(name|store|items|code|expiry)\}/g, (m, k: keyof typeof v) => v[k] ?? m);
+}
+const PLACEHOLDER = /\{(\w+)\}/g;
+export const unknownPlaceholders = (text: string) => [...text.matchAll(PLACEHOLDER)].map((m) => m[1]).filter((k) => !['name', 'store', 'items', 'code', 'expiry'].includes(k));
+
+export type StepError = 'textAr' | 'textEn' | 'long' | 'placeholder' | 'pct' | 'days' | 'coupon' | 'order' | 'codeMissing';
+/**
+ * Problems in one step. `maxLen` is the channel limit; the length is checked on the longest rendering (sample values).
+ * A step with a discount must show the code ({code}); steps must be in increasing time order.
+ */
+export function stepErrors(s: ReminderStep, prev: ReminderStep | undefined, maxLen: number, coupons: Coupon[]): StepError[] {
+  const e: StepError[] = [];
+  if (!s.text.ar.trim()) e.push('textAr');
+  if (!s.text.en.trim()) e.push('textEn');
+  if (unknownPlaceholders(s.text.ar + s.text.en).length) e.push('placeholder');
+  const sample = { name: 'عبدالرحمن العبدالله', store: 'دار نوى', items: 'عباية سوداء مطرّزة، شال حرير', code: 'LKABCDEF', expiry: '2026-12-01' };
+  if (Math.max(renderTemplate(s.text.ar, sample).length, renderTemplate(s.text.en, sample).length) > maxLen) e.push('long');
+  if (s.discount.kind === 'generated') {
+    if (!Number.isInteger(s.discount.pct) || s.discount.pct < 1 || s.discount.pct > 50) e.push('pct');
+    if (!Number.isInteger(s.discount.validDays) || s.discount.validDays < 1 || s.discount.validDays > 14) e.push('days');
+  }
+  const d = s.discount;
+  if (d.kind === 'existing' && !coupons.some((c) => c.code === d.code)) e.push('coupon');
+  if (s.discount.kind !== 'none' && !/\{code\}/.test(s.text.ar + s.text.en)) e.push('codeMissing');
+  if (prev && s.afterHours <= prev.afterHours) e.push('order');
+  return e;
+}
+
+/** A coupon accepted at checkout today (status, dates and total limit). */
+export const couponLive = (c: Coupon | undefined, today = '2026-11-24') =>
+  !!c && c.status === 'active' && c.starts <= today && (!c.ends || c.ends >= today) && (c.limitTotal === null || c.used < c.limitTotal);
+
+/** Deterministic 32-bit hash, so codes and simulated outcomes are stable across reloads. */
+export function hashOf(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h >>> 0;
+}
+/** Single-use code for one customer and one reminder: "LK" + 6 letters/digits (no 0/O/1/I). */
+export function reminderCode(seed: string, taken: string[]): string {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  for (let n = 0; ; n++) {
+    let h = hashOf(`${seed}#${n}`), out = 'LK';
+    for (let i = 0; i < 6; i++) { out += A[h % A.length]; h = Math.floor(h / A.length) || hashOf(out); }
+    if (!taken.includes(out)) return out;
+  }
+}
+const plusDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 86400000).toISOString().slice(0, 10);
+export const reminderCoupon = (code: string, pct: number, validDays: number, today = '2026-11-24'): Coupon => ({
+  code, type: 'percent', value: pct, minSpend: 0, limitTotal: 1, limitPerCustomer: 1, used: 0, starts: today, ends: plusDays(today, validDays), status: 'active', origin: 'reminder',
+});
+
+/* Deliveries: one record per cart and step (or per customer and reorder rule). */
+export type DeliveryStatus = 'sent' | 'failed' | 'deferred' | 'skipped' | 'stopped';
+export type DeliveryReason = 'noConsent' | 'optedOut' | 'caughtUp' | 'tooOld' | 'provider' | 'rejected' | 'coupon' | 'quiet' | 'bought';
+export interface Delivery {
+  id: string;
+  /** Cart sequence: `seq`; reorder: the rule id. */
+  source: string;
+  step: string;
+  /** Cart id, or the order ref the reorder reminder is about. */
+  target: string;
+  customerId?: string;
+  channel: MsgChannel;
+  status: DeliveryStatus;
+  reason?: DeliveryReason;
+  code?: string; expires?: string;
+  /** Simulated: email opens are tracked by a pixel; SMS opens cannot be measured. */
+  opened?: boolean;
+  /** Simulated outcome attributed to this message (cart bought / product bought again). */
+  result?: { revenue: number; discount: number };
+  attempts: number;
+  at: number;
+  version?: number;
+}
+export interface RunCtx { hour: number; now: number; smsDown?: boolean; today?: string }
+const simOpened = (id: string, ch: MsgChannel) => (ch === 'email' ? hashOf(`open:${id}`) % 100 < 46 : undefined);
+
+/** Outcome of handing one message to the (simulated) provider: quiet hours, outage and rejected addresses. */
+function handOff(base: Omit<Delivery, 'status' | 'attempts' | 'at'> & { attempts?: number }, ctx: RunCtx, fails: boolean, quiet: QuietHours): Delivery {
+  const d = { ...base, attempts: (base.attempts ?? 0) + 1, at: ctx.now };
+  if (inQuiet(quiet, ctx.hour)) return { ...d, attempts: base.attempts ?? 0, status: 'deferred', reason: 'quiet' };
+  if (base.channel === 'sms' && ctx.smsDown) return { ...d, status: 'failed', reason: 'provider' };
+  if (fails) return { ...d, status: 'failed', reason: 'rejected' };
+  return { ...d, status: 'sent', reason: undefined, opened: simOpened(d.id, d.channel) };
+}
+
+/**
+ * One pass of the cart sequence over the carts. For each cart: the latest due step is sent (earlier due steps are
+ * skipped as "caught up", so an old cart never receives three messages at once); bought carts stop; no consent or
+ * opted out = skipped; quiet hours = deferred until they end. Existing deliveries are kept, deferred ones retried.
+ * Returns the new delivery list and the coupons generated for this pass.
+ */
+export function runSequence(seq: CartSequence, carts: Cart[], deliveries: Delivery[], coupons: Coupon[], ctx: RunCtx) {
+  const today = ctx.today ?? '2026-11-24';
+  const steps = seq.steps.filter((s) => s.on).sort((a, b) => a.afterHours - b.afterHours);
+  const out = [...deliveries];
+  const made: Coupon[] = [];
+  const taken = coupons.map((c) => c.code);
+  if (seq.status !== 'active') return { deliveries: out, coupons: made };
+  const find = (cart: string, step: string) => out.findIndex((d) => d.source === 'seq' && d.target === cart && d.step === step);
+  for (const c of carts) {
+    const due = steps.filter((s) => c.hoursAgo >= s.afterHours);
+    // Steps after the last one already handled (a step added later never goes out after a later step).
+    const doneIdx = due.reduce((m, s, i) => { const k = find(c.id, s.id); return k >= 0 && out[k].status !== 'deferred' ? i : m; }, -1);
+    const open = due.slice(doneIdx + 1);
+    if (!open.length) continue;
+    const latest = open[open.length - 1];
+    const put = (d: Delivery) => { const i = find(d.target, d.step); if (i >= 0) out[i] = d; else out.push(d); };
+    const base = { id: `${c.id}:${latest.id}`, source: 'seq', step: latest.id, target: c.id, customerId: c.customerId, channel: latest.channel, version: seq.version };
+    for (const s of open.slice(0, -1)) if (find(c.id, s.id) < 0) put({ ...base, id: `${c.id}:${s.id}`, step: s.id, channel: s.channel, status: 'skipped', reason: 'caughtUp', attempts: 0, at: ctx.now });
+    const sentBefore = out.some((d) => d.source === 'seq' && d.target === c.id && d.status === 'sent');
+    if (c.purchased) { if (sentBefore) put({ ...base, status: 'stopped', reason: 'bought', attempts: 0, at: ctx.now }); continue; }
+    if (c.optedOut) { put({ ...base, status: 'skipped', reason: 'optedOut', attempts: 0, at: ctx.now }); continue; }
+    if (c.hoursAgo > CART_MAX_AGE_H) { put({ ...base, status: 'skipped', reason: 'tooOld', attempts: 0, at: ctx.now }); continue; }
+    if (latest.channel === 'email' ? !c.emailConsent : !c.smsConsent) { put({ ...base, status: 'skipped', reason: 'noConsent', attempts: 0, at: ctx.now }); continue; }
+    if (latest.discount.kind === 'existing' && !couponLive(coupons.find((x) => x.code === (latest.discount as { code: string }).code), today)) {
+      put({ ...base, status: 'failed', reason: 'coupon', attempts: 1, at: ctx.now }); continue;
+    }
+    const prev = out[find(c.id, latest.id)];
+    let d = handOff({ ...base, attempts: prev?.attempts ?? 0 }, ctx, simSendFails(c), seq.quiet);
+    if (d.status === 'sent' && latest.discount.kind !== 'none') {
+      if (latest.discount.kind === 'existing') d = { ...d, code: latest.discount.code };
+      else {
+        const code = reminderCode(`${c.id}:${latest.id}`, taken);
+        taken.push(code);
+        const cp = reminderCoupon(code, latest.discount.pct, latest.discount.validDays, today);
+        made.push(cp);
+        d = { ...d, code, expires: cp.ends ?? undefined };
+      }
+    }
+    put(d);
+  }
+  return { deliveries: out, coupons: made };
+}
+
+/** Retry one failed delivery: same message, one more attempt (a still-failing cause fails again). */
+export function retryDelivery(d: Delivery, ctx: RunCtx, quiet: QuietHours, fails: boolean, couponOk = true): Delivery {
+  if (d.status !== 'failed') return d;
+  if (d.reason === 'coupon' && !couponOk) return { ...d, attempts: d.attempts + 1, at: ctx.now };
+  return handOff({ ...d, reason: undefined }, ctx, fails, quiet);
+}
+
+/**
+ * Simulated attribution: some customers who received a message buy within the code's validity (with a discount
+ * one in three, without one in five). Deterministic per cart and step. Real attribution needs the server to link the
+ * order to the message (link click or code).
+ */
+export function cartConverts(d: Delivery, withDiscount: boolean) {
+  return d.status === 'sent' && !d.result && hashOf(`buy:${d.id}`) % (withDiscount ? 3 : 5) === 0;
+}
+
+export interface StepStats { sent: number; opened: number; openable: number; failed: number; deferred: number; skipped: number; stopped: number; recovered: number; revenue: number; discount: number; cost: number }
+export function stepStats(deliveries: Delivery[], source: string, step: string): StepStats {
+  const mine = deliveries.filter((d) => d.source === source && d.step === step);
+  const sent = mine.filter((d) => d.status === 'sent');
+  const won = sent.filter((d) => d.result);
+  return {
+    sent: sent.length, opened: sent.filter((d) => d.opened).length, openable: sent.filter((d) => d.channel === 'email').length,
+    failed: mine.filter((d) => d.status === 'failed').length, deferred: mine.filter((d) => d.status === 'deferred').length,
+    skipped: mine.filter((d) => d.status === 'skipped').length, stopped: mine.filter((d) => d.status === 'stopped').length,
+    recovered: won.length, revenue: won.reduce((s, d) => s + (d.result?.revenue ?? 0), 0), discount: won.reduce((s, d) => s + (d.result?.discount ?? 0), 0),
+    cost: sent.reduce((s, d) => s + TEST_RATE[d.channel], 0),
+  };
+}
+
+/**
+ * What a sequence would do for the carts open today if each one reached every step: messages per step (consent on
+ * the step's channel, not bought, not opted out, not too old) and the message cost at the test rate. The discount
+ * is given only when someone buys with the code, so it is shown as an average per recovered cart and a maximum.
+ */
+export function sequenceForecast(seq: Pick<CartSequence, 'steps'>, carts: Cart[], cartDisc: (step: ReminderStep, c: Cart) => number) {
+  const open = carts.filter((c) => !c.purchased && !c.optedOut && c.hoursAgo <= CART_MAX_AGE_H);
+  return seq.steps.filter((s) => s.on).map((s) => {
+    const who = open.filter((c) => (s.channel === 'email' ? c.emailConsent : c.smsConsent));
+    const disc = s.discount.kind === 'none' ? [] : who.map((c) => cartDisc(s, c));
+    const max = disc.reduce((a, b) => a + b, 0);
+    return { step: s.id, messages: who.length, cost: who.length * TEST_RATE[s.channel], avgDiscount: disc.length ? Math.round(max / disc.length) : 0, maxDiscount: max };
+  });
+}
+
+/* ---------- Reorder (replenishment) reminders ---------- */
+
+export interface ReorderRule {
+  id: string;
+  /** A product (product id) or a category (English category name). */
+  scope: { kind: 'product' | 'category'; id: string };
+  /** Remind this many days after the last purchase in scope. */
+  days: number;
+  channel: MsgChannel;
+  text: L;
+  discount: ReminderDiscount;
+  status: ReminderStatus;
+  by: string; at: string;
+}
+export const reorderFixtures = (): ReorderRule[] => [
+  { id: 'RR-1', scope: { kind: 'product', id: 'p3' }, days: 45, channel: 'email', status: 'active', by: 'المالك', at: '2026-11-02', discount: { kind: 'none' },
+    text: { ar: '{name}، هل قارب عطرك من {store} على النفاد؟ اطلب عبوة جديدة متى ناسبك.', en: '{name}, running low on your perfume from {store}? Order a new bottle whenever suits you.' } },
+];
+/** Minimal views the reorder rules need, so this stays independent of the catalogue and customers modules. */
+export interface ReorderProduct { id: string; sku: string; variants: { sku: string }[]; category: L; name: L }
+export interface ReorderCustomer { id: string; name: L; consent: { email: boolean; sms: boolean }; blocked?: unknown }
+export type ReorderExclusion = 'noConsent' | 'blocked' | 'reminded' | 'otherRule';
+export interface ReorderCandidate { customerId: string; name: L; orderRef: string; sku: string; item: L; value: number; daysSince: number; dueIn: number }
+
+const productOfSku = (products: ReorderProduct[], sku: string) => products.find((p) => p.sku === sku || p.variants.some((v) => v.sku === sku) || sku.startsWith(`${p.sku}-`));
+export const inReorderScope = (r: ReorderRule, sku: string, products: ReorderProduct[]) => {
+  const p = productOfSku(products, sku);
+  return !!p && (r.scope.kind === 'product' ? p.id === r.scope.id : p.category.en === r.scope.id);
+};
+
+/**
+ * Customers a rule concerns, from each customer's latest paid order with an item in scope:
+ * `due` = the reminder day has come (up to a week late, e.g. a rule just activated), `week` = it comes in the
+ * next 7 days. A newer purchase in scope moves the date, so customers who already bought again are not reminded.
+ * `earlier` are rules that come first; a customer gets one reorder reminder per order.
+ */
+export function reorderCandidates(r: ReorderRule, orders: Order[], customers: ReorderCustomer[], products: ReorderProduct[], deliveries: Delivery[], earlier: ReorderRule[] = []) {
+  const due: ReorderCandidate[] = [], week: ReorderCandidate[] = [];
+  const excluded: Record<ReorderExclusion, number> = { noConsent: 0, blocked: 0, reminded: 0, otherRule: 0 };
+  for (const c of customers) {
+    const mine = orders.filter((o) => o.pay !== 'failed' && (o.customerId ? o.customerId === c.id : o.customer.en === c.name.en));
+    let best: { o: Order; sku: string; item: L; value: number } | null = null;
+    for (const o of mine) for (const i of o.items) {
+      if (!inReorderScope(r, i.sku, products)) continue;
+      if (!best || o.hoursAgo < best.o.hoursAgo) best = { o, sku: i.sku, item: i.name, value: i.qty * i.unit };
+    }
+    if (!best) continue;
+    const daysSince = Math.floor(best.o.hoursAgo / 24);
+    const dueIn = r.days - daysSince;
+    if (dueIn > 6 || dueIn < -7) continue;
+    const cand: ReorderCandidate = { customerId: c.id, name: c.name, orderRef: best.o.ref, sku: best.sku, item: best.item, value: best.value, daysSince, dueIn };
+    if (c.blocked) { excluded.blocked++; continue; }
+    if (!c.consent[r.channel]) { excluded.noConsent++; continue; }
+    if (deliveries.some((d) => d.source === r.id && d.target === best!.o.ref && d.status !== 'failed' && d.status !== 'deferred')) { excluded.reminded++; continue; }
+    if (earlier.some((e) => e.status === 'active' && inReorderScope(e, best!.sku, products))) { excluded.otherRule++; continue; }
+    (dueIn <= 0 ? due : week).push(cand);
+  }
+  const byDue = (a: ReorderCandidate, b: ReorderCandidate) => a.dueIn - b.dueIn || a.name.en.localeCompare(b.name.en);
+  return { due: due.sort(byDue), week: week.sort(byDue), excluded };
+}
+
+/** Send a rule's due reminders (simulated). Same hand-off rules as the cart sequence; quiet hours are shared. */
+export function runReorder(r: ReorderRule, cands: ReorderCandidate[], deliveries: Delivery[], coupons: Coupon[], quiet: QuietHours, ctx: RunCtx) {
+  const today = ctx.today ?? '2026-11-24';
+  const out = [...deliveries];
+  const made: Coupon[] = [];
+  const taken = coupons.map((c) => c.code);
+  if (r.status !== 'active') return { deliveries: out, coupons: made };
+  for (const c of cands) {
+    const i = out.findIndex((d) => d.source === r.id && d.target === c.orderRef);
+    if (i >= 0 && out[i].status !== 'deferred') continue;
+    const base = { id: `${r.id}:${c.orderRef}`, source: r.id, step: r.id, target: c.orderRef, customerId: c.customerId, channel: r.channel, attempts: i >= 0 ? out[i].attempts : 0 };
+    let d: Delivery;
+    if (r.discount.kind === 'existing' && !couponLive(coupons.find((x) => x.code === (r.discount as { code: string }).code), today)) d = { ...base, status: 'failed', reason: 'coupon', attempts: 1, at: ctx.now };
+    else d = handOff(base, ctx, c.customerId.endsWith('7'), quiet);
+    if (d.status === 'sent' && r.discount.kind === 'existing') d = { ...d, code: r.discount.code };
+    if (d.status === 'sent' && r.discount.kind === 'generated') {
+      const code = reminderCode(`${r.id}:${c.orderRef}`, taken);
+      taken.push(code);
+      const cp = reminderCoupon(code, r.discount.pct, r.discount.validDays, today);
+      made.push(cp);
+      d = { ...d, code, expires: cp.ends ?? undefined };
+    }
+    if (i >= 0) out[i] = d; else out.push(d);
+  }
+  return { deliveries: out, coupons: made };
 }

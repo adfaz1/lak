@@ -5,7 +5,7 @@ import { Banknote, Check, ChevronDown, Clock, CreditCard, Landmark, FlaskConical
 import { navigate } from '../../../core/router';
 import { Alert, Field, Input, Modal, Select, Textarea } from '../../../ds/kit';
 import { Button, EmptyState, LinkButton, Money, Segmented, cn, useTx } from '../../../ds/ui';
-import { settingsStore } from '../../merchant/stores';
+import { locationsStore, settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
   CITIES, canPay, cityById, cleanPhone, computeTotals, deliveryEstimate, isSettled, payEligibility,
@@ -18,7 +18,7 @@ import {
   payEvent, pendingForSession, signIn, signOut, stripSaved, submit,
 } from '../state';
 import { useCatalog, useConfig } from '../data';
-import { cartWeight, standardFor } from '../bridge';
+import { shipOptions } from '../bridge';
 import { simNow, useSim } from '../review';
 
 const FIELD_ORDER: (keyof AddrErr)[] = ['email', 'name', 'phone', 'city', 'district', 'street', 'building', 'nationalCode'];
@@ -51,15 +51,17 @@ export default function Checkout() {
   const discount = coupon?.status === 'valid' ? coupon.discount : 0;
   const freeShip = coupon?.status === 'valid' && coupon.freeShip;
   const city = co.addr.city as CityId | undefined;
-  // One delivery method, priced by the merchant's shipping zone for this city and the bag's weight.
-  const ship = standardFor(cfg.zones, city, cartWeight(lines));
+  // Delivery methods from the merchant's shipping setup (methods, rules, promises) for this city and bag; the shopper picks one.
+  const locations = locationsStore.use();
+  const shipList = shipOptions(cfg, city, lines, { now: Date.now(), goods: lines.reduce((a, x) => a + x.amount, 0) - discount, cod: co.method === 'cod', locations });
+  const ship = shipList.find((x) => x.id === co.ship) ?? shipList[0];
   const shipOk = !!city && !!ship;
   const signed = co.mode === 'account' && acc.signedIn;
   const needSignIn = !cfg.guest && !signed;
   const openCod = openCodCount();
   const totalsNoCod = computeTotals(lines, { discount, ship, freeShip, codFee: cfg.codFee });
   const elig = (pm: PayMethod) => payEligibility(pm, {
-    total: totalsNoCod.total + (pm === 'cod' ? cfg.codFee : 0), applePayDevice: sim.applePay, openCod, ship: co.ship,
+    total: totalsNoCod.total + (pm === 'cod' ? cfg.codFee : 0), applePayDevice: sim.applePay, openCod, ship: ship?.id ?? co.ship, codOk: ship?.codOk,
     codFee: cfg.codFee, codMin: cfg.codMin, codMax: cfg.codMax, codOpenLimit: cfg.codOpenLimit,
   });
   // Only methods the merchant connected; Apple Pay also needs a device that supports it.
@@ -83,6 +85,8 @@ export default function Checkout() {
   }, [cfg.guest, co.mode]);
 
   useEffect(() => { if (co.notice) noticeRef.current?.focus(); }, [co.notice]);
+  // Keep the chosen delivery method one the store still offers for this city and bag.
+  useEffect(() => { if (ship && ship.id !== co.ship) checkoutStore.set((c) => ({ ...c, ship: ship.id })); }, [ship?.id, co.ship]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setAddr = (patch: Partial<Address>) => checkoutStore.set((c) => ({ ...c, addr: { ...c.addr, ...patch }, savedId: undefined }));
 
@@ -354,22 +358,22 @@ export default function Checkout() {
             {!city ? <p className={cn('text-sm', tried ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted')}>{t.cityFirst}</p> : (
               <fieldset className="space-y-2">
                 <legend className="sr-only">{t.sShip}</legend>
-                {ship ? (() => {
-                  const est = deliveryEstimate(ship, city, Date.now());
-                  const cost = totalsNoCod.shipping;
+                {shipList.length ? shipList.map((opt) => {
+                  const est = deliveryEstimate(opt, city, Date.now());
+                  const cost = computeTotals(lines, { discount, ship: opt, freeShip }).shipping;
                   return (
-                    <label className={radioCard}>
-                      <input type="radio" name="sf-ship" className={radio} checked={co.ship === ship.id} onChange={() => checkoutStore.set((c) => ({ ...c, ship: ship.id }))} />
+                    <label key={opt.id} className={radioCard}>
+                      <input type="radio" name="sf-ship" className={radio} checked={ship?.id === opt.id} onChange={() => checkoutStore.set((c) => ({ ...c, ship: opt.id }))} />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">{l(ship.name)}</span>
+                        <span className="block text-sm font-semibold">{l(opt.name)}</span>
                         <span className="mt-0.5 block text-[13px] text-muted">
-                          {est && t.etaRange(dl(est.from), dl(est.to))} · {l(ship.note)}{ship.freeFrom ? ` · ${t.freeFromT(m(ship.freeFrom))}` : ''}
+                          {est && t.etaRange(dl(est.from), dl(est.to))} · {l(opt.note)}{opt.freeFrom ? ` · ${t.freeFromT(m(opt.freeFrom))}` : ''}
                         </span>
                       </span>
                       <span className="shrink-0 text-sm font-semibold">{cost === 0 ? <span className="text-emerald-700 dark:text-emerald-400">{t.free}</span> : <Money v={cost} />}</span>
                     </label>
                   );
-                })() : <p className="text-sm font-medium text-red-600 dark:text-red-400">{t.noShipZone}</p>}
+                }) : <p className="text-sm font-medium text-red-600 dark:text-red-400">{t.noShipZone}</p>}
               </fieldset>
             )}
             {city && <SimNote>{t.shipSim}</SimNote>}

@@ -4,15 +4,30 @@
 //   reserved  = units held for paid orders not yet fulfilled
 //   available = on hand − reserved (what can still be sold)
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
+//   (added) awaiting payment, unavailable and safety reserve: optional parts of on hand that are not sold either.
+//   See "Full stock states" at the end of this file. Levels without them behave exactly as before.
 import { LOC_IDS, type L, type LocId, type Location } from './domain';
 
-export interface Level { sku: string; loc: LocId; onHand: number; reserved: number; incoming: number; version: number; threshold: number }
-export const available = (l: Level) => l.onHand - l.reserved;
+export interface Level {
+  sku: string; loc: LocId; onHand: number; reserved: number; incoming: number; version: number; threshold: number;
+  /** Units held for orders whose payment is not confirmed yet (bank transfer, payment link). Part of on hand. */
+  awaitingPay?: number;
+  /** Damaged or in quarantine: on the shelf but not sellable until restored or written off. Part of on hand. */
+  unavailable?: number;
+  /** Safety reserve the merchant keeps back from online sale. Part of on hand. */
+  safety?: number;
+}
+/** What can still be sold: on hand − reserved − awaiting payment − unavailable − safety reserve. */
+export const available = (l: Level) => l.onHand - l.reserved - (l.awaitingPay ?? 0) - (l.unavailable ?? 0) - (l.safety ?? 0);
 
 export type AdjReason = 'received' | 'count' | 'damaged' | 'returned' | 'other';
 export const ADJ_REASONS: AdjReason[] = ['received', 'count', 'damaged', 'returned', 'other'];
 export type LogReason = AdjReason | 'transferOut' | 'transferIn' | 'discrepancy' | 'fulfilled';
-export interface StockLog { id: string; sku: string; loc: LocId; delta: number; before: number; after: number; reason: LogReason; who: string; ref?: string; note?: string }
+export interface StockLog {
+  id: string; sku: string; loc: LocId; delta: number; before: number; after: number; reason: LogReason; who: string; ref?: string; note?: string;
+  /** Set when units moved between stock states (e.g. marked damaged); `delta` is then the change in on hand (often 0). */
+  state?: StateLog;
+}
 
 export interface History { sku: string; days: number; sold: number }
 export const MIN_HISTORY_DAYS = 14;
@@ -270,4 +285,140 @@ export function newLocationId(name: L, all: Location[]): LocId {
   let i = 2;
   while (ids.has(`${base}${i}`)) i++;
   return `${base}${i}`;
+}
+
+/* ---------- Full stock states (products & inventory group; Salla audit MATRIX #42) ---------- */
+// Every unit on the shelf is in exactly one of five parts, so the numbers always add up:
+//   on hand = available + reserved + awaiting payment + unavailable + safety reserve
+// Incoming and outgoing are in transit between locations and are NOT part of on hand at either end:
+//   incoming = sent to this location in a transfer, not received yet
+//   outgoing = sent from this location in a transfer, not received at the destination yet (already left on hand)
+// Customer shipments leave on hand when they ship (orders own that), so they are not "outgoing" here.
+
+export type StockState = 'onHand' | 'available' | 'reserved' | 'awaitingPay' | 'unavailable' | 'safety' | 'incoming' | 'outgoing';
+export const STOCK_STATES: StockState[] = ['onHand', 'available', 'reserved', 'awaitingPay', 'unavailable', 'safety', 'incoming', 'outgoing'];
+/** The parts that make up on hand, in the order they are drawn. */
+export const ON_HAND_PARTS: StockState[] = ['available', 'reserved', 'awaitingPay', 'unavailable', 'safety'];
+export type Breakdown = Record<StockState, number>;
+
+/** Units that left `loc` in a sent or partly received transfer and have not arrived yet. */
+export function outgoingOf(transfers: Transfer[], sku: string, loc: LocId): number {
+  return transfers.filter((t) => t.from === loc && (t.status === 'sent' || t.status === 'partial'))
+    .reduce((s, t) => s + t.lines.filter((l) => l.sku === sku).reduce((n, l) => n + Math.max(0, l.qty - l.received), 0), 0);
+}
+
+/** Every state of one level. `available` may be negative when on hand dropped below what is held (oversold). */
+export function breakdown(l: Level, transfers: Transfer[] = []): Breakdown {
+  return {
+    onHand: l.onHand, available: available(l), reserved: l.reserved, awaitingPay: l.awaitingPay ?? 0, unavailable: l.unavailable ?? 0, safety: l.safety ?? 0,
+    incoming: l.incoming, outgoing: outgoingOf(transfers, l.sku, l.loc),
+  };
+}
+/** Sum of states over many levels (e.g. one SKU across locations). */
+export function sumBreakdown(levels: Level[], transfers: Transfer[] = []): Breakdown {
+  const out = Object.fromEntries(STOCK_STATES.map((s) => [s, 0])) as Breakdown;
+  for (const l of levels) { const b = breakdown(l, transfers); for (const s of STOCK_STATES) out[s] += b[s]; }
+  return out;
+}
+
+/** Moving units between states on the shelf. Each needs a reason and is logged; on hand changes only on write-off. */
+export type StateMove = 'damage' | 'restore' | 'writeOff' | 'setSafety' | 'releasePay' | 'confirmPay';
+export const STATE_MOVES: StateMove[] = ['damage', 'restore', 'writeOff', 'setSafety', 'releasePay', 'confirmPay'];
+export type StateReason = 'damaged' | 'quarantine' | 'inspected' | 'disposed' | 'buffer' | 'store' | 'expired' | 'paid' | 'other';
+export const MOVE_REASONS: Record<StateMove, StateReason[]> = {
+  damage: ['damaged', 'quarantine', 'other'],
+  restore: ['inspected', 'other'],
+  writeOff: ['disposed', 'other'],
+  setSafety: ['buffer', 'store', 'other'],
+  releasePay: ['expired', 'other'],
+  confirmPay: ['paid', 'other'],
+};
+/** Where the units come from and go to. For the safety reserve the direction depends on whether it grows or shrinks. */
+export const MOVE_PATH: Record<StateMove, [StockState, StockState | 'gone']> = {
+  damage: ['available', 'unavailable'], restore: ['unavailable', 'available'], writeOff: ['unavailable', 'gone'],
+  setSafety: ['available', 'safety'], releasePay: ['awaitingPay', 'available'], confirmPay: ['awaitingPay', 'reserved'],
+};
+export interface StateLog { move: StateMove; qty: number; reason: StateReason; from: StockState; to: StockState | 'gone' }
+export type MoveError = 'qty' | 'exceeds' | 'same' | 'reason' | 'conflict' | 'notFound';
+
+/** The most units a move can take now. For `setSafety` it is the largest reserve that can be set. */
+export function moveLimit(l: Level, move: StateMove): number {
+  const free = Math.max(0, available(l));
+  switch (move) {
+    case 'damage': return free;
+    case 'restore': case 'writeOff': return l.unavailable ?? 0;
+    case 'setSafety': return (l.safety ?? 0) + free;
+    case 'releasePay': case 'confirmPay': return l.awaitingPay ?? 0;
+  }
+}
+
+/** Check a move before showing or applying it. `qty` is the number of units, or the new reserve for `setSafety`. */
+export function checkMove(l: Level, move: StateMove, qty: number | null): MoveError | null {
+  if (qty === null || !Number.isInteger(qty) || qty < 0 || (move !== 'setSafety' && qty === 0)) return 'qty';
+  if (move === 'setSafety' && qty === (l.safety ?? 0)) return 'same';
+  return qty > moveLimit(l, move) ? 'exceeds' : null;
+}
+
+function applyMove(l: Level, move: StateMove, qty: number): Level {
+  const u = l.unavailable ?? 0, p = l.awaitingPay ?? 0;
+  switch (move) {
+    case 'damage': return { ...l, unavailable: u + qty };
+    case 'restore': return { ...l, unavailable: u - qty };
+    case 'writeOff': return { ...l, unavailable: u - qty, onHand: l.onHand - qty };
+    case 'setSafety': return { ...l, safety: qty };
+    case 'releasePay': return { ...l, awaitingPay: p - qty };
+    case 'confirmPay': return { ...l, awaitingPay: p - qty, reserved: l.reserved + qty };
+  }
+}
+
+/** Before and after for every state, as the merchant sees it in the preview. Nothing is written. */
+export function movePreview(l: Level, move: StateMove, qty: number | null, transfers: Transfer[] = []): { before: Breakdown; after: Breakdown; error: MoveError | null; units: number } {
+  const error = checkMove(l, move, qty);
+  const before = breakdown(l, transfers);
+  const after = error ? before : breakdown(applyMove(l, move, qty!), transfers);
+  const units = error ? 0 : move === 'setSafety' ? Math.abs(qty! - (l.safety ?? 0)) : qty!;
+  return { before, after, error, units };
+}
+
+/**
+ * Move units between states with a reason. Uses the same optimistic version as `adjust`: if the level changed since the
+ * merchant opened the form, nothing is written and the current level is returned. Logged like any stock movement.
+ */
+export function moveStock(
+  levels: Level[], sku: string, loc: LocId, move: StateMove, qty: number | null, reason: StateReason | '', expectedVersion: number, who: string, id: string, note = '',
+): { levels: Level[]; log?: StockLog; error?: MoveError; current?: Level } {
+  const cur = levelOf(levels, sku, loc);
+  if (!cur) return { levels, error: 'notFound' };
+  if (!reason || !MOVE_REASONS[move].includes(reason)) return { levels, error: 'reason' };
+  if (cur.version !== expectedVersion) return { levels, error: 'conflict', current: cur };
+  const err = checkMove(cur, move, qty);
+  if (err) return { levels, error: err };
+  const next = { ...applyMove(cur, move, qty!), version: cur.version + 1 };
+  const shrink = move === 'setSafety' && qty! < (cur.safety ?? 0);
+  const [from, to] = shrink ? (['safety', 'available'] as const) : MOVE_PATH[move];
+  const units = move === 'setSafety' ? Math.abs(qty! - (cur.safety ?? 0)) : qty!;
+  return {
+    levels: levels.map((l) => (l === cur ? next : l)),
+    log: {
+      id, sku, loc, delta: next.onHand - cur.onHand, before: cur.onHand, after: next.onHand, who, note,
+      reason: move === 'damage' || move === 'writeOff' ? 'damaged' : 'other',
+      state: { move, qty: units, reason, from, to },
+    },
+  };
+}
+
+/** Demo holds on a few SKUs so every state has an example. Applied to the fixture store only; tests keep plain levels. */
+export function withStateFixtures(levels: Level[]): Level[] {
+  const extra: Record<string, Partial<Level>> = {
+    'WLT-LTH-01@ryd': { awaitingPay: 1, safety: 2 },
+    'BAG-LTH-01@ryd': { unavailable: 1 },
+    'ABY-LIN-NAV-L@jed': { unavailable: 1 },
+    'THB-COT-WHI-56@ryd': { safety: 3, awaitingPay: 2 },
+  };
+  return levels.map((l) => {
+    const e = extra[`${l.sku}@${l.loc}`];
+    if (!e) return l;
+    const want = (e.awaitingPay ?? 0) + (e.unavailable ?? 0) + (e.safety ?? 0);
+    return available(l) >= want ? { ...l, ...e } : l;
+  });
 }

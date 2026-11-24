@@ -57,7 +57,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
         {refundFromNextPayout(o) && <Row label={tx('من', 'From')}>{tx('التحويل القادم', 'Next payout')}</Row>}
       </dl>
       <Alert tone="info" title={tx('يبقى «بانتظار المزوّد» حتى يؤكده', 'Stays “awaiting provider” until confirmed')}>
-        <span className="flex flex-wrap items-center gap-2">{tx('لا تتغير حالة الدفع قبل التأكيد. لا رسالة للعميل من هنا.', 'Payment state changes only on confirmation. No customer message is sent.')}<Simulated /></span>
+        <span className="flex flex-wrap items-center gap-2">{tx('لا تتغير حالة الدفع قبل التأكيد. تصل العميل رسالة «تم الاسترداد» عند تأكيد المزوّد.', 'Payment state changes only on confirmation. The customer gets the “Refunded” message once the provider confirms.')}<Simulated /></span>
       </Alert>
     </Modal>
   );

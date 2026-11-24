@@ -16,7 +16,9 @@ import { useCart, useCategories, useConfig, useStoreContent } from './data';
 import { servedPage, socialLinks } from './bridge';
 import ContentPage, { useDocTitle } from './pages/Content';
 import { ReviewPanel, setSfState, useSfState } from './review';
-import { headingText, sectionOf, storeCss } from './theme';
+import { headingText, liveAnnouncement, liveIdentity, mediaSrc, storeCss } from './theme';
+import { annColours } from '../dashboard/storefront/identity';
+import { mediaStore } from '../dashboard/storefront/state';
 import Home from './pages/Home';
 import Listing from './pages/Listing';
 import ProductPage from './pages/Product';
@@ -48,6 +50,17 @@ export default function Storefront({ route }: { route: Route }) {
     document.body.dataset.sf = '1';
     return () => { delete document.body.dataset.sf; };
   }, []);
+  // The merchant's published identity: favicon while the store is open (removed on leaving).
+  const identity = liveIdentity(theme);
+  const media = mediaStore.use();
+  const favicon = mediaSrc(identity.favicon, media);
+  useEffect(() => {
+    if (!favicon) return;
+    const el = document.createElement('link');
+    el.rel = 'icon'; el.href = favicon; el.dataset.sf = '1';
+    document.head.appendChild(el);
+    return () => { el.remove(); };
+  }, [favicon]);
 
   const [a, b] = route.path;
   const content = useStoreContent();
@@ -81,7 +94,8 @@ export default function Storefront({ route }: { route: Route }) {
     window.scrollTo({ top: 0 });
   }, [pathKey]);
 
-  const announcement = sectionOf(theme, 'announcement');
+  const announcement = liveAnnouncement(theme, Date.now());
+  const annC = announcement ? annColours(announcement) : null;
   // A closed store keeps its policies and order tracking reachable; review mode can still look around.
   const closed = (view === 'hidden' || view === 'maintenance') && !review && !['page', 'track', 'order'].includes(a ?? '');
 
@@ -96,13 +110,15 @@ export default function Storefront({ route }: { route: Route }) {
 
   return (
     <div className={cn('lak', dark && 'dark')} dir={lang === 'ar' ? 'rtl' : 'ltr'} data-store="dar-nuwa">
-      <style>{storeCss()}</style>
+      <style>{storeCss(identity)}</style>
       <ToastProvider>
         <a href="#sf-main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:start-2 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-3 focus:py-2">{tx('تخطَّ إلى المحتوى', 'Skip to content')}</a>
         <div className="flex min-h-screen flex-col bg-bg text-fg">
           {view === 'browseOnly' && <p className="bg-amber-500/15 px-4 py-2 text-center text-[13px] font-medium text-amber-900 dark:text-amber-200" role="status">{t.browseOnly}</p>}
           {(view === 'hidden' || view === 'maintenance') && review && <p className="bg-amber-500/15 px-4 py-2 text-center text-[13px] font-medium text-amber-900 dark:text-amber-200" role="status">{view === 'hidden' ? t.closedHiddenReview : t.closedMaintReview}</p>}
-          {announcement && <p className="bg-fg px-4 py-2 text-center text-[13px] text-bg">{headingText(announcement.heading, lang)}</p>}
+          {announcement && annC && <p className="px-4 py-2 text-center text-[13px]" style={{ background: annC.bg, color: annC.fg }} data-announcement="">
+            {announcement.link ? <a href={announcement.link.startsWith('/') ? to(announcement.link) : announcement.link} {...(announcement.link.startsWith('/') ? {} : { target: '_blank', rel: 'noopener' })} className="underline underline-offset-2">{headingText(announcement.heading, lang)}</a> : headingText(announcement.heading, lang)}
+          </p>}
           <Header route={route} dark={dark} setDark={setDark} />
           <main id="sf-main" ref={mainRef} className="flex-1" aria-busy={state === 'loading' || undefined}>{body}</main>
           <Footer />
@@ -173,6 +189,9 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
   const cats = useCategories();
   const cfg = useConfig();
   const content = useStoreContent();
+  const identity = liveIdentity(themeStore.use());
+  const logo = mediaSrc(identity.logo, mediaStore.use());
+  const layout = identity.header;
   // The merchant's published header menu (Online store → Menus); categories when the menu is empty.
   const menuLinks = content.header.length ? content.header
     : [{ id: 'all', label: { ar: t.all, en: t.all }, path: '/c/all', url: null }, ...cats.map((c) => ({ id: c.id, label: c.name, path: `/c/${c.id}`, url: null }))];
@@ -207,10 +226,12 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
 
   return (
     <header className="glass sticky top-0 z-30 border-b border-border">
-      <div className={cn(WRAP, 'flex h-16 items-center gap-2')}>
-        <IconButton label={t.menu} onClick={() => setMenu(true)} className="-ms-2 text-fg lg:hidden"><Menu className="size-5" aria-hidden="true" /></IconButton>
-        <a href={to()} className="text-[22px] font-bold tracking-tight text-fg max-lg:absolute max-lg:start-1/2 max-lg:-translate-x-1/2 max-lg:rtl:translate-x-1/2 sm:text-2xl">{l(cfg.name)}</a>
-        <nav aria-label={t.cats} className="ms-10 hidden items-center gap-6 lg:flex">
+      <div className={cn(WRAP, 'flex h-16 items-center gap-2', layout === 'centered' && 'lg:relative')} data-header={layout}>
+        <IconButton label={t.menu} onClick={() => setMenu(true)} className={cn('-ms-2 text-fg', layout !== 'minimal' && 'lg:hidden')}><Menu className="size-5" aria-hidden="true" /></IconButton>
+        <a href={to()} className={cn('text-[22px] font-bold tracking-tight text-fg max-lg:absolute max-lg:start-1/2 max-lg:-translate-x-1/2 max-lg:rtl:translate-x-1/2 sm:text-2xl', layout === 'centered' && 'lg:absolute lg:start-1/2 lg:-translate-x-1/2 lg:rtl:translate-x-1/2')}>
+          {logo ? <img src={logo} alt={l(cfg.name)} className="h-9 w-auto max-w-[150px] object-contain sm:h-10 sm:max-w-[200px]" /> : l(cfg.name)}
+        </a>
+        <nav aria-label={t.cats} className={cn('ms-10 hidden items-center gap-6', layout === 'classic' && 'lg:flex')}>
           {menuLinks.map((x) => (x.url ? <a key={x.id} href={x.url} target="_blank" rel="noopener" className="inline-flex h-12 items-center whitespace-nowrap px-1 text-[14px] font-medium text-muted hover:text-fg">{l(x.label)}</a>
             : navLink(to(x.path!), l(x.label), x.path === `/c/${curCat}` || (!!route.path[0] && x.path === `/${route.path.join('/')}`))))}
         </nav>
@@ -231,6 +252,12 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
           {bagLink}
         </div>
       </div>
+      {layout === 'centered' && (
+        <nav aria-label={t.cats} className={cn(WRAP, 'hidden h-11 items-center justify-center gap-7 border-t border-border lg:flex')}>
+          {menuLinks.map((x) => (x.url ? <a key={x.id} href={x.url} target="_blank" rel="noopener" className="inline-flex h-11 items-center whitespace-nowrap px-1 text-[14px] font-medium text-muted hover:text-fg">{l(x.label)}</a>
+            : navLink(to(x.path!), l(x.label), x.path === `/c/${curCat}` || (!!route.path[0] && x.path === `/${route.path.join('/')}`))))}
+        </nav>
+      )}
       {menu && (
         <Drawer title={l(cfg.name)} onClose={() => setMenu(false)}>
           <nav aria-label={t.cats}>

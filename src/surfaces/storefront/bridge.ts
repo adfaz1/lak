@@ -11,6 +11,9 @@ import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type
 import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
 import type { BankDetails, Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
+import { quote, setupOf, warehouseFor, zoneForCity, type CartIn } from '../dashboard/settings/shipping-model';
+import type { Location } from '../merchant/domain';
+import type { ShippingSetup } from '../merchant/workspace';
 import {
   CITIES, DAY, MERCHANT, cityById, computeTotals, isSettled, vatIn,
   type CityId, type Coupon, type CouponResult, type FulState, type Order, type PayMethod, type PayState, type PricedLine, type Product, type ShipMethod, type ShipState, type Variant,
@@ -89,6 +92,8 @@ export interface StoreConfig {
   zones: Zone[];
   /** Bank-transfer details shown to the shopper when they choose bank transfer; null = not offered. */
   bank: BankDetails | null;
+  /** Delivery methods, rules and promises (dashboard → Settings → Shipping); absent = the starting setup. */
+  shipping?: ShippingSetup;
 }
 
 const FIXTURE_NAME_AR = 'دار نُوى';
@@ -113,13 +118,14 @@ export function payMethodsFrom(providers: Provider[], plan: Plan): { methods: Pa
 }
 
 export function storeConfig(
-  s: { store: Pick<StoreDetails, 'name'>; providers: Provider[]; plan: Plan; cod: { min: number; max: number }; policies: Policy[]; zones: Zone[]; bank?: BankDetails | null },
+  s: { store: Pick<StoreDetails, 'name'>; providers: Provider[]; plan: Plan; cod: { min: number; max: number }; policies: Policy[]; zones: Zone[]; bank?: BankDetails | null; shipping?: ShippingSetup },
   checkout: { guest: boolean; codPerCustomer: number | null },
 ): StoreConfig {
   const pm = payMethodsFrom(s.providers, s.plan);
   return {
     name: storeName(s.store), codFee: 0, codMin: s.cod.min, codMax: s.cod.max, codOpenLimit: checkout.codPerCustomer, guest: checkout.guest,
     returnDays: returnDaysFrom(s.policies), methods: s.bank?.iban ? pm.methods : pm.methods.filter((x) => x !== 'bank'), bank: s.bank?.iban ? s.bank : null, bnplNames: pm.bnplNames, zones: s.zones,
+    shipping: setupOf(s.shipping),
   };
 }
 
@@ -155,6 +161,39 @@ export const cartWeight = (lines: { qty: number; weight?: number }[]) => lines.r
 export function freeDeliveryOffer(zones: Zone[]): { from: number; zone: L } | undefined {
   const z = zones.filter((x) => x.freeOver !== null).sort((a, b) => a.freeOver! - b.freeOver!)[0];
   return z && { from: z.freeOver!, zone: z.name };
+}
+
+/**
+ * Every delivery method a shopper in this city can choose for this bag, from the merchant's shipping setup: methods
+ * and carriers, rules (city, cart value, weight, category, COD), free thresholds and the delivery promise per zone.
+ * Cheapest first. `goods` is the subtotal after discount; `cod` = the shopper chose cash on delivery.
+ */
+export function shipOptions(
+  cfg: Pick<StoreConfig, 'zones' | 'shipping'>, city: CityId | undefined,
+  lines: { productId: string; cat: string; qty: number; amount: number; weight?: number }[],
+  o: { now: number; goods?: number; cod?: boolean; locations?: Location[] },
+): ShipMethod[] {
+  const c = cityById(city);
+  if (!c) return [];
+  const cart: CartIn = {
+    goods: o.goods ?? lines.reduce((s, l) => s + l.amount, 0), weightG: cartWeight(lines),
+    cats: [...new Set(lines.map((l) => l.cat))], productIds: [...new Set(lines.map((l) => l.productId))],
+  };
+  const q = quote(setupOf(cfg.shipping), cfg.zones, { country: 'SA', city: c.id }, cart, { now: o.now, cod: o.cod, locations: o.locations });
+  return q.offers.map((x) => {
+    const loc = x.cat === 'pickup' ? o.locations?.find((l) => l.id === setupOf(cfg.shipping).methods.find((m) => m.id === x.id)?.pickupLoc) : undefined;
+    const note: L = x.today === true ? { ar: 'يصل اليوم إذا طلبت الآن', en: 'Arrives today if you order now' }
+      : x.today === false ? { ar: 'انتهى وقت طلبات اليوم؛ يصل غدًا', en: 'Past today’s cut-off; arrives tomorrow' }
+        : loc ? { ar: `${loc.name.ar} · ${loc.address}`, en: `${loc.name.en} · ${loc.address}` }
+          : x.carrier?.name ?? x.name;
+    return { id: x.id, name: x.name, cost: x.price, freeFrom: x.freeFrom, zones: [c.zone], transit: { [c.zone]: x.transit }, handling: x.handling, codOk: x.codOk, note };
+  });
+}
+
+/** The warehouse the merchant ships this city from (auto-pick by zone), used first when stock is reserved. */
+export function shipFrom(cfg: Pick<StoreConfig, 'zones' | 'shipping'>, city: CityId | undefined, locations: Location[]): LocId | undefined {
+  const c = cityById(city);
+  return c ? warehouseFor(setupOf(cfg.shipping), zoneForCity(cfg.zones, c.name), locations)?.id : undefined;
 }
 
 /** Cities the store delivers to (a zone covers them). */
@@ -243,8 +282,9 @@ export function matchCustomer(
  * Reserve units for a paid order: from the first warehouse that can cover the whole line, else split across
  * warehouses in order. Never reserves more than is available; `short` is what could not be reserved.
  */
-export function reserve(levels: Level[], sku: string, qty: number): { levels: Level[]; picks: Partial<Record<LocId, number>>; short: number } {
-  const mine = LOC_IDS.map((loc) => levels.find((l) => l.sku === sku && l.loc === loc)).filter((l): l is Level => !!l);
+export function reserve(levels: Level[], sku: string, qty: number, prefer?: LocId): { levels: Level[]; picks: Partial<Record<LocId, number>>; short: number } {
+  const order = prefer && LOC_IDS.includes(prefer) ? [prefer, ...LOC_IDS.filter((x) => x !== prefer)] : LOC_IDS;
+  const mine = order.map((loc) => levels.find((l) => l.sku === sku && l.loc === loc)).filter((l): l is Level => !!l);
   const picks: Partial<Record<LocId, number>> = {};
   const whole = mine.find((l) => available(l) >= qty);
   if (whole) picks[whole.loc] = qty;
@@ -280,7 +320,7 @@ export interface Book { orders: MOrder[]; levels: Level[]; customers: Customer[]
  * challenge creates nothing. The merchant order is created once (same reference), its payment follows the shopper's;
  * when it becomes paid (or COD is confirmed) stock is reserved, the coupon use is recorded, and the log says so.
  */
-export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number; gift?: { message?: string } }): Book {
+export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number; gift?: { message?: string }; prefer?: LocId }): Book {
   const existing = book.orders.find((o) => o.ref === after.ref);
   if (!existing && (after.pay.state === 'awaiting' || after.pay.state === 'challenge')) return book;
   const wasPaid = !!before && isSettled(before.pay.state);
@@ -305,7 +345,7 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
       if (!line.sku) continue;
       const p = ctx.products.find((x) => x.id === line.productId);
       if (p?.digital) continue;
-      const r = reserve(levels, line.sku, line.qty);
+      const r = reserve(levels, line.sku, line.qty, ctx.prefer);
       levels = r.levels;
       picks[line.sku] = r.picks;
     }
