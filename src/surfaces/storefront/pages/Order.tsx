@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { AlertTriangle, Check, CheckCircle2, Clock, FlaskConical, PackageCheck, RefreshCw, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
 import { navigate, type Route } from '../../../core/router';
 import { Alert, Field, Input } from '../../../ds/kit';
-import { Badge, Button, EmptyState, LinkButton, Ref, cn, useTx, type Tone } from '../../../ds/ui';
+import { Badge, Button, EmptyState, LinkButton, Money, Ref, cn, useTx, type Tone } from '../../../ds/ui';
 import {
   addToCart, advanceFulfilment, canAdvance, cityById, cleanPhone, isSettled, returnEligibility, shipById, variantById,
   type FulState, type Order, type PayState, type ShipState,
@@ -34,7 +34,7 @@ function NoOrder() {
 }
 
 export function Lines({ o }: { o: Order }) {
-  const { l, lang, m } = useS();
+  const { l, lang } = useS();
   const products = useCatalog();
   return (
     <ul className="space-y-4">
@@ -48,7 +48,7 @@ export function Lines({ o }: { o: Order }) {
               <span className="absolute -top-2 -end-2 grid min-w-5 place-items-center rounded-full bg-fg px-1.5 text-[11px] font-bold leading-5 text-bg tabular-nums">{line.qty}</span>
             </span>
             <span className="min-w-0 flex-1"><span className="line-clamp-1 block text-sm font-medium">{l(f.product.name)}</span><span className="block text-xs text-muted">{variantLabel(f.product, f.variant.color, f.variant.size, lang)}</span></span>
-            <bdi className="text-sm tabular-nums">{m(line.amount)}</bdi>
+            <Money v={line.amount} className="text-sm" />
           </li>
         );
       })}

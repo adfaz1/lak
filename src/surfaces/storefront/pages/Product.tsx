@@ -6,7 +6,7 @@ import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
 import { settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
-  CATEGORIES, CITIES, COLORS, SHIP_METHODS, addToCart, deliveryEstimate, findVariant, missingOptions, productById,
+  CATEGORIES, CITIES, COLORS, SHIP_METHODS, addToCart, deliveryEstimate, findVariant, inStock, missingOptions, productById,
   stockLevel, type CityId, type ColorId,
 } from '../domain';
 import { Crumbs, H2, PANEL, Price, ProductPhoto, Stepper, Swatch, WRAP, sizeLabel, to, useS, variantLabel } from '../kit';
@@ -50,7 +50,8 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const std = SHIP_METHODS[0];
   const est = deliveryEstimate(std, city, Date.now());
   const price = variant?.price ?? Math.min(...p.variants.map((v) => v.price));
-  const related = products.filter((x) => x.cat === p.cat && x.id !== p.id).slice(0, 4);
+  const sameCat = products.filter((x) => x.cat === p.cat && x.id !== p.id);
+  const related = [...sameCat, ...products.filter((x) => x.cat !== p.cat && inStock(x)).sort((a, b) => a.rank - b.rank)].slice(0, 4);
   const soldOutVariant = !!variant && variant.stock <= 0;
 
   const pick = (k: 'color' | 'size', v: string) => {

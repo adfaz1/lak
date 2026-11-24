@@ -69,7 +69,7 @@ const en: Strings = {
   menu: 'Menu',
   closeMenu: 'Close menu',
   login: 'Log in',
-  loginNote: 'Opens the demo merchant workspace',
+  loginNote: 'Opens the demo merchant dashboard',
   register: 'Start your store',
   nav: {
     plans: 'Plans', payments: 'Payments', marketing: 'Marketing', ads: 'Ads', help: 'Help center', blog: 'Blog',
@@ -78,7 +78,7 @@ const en: Strings = {
   },
   footer: {
     product: 'Product', resources: 'Resources', company: 'Company', legal: 'Policies', products: 'LAK products',
-    workspace: 'Merchant workspace (demo)', appmaker: 'App Maker (demo)', market: 'LAK marketplace (demo)', storefront: 'Sample storefront (demo)',
+    workspace: 'Merchant dashboard (demo)', appmaker: 'App Maker (demo)', market: 'LAK marketplace (demo)', storefront: 'Sample storefront (demo)',
     themes: 'Theme store', planned: 'Planned',
     note: 'This website is a prototype for review. Data is example data, forms send nothing, and it is not connected to the live LAK platform.',
     pending: 'Links awaiting approval: external complaints portal and VAT certificate.',

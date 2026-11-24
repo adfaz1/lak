@@ -103,8 +103,8 @@ function SiteHeader({ current, dark, setDark }: { current: string; dark: boolean
         <nav aria-label={t.siteNav} className="ms-6 hidden items-center gap-1 lg:flex">
           {PRIMARY.map((id) => (
             <a key={id} href={site(id)} aria-current={current === id ? 'page' : undefined}
-              className={cn('rounded-lg px-3 py-2 text-sm font-medium transition-colors', current === id ? 'text-fg' : 'text-muted hover:text-fg')}>
-              {t.nav[id]}{current === id && <span className="mx-auto mt-0.5 block h-0.5 w-4 rounded-full bg-brand-600" aria-hidden="true" />}
+              className={cn('relative rounded-lg px-3 py-2 text-sm font-medium transition-colors', current === id ? 'text-fg' : 'text-muted hover:text-fg')}>
+              {t.nav[id]}{current === id && <span className="absolute inset-x-3 -bottom-[13px] h-0.5 rounded-full bg-brand-600" aria-hidden="true" />}
             </a>
           ))}
         </nav>

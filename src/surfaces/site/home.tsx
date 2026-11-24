@@ -160,7 +160,12 @@ export default function Home({ route, dark }: { route: Route; dark: boolean }) {
           </div>
 
           <div className="relative mt-14 pb-6 sm:mt-16 sm:pb-12">
-            <Shot priority src={shotSrc('home', lang, dark)} alt={c.shotAlt} label={c.shotLabel} className="sm:me-16 lg:me-28" />
+            <Shot priority src={shotSrc('home', lang, dark)} alt={c.shotAlt} label={c.shotLabel} className="max-sm:hidden sm:me-16 lg:me-28" />
+            <figure className="mx-auto w-[260px] sm:hidden">
+              <img src={shotSrc('phone', lang, dark)} alt={c.phoneAlt} width={390} height={844} loading="eager"
+                className="block aspect-[9/16] h-auto w-full rounded-[32px] border-[6px] border-[#12142b] object-cover object-top shadow-pop dark:border-[#2a2e52]" />
+              <figcaption className="mt-3 text-center text-xs text-subtle">{c.shotLabel} · {t.exampleData}</figcaption>
+            </figure>
             <img src={shotSrc('phone', lang, dark)} alt={c.phoneAlt} width={390} height={844} loading="eager"
               className="absolute bottom-0 end-0 hidden aspect-[9/17] h-auto w-[170px] rounded-[28px] border-[6px] border-[#12142b] object-cover object-top shadow-pop sm:block lg:w-[230px] dark:border-[#2a2e52]" />
           </div>

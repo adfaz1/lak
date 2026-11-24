@@ -280,7 +280,7 @@ export default function Checkout() {
             )}
             {!co.savedId && (
               <div className="grid gap-4 sm:grid-cols-2">
-                <div className="sm:col-span-2 flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3 text-sm">
+                <div className="flex flex-col gap-0.5 rounded-xl bg-surface-2 px-4 py-3 text-sm sm:col-span-2 sm:flex-row sm:items-center sm:justify-between">
                   <span><span className="text-muted">{t.country}: </span><span className="font-medium">{t.countryVal}</span></span>
                   <span className="text-xs text-muted">{t.countryNote}</span>
                 </div>

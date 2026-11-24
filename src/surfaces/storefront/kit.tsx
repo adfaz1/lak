@@ -153,7 +153,7 @@ export function Breakdown({ totals, shippingLabel, shippingNote, coupon, shippin
       <div className={row}><dt className="text-muted">{t.subtotal}</dt><dd><Money v={totals.subtotal} /></dd></div>
       {totals.discount > 0 && (
         <div className={row}><dt className="text-muted">{t.discount}{coupon && <> · <bdi dir="ltr" className="font-medium">{coupon}</bdi></>}</dt>
-          <dd className="text-emerald-700 dark:text-emerald-400"><bdi dir="ltr">−</bdi><Money v={totals.discount} /></dd></div>
+          <dd className="text-emerald-700 dark:text-emerald-400"><span dir="ltr" className="inline-flex items-baseline">−<Money v={totals.discount} /></span></dd></div>
       )}
       <div className={row}><dt className="text-muted">{shippingLabel ?? t.shipping}</dt>
         <dd>{shippingPending ? <span className="text-muted">{t.shipLater}</span> : totals.shipping === 0 ? <span className="font-medium text-emerald-700 dark:text-emerald-400">{t.free}</span> : <Money v={totals.shipping} />}</dd></div>
