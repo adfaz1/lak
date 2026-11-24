@@ -72,6 +72,9 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
       <div className="flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3">
         <span className="text-sm text-muted">{tx('المتاح للاسترداد', 'Available to refund')}</span><Money v={refundable(o)} className="font-semibold text-fg" />
       </div>
+      {refundable(o) === 0 && <Alert tone="info" title={o.pay !== 'failed' ? tx('رُدّ المبلغ كاملًا من قبل', 'Already fully refunded') : tx('لا مبلغ للاسترداد: الدفع لم يكتمل', 'Nothing to refund: payment was not completed')}>
+        {o.pay !== 'failed' ? tx('يمكنك فتح مرتجع لإعادة القطع إلى المخزون دون رد مبلغ.', 'You can still open a return to restock items without refunding money.') : tx('لم يُحصَّل من العميل شيء. إن أردت إنهاء الطلب فاستخدم «إلغاء الطلب».', 'Nothing was collected from the customer. To close the order, use “Cancel order”.')}
+      </Alert>}
       {refundFromNextPayout(o) && <Alert tone="info">{tx('سُوّي هذا الطلب في تحويل سابق؛ يُخصم الاسترداد من التحويل القادم.', 'This order was already paid out; the refund comes from your next payout.')}</Alert>}
 
       <fieldset>
