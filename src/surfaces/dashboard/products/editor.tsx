@@ -557,10 +557,10 @@ function Variants({ draft, set, fe, known, get }: SecProps & { known: Set<string
               return (
                 <label key={c} className="inline-flex items-center gap-2 text-xs text-muted">
                   <ProductImage src={colorImg(c) ? mediaSrc(colorImg(c)!) : undefined} alt="" size={28} />{colorText(c, lang)}
-                  <Select className="h-8 w-auto text-xs" value={own?.id ?? ''} aria-label={tx(`صورة اللون ${colorText(c, 'ar')}`, `Image for ${c}`)} onChange={(e) => set({ media: e.target.value ? setColorImage(draft.media, c, e.target.value) : draft.media.map((m) => (m.id === own?.id ? { ...m, variant: undefined } : m)) })}>
+                  <span className="block w-36"><Select className="h-8 text-xs" value={own?.id ?? ''} aria-label={tx(`صورة اللون ${colorText(c, 'ar')}`, `Image for ${c}`)} onChange={(e) => set({ media: e.target.value ? setColorImage(draft.media, c, e.target.value) : draft.media.map((m) => (m.id === own?.id ? { ...m, variant: undefined } : m)) })}>
                     <option value="">{tx('الرئيسية', 'Main image')}</option>
                     {draft.media.map((m, i) => <option key={m.id} value={m.id}>{tx(`صورة ${i + 1}`, `Image ${i + 1}`)}{m.alt ? ` · ${m.alt.slice(0, 24)}` : ''}</option>)}
-                  </Select>
+                  </Select></span>
                 </label>
               );
             })}
@@ -571,21 +571,21 @@ function Variants({ draft, set, fe, known, get }: SecProps & { known: Set<string
         <>
           <div className="flex flex-wrap items-end gap-2 border-t border-border px-5 py-3" role="group" aria-label={tx('تعبئة عمود', 'Fill a column')}>
             <span className="inline-flex h-10 items-center gap-1 text-[13px] font-semibold text-fg">{tx('عبّئ عمودًا', 'Fill a column')}<InfoHint>{tx('يكتب القيمة نفسها في كل المتغيرات أو في لون/مقاس واحد. SKU يُبنى من الأساس للمتغيرات الجديدة فقط، والكمية للـSKU الجديد فقط. تراجع من الإشعار.', 'Writes the same value to every variant, or to one colour or size. SKU is rebuilt from the base for new variants only; quantity for new SKUs only. Undo from the notice.')}</InfoHint></span>
-            <Select className="h-10 w-auto text-[13px]" aria-label={tx('العمود', 'Column')} value={fill.col} onChange={(e) => setFill({ ...fill, col: e.target.value as FillCol, err: null })}>
+            <span className="block w-40"><Select className="h-10 text-[13px]" aria-label={tx('العمود', 'Column')} value={fill.col} onChange={(e) => setFill({ ...fill, col: e.target.value as FillCol, err: null })}>
               <option value="price">{tx('السعر', 'Price')}</option>
               <option value="sku">{tx('SKU من الأساس', 'SKU from base')}</option>
               {physical && anyFresh && LOC_IDS.map((l) => <option key={l} value={`stock.${l}`}>{tx(`الكمية · ${LOCATIONS[l].ar}`, `Quantity · ${LOCATIONS[l].en}`)}</option>)}
-            </Select>
-            <Select className="h-10 w-auto text-[13px]" aria-label={tx('النطاق', 'Scope')} value={fill.scope} onChange={(e) => setFill({ ...fill, scope: e.target.value })}>
+            </Select></span>
+            <span className="block w-44"><Select className="h-10 text-[13px]" aria-label={tx('النطاق', 'Scope')} value={fill.scope} onChange={(e) => setFill({ ...fill, scope: e.target.value })}>
               <option value="">{tx(`كل المتغيرات (${draft.variants.length})`, `All variants (${draft.variants.length})`)}</option>
               {draft.colors.map((c) => <option key={`c${c}`} value={`c:${c}`}>{tx('اللون: ', 'Colour: ')}{colorText(c, lang)}</option>)}
               {draft.sizes.map((z) => <option key={`s${z}`} value={`s:${z}`}>{tx('المقاس: ', 'Size: ')}{z}</option>)}
-            </Select>
-            {fill.col !== 'sku' && <div><Input className="w-28" dir="ltr" inputMode={fill.col === 'price' ? 'decimal' : 'numeric'} aria-label={tx('القيمة', 'Value')} aria-invalid={!!fill.err || undefined} placeholder={fill.col === 'price' ? '0.00' : '0'} value={fill.value} onChange={(e) => setFill({ ...fill, value: e.target.value, err: null })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doFill(); } }} /></div>}
+            </Select></span>
+            {fill.col !== 'sku' && <div><Input className="w-28" dir="ltr" inputMode={fill.col === 'price' ? 'decimal' : 'numeric'} aria-label={tx('قيمة التعبئة', 'Fill value')} aria-invalid={!!fill.err || undefined} placeholder={fill.col === 'price' ? '0.00' : '0'} value={fill.value} onChange={(e) => setFill({ ...fill, value: e.target.value, err: null })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doFill(); } }} /></div>}
             <Button variant="secondary" onClick={doFill}>{tx('عبّئ', 'Fill')}</Button>
             {fill.err && <p className="basis-full text-xs font-medium text-red-600 dark:text-red-400" role="alert">{fill.err}</p>}
           </div>
-          <div className="scrollbar-thin overflow-x-auto border-t border-border">
+          <div className="scrollbar-thin relative overflow-x-auto border-t border-border">
             <table className="w-full min-w-[640px] text-sm" aria-label={tx('مصفوفة المتغيرات', 'Variant matrix')}>
               <thead><tr className="border-b border-border text-xs text-muted">
                 <th scope="col" className="px-4 py-3 text-start font-semibold">{tx('المتغير', 'Variant')}</th>

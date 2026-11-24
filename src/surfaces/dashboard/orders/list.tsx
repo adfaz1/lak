@@ -169,7 +169,7 @@ export default function OrdersList({ route }: { route: Route }) {
           <MenuItem icon={<PackageX className="size-4" />} onClick={() => { close(); setMore('voidLabels'); }}>{tx('ألغِ الملصقات', 'Void labels')}</MenuItem>
         </>}
       </Menu>
-      <Menu label={tx('تنظيم', 'Organise')} size="sm" button={<MenuButtonLabel icon={<Tags className="size-4" aria-hidden="true" />}>{tx('تنظيم', 'Organise')}</MenuButtonLabel>}>
+      <Menu label={tx('تنظيم', 'Organise')} size="sm" align="start" button={<MenuButtonLabel icon={<Tags className="size-4" aria-hidden="true" />}>{tx('تنظيم', 'Organise')}</MenuButtonLabel>}>
         {(close) => <>
           <MenuItem icon={<UserRound className="size-4" />} onClick={() => { close(); setMore('assign'); }}>{tx('أسند إلى عضو', 'Assign to a member')}</MenuItem>
           <MenuItem icon={<Tag className="size-4" />} onClick={() => { close(); setMore('tagAdd'); }}>{tx('أضف وسمًا', 'Add a tag')}</MenuItem>
@@ -185,7 +185,7 @@ export default function OrdersList({ route }: { route: Route }) {
         </>}
       </Menu>
       <span className="flex items-center gap-1 rounded-xl border border-dashed border-amber-500/50 bg-amber-500/5 p-1" role="group" aria-label={tx('يصل للعميل', 'Reaches the customer')}>
-        <Menu label={tx('إرسال للعميل', 'Send to customer')} size="sm" variant="ghost" button={<MenuButtonLabel icon={<Send className="size-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />}>{tx('إرسال للعميل', 'Send to customer')}</MenuButtonLabel>}>
+        <Menu label={tx('إرسال للعميل', 'Send to customer')} size="sm" variant="ghost" align="start" button={<MenuButtonLabel icon={<Send className="size-4 text-amber-700 dark:text-amber-300" aria-hidden="true" />}>{tx('إرسال للعميل', 'Send to customer')}</MenuButtonLabel>}>
           {(close) => canMessage ? <>
             <MenuItem icon={<Link2 className="size-4" />} onClick={() => { close(); setMore('payLink'); }}>{tx('أرسل رابط دفع', 'Send a payment link')}</MenuItem>
             <MenuItem icon={<CalendarClock className="size-4" />} onClick={() => { close(); setMore('extendDue'); }}>{tx('مدّد مهلة الدفع وأبلغ', 'Extend payment deadline')}</MenuItem>

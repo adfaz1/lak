@@ -53,7 +53,7 @@ export function QuickBar({ value, counts, onToggle }: { value: QuickFilter[]; co
   const tx = useTx();
   const n = useListNames();
   return (
-    <div role="group" aria-label={tx('فلاتر سريعة', 'Quick filters')} className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+    <div role="group" aria-label={tx('فلاتر سريعة', 'Quick filters')} className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 sm:flex-wrap sm:overflow-visible">
       {QUICK_FILTERS.map((f) => {
         const on = value.includes(f);
         return (
@@ -72,9 +72,11 @@ export function SortSelect({ value, onChange }: { value: SortKey; onChange: (s: 
   const tx = useTx();
   const n = useListNames();
   return (
-    <Select className={cn('h-10 w-auto text-[13px] font-medium', value !== 'catalogue' && 'border-brand-300 text-brand-700 dark:text-brand-300')} aria-label={tx('الترتيب', 'Sort')} value={value} onChange={(e) => onChange(e.target.value as SortKey)}>
-      {SORTS.map((s) => <option key={s} value={s}>{tx('ترتيب: ', 'Sort: ')}{n.sort(s)}</option>)}
-    </Select>
+    <span className="block w-52 shrink-0">
+      <Select className={cn('h-10 text-[13px] font-medium', value !== 'catalogue' && 'border-brand-300 text-brand-700 dark:text-brand-300')} aria-label={tx('الترتيب', 'Sort')} value={value} onChange={(e) => onChange(e.target.value as SortKey)}>
+        {SORTS.map((s) => <option key={s} value={s}>{tx('ترتيب: ', 'Sort: ')}{n.sort(s)}</option>)}
+      </Select>
+    </span>
   );
 }
 

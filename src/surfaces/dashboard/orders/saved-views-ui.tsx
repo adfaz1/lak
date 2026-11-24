@@ -12,7 +12,8 @@ import { MAX_PINNED, VIEW_NAME_MAX, addView, currentView, pinView, removeView, r
 import { Menu, MenuButtonLabel, MenuItem, MenuNote, ohref, useLabels } from './ui';
 
 type Tab = { href: string; label: ReactNode; current: boolean; count?: number };
-const hrefOf = (v: SavedView) => link('/dashboard/orders', v.params);
+// `sv` keeps the tab key unique when a built-in tab carries the same filters; the list ignores it.
+const hrefOf = (v: SavedView) => link('/dashboard/orders', { ...v.params, sv: v.id });
 
 export function SavedViewsBar({ lq, all, views, viewer, builtin }: { lq: ListQuery; all: Order[]; views: SavedView[]; viewer: string; builtin: Tab[] }) {
   const tx = useTx();
@@ -39,7 +40,7 @@ export function SavedViewsBar({ lq, all, views, viewer, builtin }: { lq: ListQue
       <div className="flex shrink-0 items-center gap-1 pb-1.5">
         {savable && <Button size="sm" variant="ghost" onClick={() => setDialog('save')}><BookmarkPlus className="size-4" aria-hidden="true" />{tx('احفظ العرض', 'Save view')}</Button>}
         {cur && <Badge tone="brand" icon={<Bookmark className="size-3" aria-hidden="true" />}>{cur.name}</Badge>}
-        <Menu label={tx('عروضي المحفوظة', 'My saved views')} size="sm" variant="ghost" button={<MenuButtonLabel icon={<Bookmark className="size-4" aria-hidden="true" />}>{tx(`عروضي${views.length ? ` (${views.length})` : ''}`, `My views${views.length ? ` (${views.length})` : ''}`)}</MenuButtonLabel>}>
+        <Menu label={tx('عروضي المحفوظة', 'My saved views')} size="sm" variant="ghost" align="start" button={<MenuButtonLabel icon={<Bookmark className="size-4" aria-hidden="true" />}>{tx(`عروضي${views.length ? ` (${views.length})` : ''}`, `My views${views.length ? ` (${views.length})` : ''}`)}</MenuButtonLabel>}>
           {(close) => <>
             {views.length === 0 && <MenuNote>{tx('ابحث أو صفِّ، ثم «احفظ العرض» ليظهر هنا.', 'Search or filter, then “Save view” to keep it here.')}</MenuNote>}
             {views.map((v) => <MenuItem key={v.id} icon={v.pinned ? <Pin className="size-4" /> : <Bookmark className="size-4" />} onClick={() => { close(); navigate(hrefOf(v)); }}>{v.name}</MenuItem>)}
