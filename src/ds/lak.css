@@ -84,6 +84,7 @@
 .lak { font-family: var(--font-sans); background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; min-height: 100vh; font-feature-settings: 'tnum' 1; }
 .lak *, .lak *::before, .lak *::after { box-sizing: border-box; border: 0 solid; }
 .lak :where(h1, h2, h3, h4, p, figure, blockquote, dl, dd, ul, ol) { margin: 0; }
+.lak :where(table) { min-width: 0; } /* the old prototype styles give every table 760px; the new dashboard sizes its own */
 .lak :where(ul, ol) { list-style: none; padding: 0; }
 .lak :where(button, input, select, textarea) { font: inherit; color: inherit; background: transparent; }
 .lak :where(button) { cursor: pointer; }
