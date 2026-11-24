@@ -258,3 +258,5 @@
 /* Guard against generic class names from the older prototype styles (e.g. a global .brand). */
 .lk .lk-btn { flex-direction: row; }
 [dir='rtl'] .lk-flipx { transform: scaleX(-1); }
+/* The switch keeps its own size even inside a .lk-check label. */
+.lk .lk-check input.lk-switch { width: 36px; height: 20px; accent-color: initial; }
