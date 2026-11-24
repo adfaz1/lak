@@ -167,16 +167,16 @@ export interface ThemeState { published: ThemeVersion; draft: Section[]; history
 
 export function themeFixture(): ThemeState {
   const sections: Section[] = [
-    { id: 's1', kind: 'announcement', visible: true, heading: 'Free shipping over SAR 300 in Riyadh' },
-    { id: 's2', kind: 'hero', visible: true, heading: 'Summer linen collection' },
-    { id: 's3', kind: 'featured', visible: true, heading: 'Best sellers' },
-    { id: 's4', kind: 'categories', visible: true, heading: 'Shop by category' },
-    { id: 's5', kind: 'offers', visible: false, heading: 'This week’s offers' },
-    { id: 's6', kind: 'video', visible: false, heading: 'How our abayas are made' },
-    { id: 's7', kind: 'newsletter', visible: true, heading: 'Get new arrivals first' },
+    { id: 's1', kind: 'announcement', visible: true, heading: 'شحن مجاني للطلبات فوق 300 ر.س داخل الرياض' },
+    { id: 's2', kind: 'hero', visible: true, heading: 'تشكيلة العبايات المطرّزة' },
+    { id: 's3', kind: 'featured', visible: true, heading: 'الأكثر مبيعًا' },
+    { id: 's4', kind: 'categories', visible: true, heading: 'تسوّقي حسب الفئة' },
+    { id: 's5', kind: 'offers', visible: false, heading: 'عروض هذا الأسبوع' },
+    { id: 's6', kind: 'video', visible: false, heading: 'كيف نصنع عباياتنا' },
+    { id: 's7', kind: 'newsletter', visible: true, heading: 'كوني أول من يعرف بالجديد' },
   ];
-  const v6: ThemeVersion = { version: 6, note: 'Hero updated', sections: sections.map((s) => (s.id === 's2' ? { ...s, heading: 'Autumn arrivals' } : s)) };
-  const v7: ThemeVersion = { version: 7, note: 'Linen collection', sections };
+  const v6: ThemeVersion = { version: 6, note: 'تحديث البانر', sections: sections.map((s) => (s.id === 's2' ? { ...s, heading: 'وصل حديثًا لموسم الخريف' } : s)) };
+  const v7: ThemeVersion = { version: 7, note: 'تشكيلة المطرّزات', sections };
   return { published: v7, draft: sections.map((s) => ({ ...s })), history: [v7, v6] };
 }
 
