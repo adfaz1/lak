@@ -12,6 +12,9 @@ import { DEFAULT_WS, sanitizeWs, type Workspace } from '../model/home';
 import { TOOLS, canUseTool } from '../model/tools';
 import { emptyQueueState, forRole, workQueue, type QueueState, type WorkItem } from './model';
 import type { DraftLog } from '../assistant/model';
+import { deliveriesStore, reminderWorkItems, reorderStore, sequenceStore } from '../marketing/reminders-model';
+import { couponsStore } from '../../merchant/stores';
+import { rank } from './model';
 
 export const queueStore = createStore.key('dashboard.workQueue')<QueueState>(emptyQueueState);
 export const assistantLogStore = createStore.key('dashboard.assistantLog')<DraftLog[]>(() => []);
@@ -28,8 +31,12 @@ export function useWork(empty = false): { all: WorkItem[]; mine: WorkItem[]; rol
   const runs = runsStore.use();
   const autos = automationsStore.use();
   const role = testStore.use().role;
-  const all = useMemo(() => (empty ? [] : workQueue({ orders, levels, history: HISTORY, payouts: fin.payouts, txs: fin.txs, apps, providers: settings.providers, domain: settings.domain, runs, automations: autos })),
-    [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos]);
+  // Cart and reorder reminders report only steps that need the merchant (provider down, coupon broken).
+  const seq = sequenceStore.use(); const rules = reorderStore.use(); const deliveries = deliveriesStore.use(); const coupons = couponsStore.use();
+  const all = useMemo(() => (empty ? [] : rank([
+    ...workQueue({ orders, levels, history: HISTORY, payouts: fin.payouts, txs: fin.txs, apps, providers: settings.providers, domain: settings.domain, runs, automations: autos }),
+    ...reminderWorkItems({ seq, rules, deliveries, coupons }),
+  ])), [empty, orders, levels, fin, apps, settings.providers, settings.domain, runs, autos, seq, rules, deliveries, coupons]);
   return { all, mine: useMemo(() => forRole(role, all), [role, all]), role };
 }
 
