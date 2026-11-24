@@ -73,7 +73,7 @@ export default function Storefront({ route }: { route: Route }) {
     if (prevPath.current === pathKey) return;
     prevPath.current = pathKey;
     const h = mainRef.current?.querySelector('h1');
-    if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
+    if (h) { h.setAttribute('tabindex', '-1'); h.style.outline = 'none'; h.focus({ preventScroll: true }); }
     window.scrollTo({ top: 0 });
   }, [pathKey]);
 
