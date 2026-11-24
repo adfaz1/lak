@@ -79,13 +79,16 @@ export function Sim() {
 /** Modal confirmation. States the action, its scope and consequence; returns focus to the opener on close. */
 export function Dialog({ title, children, onClose, footer }: { title: string; children: ReactNode; onClose: () => void; footer: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
+  // Keep the latest onClose in a ref so focus is moved and restored once per opening, not on every render.
+  const close = useRef(onClose);
+  close.current = onClose;
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
     ref.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close.current(); };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); opener?.focus(); };
-  }, [onClose]);
+  }, []);
   return (
     <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={ref}>
