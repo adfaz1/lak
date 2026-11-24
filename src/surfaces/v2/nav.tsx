@@ -10,7 +10,8 @@ import { vhref } from './data';
 export interface Dest { id: string; label: L; desc: L; href: string; redesigned?: boolean }
 export interface Group { id: string; label: L; icon: IconName; tint: 'purple' | 'cyan' | 'indigo' | 'green' | 'peach'; items: Dest[] }
 
-const m = (page: string) => link(`/merchant/${page}`);
+/** A not-yet-redesigned section: opens the previous version, which then shows a way back. */
+const m = (page: string) => { const [path, q] = page.split('?'); return link(`/merchant/${path}`, { ...Object.fromEntries(new URLSearchParams(q ?? '')), from: 'v2' }); };
 const d = (id: string, ar: string, en: string, dar: string, den: string, href: string, redesigned = false): Dest => ({ id, label: { ar, en }, desc: { ar: dar, en: den }, href, redesigned });
 
 export const GROUPS: Group[] = [
@@ -105,7 +106,7 @@ export function AllMenu({ onClose }: { onClose: () => void }) {
                       <li key={i.id} className="nav-mega-item">
                         <a href={i.href} onClick={onClose}>
                           <span className="lk-strong">{i.label[lang]}</span>
-                          {!i.redesigned && <span className="nav-old">{tx('الإصدار الحالي', 'current')}</span>}
+                          {!i.redesigned && <span className="nav-old">{tx('الإصدار السابق', 'previous version')}</span>}
                           <span className="lk-micro lk-3">{i.desc[lang]}</span>
                         </a>
                         <button type="button" className={`nav-pin${pinned ? ' on' : ''}`} aria-pressed={pinned} aria-label={pinned ? tx(`إلغاء تثبيت ${i.label.ar}`, `Unpin ${i.label.en}`) : tx(`تثبيت ${i.label.ar} في الوصول السريع`, `Pin ${i.label.en} to quick access`)} onClick={() => togglePin(i.id)}>
@@ -129,10 +130,10 @@ export const TOP: { id: string; label: L; href: string; match: string[] }[] = [
   { id: 'home', label: { ar: 'الرئيسية', en: 'Home' }, href: vhref(''), match: ['home'] },
   { id: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, href: vhref('orders'), match: ['orders', 'late', 'returns', 'payfail'] },
   { id: 'products', label: { ar: 'المنتجات', en: 'Products' }, href: vhref('products/p1'), match: ['product-edit'] },
-  { id: 'customers', label: { ar: 'العملاء', en: 'Customers' }, href: link('/merchant/customers'), match: [] },
-  { id: 'marketing', label: { ar: 'التسويق', en: 'Marketing' }, href: link('/merchant/marketing'), match: [] },
-  { id: 'money', label: { ar: 'المالية', en: 'Money' }, href: link('/merchant/finance'), match: [] },
-  { id: 'store', label: { ar: 'المتجر', en: 'Online store' }, href: link('/merchant/storefront'), match: [] },
+  { id: 'customers', label: { ar: 'العملاء', en: 'Customers' }, href: m('customers'), match: [] },
+  { id: 'marketing', label: { ar: 'التسويق', en: 'Marketing' }, href: m('marketing'), match: [] },
+  { id: 'money', label: { ar: 'المالية', en: 'Money' }, href: m('finance'), match: [] },
+  { id: 'store', label: { ar: 'المتجر', en: 'Online store' }, href: m('storefront'), match: [] },
 ];
 export function SideGroups({ current, counts }: { current: string; counts?: Record<string, number> }) {
   const { lang } = useLang();
@@ -146,7 +147,7 @@ export function SideGroups({ current, counts }: { current: string; counts?: Reco
           <li key={t.id}>
             <a className="nav-flat-l" href={t.href} aria-current={on ? 'page' : undefined} title={later ? tx('لم يُعَد تصميمه بعد: يفتح الإصدار الحالي', 'Not redesigned yet: opens the current version') : undefined}>
               <span className="lk-grow">{t.label[lang]}</span>
-              {counts?.[t.id] ? <span className="nav-flat-n">{counts[t.id]}</span> : later ? <span className="nav-flat-later" aria-hidden="true">↗</span> : null}
+              {counts?.[t.id] ? <span className="nav-flat-n">{counts[t.id]}</span> : later ? <span className="nav-flat-later">{tx('سابق', 'old')}</span> : null}
             </a>
           </li>
         );

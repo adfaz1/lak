@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useState, type ComponentType } from 'react';
 import { useLang, type L } from './core/lang';
 import { link, sub, useRoute, type Route } from './core/router';
 import { resetAll } from './core/store';
+import { syncReviewMode, useReviewMode, fromRedesignStore } from './core/review';
 
 // Each surface is its own chunk so opening one does not download the other five.
 const Site = lazy(() => import('./surfaces/site'));
@@ -11,6 +12,7 @@ const Storefront = lazy(() => import('./surfaces/storefront'));
 const AppMaker = lazy(() => import('./surfaces/appmaker'));
 const Market = lazy(() => import('./surfaces/market'));
 const V2 = lazy(() => import('./surfaces/v2'));
+const Dashboard = lazy(() => import('./surfaces/dashboard'));
 
 /** The six surfaces of the platform blueprint, in dependency order. */
 const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }> }[] = [
@@ -20,6 +22,7 @@ const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }
   { id: 'store', name: { ar: 'متجر التاجر', en: 'Storefront' }, who: { ar: 'عميل يتسوق من متجر', en: 'A shopper in one store' }, C: Storefront },
   { id: 'appmaker', name: { ar: 'صانع التطبيقات', en: 'App Maker' }, who: { ar: 'تاجر يبني تطبيق متجره', en: 'A merchant building their app' }, C: AppMaker },
   { id: 'market', name: { ar: 'سوق لك', en: 'LAK marketplace' }, who: { ar: 'عميل يتسوق عبر المتاجر', en: 'A shopper across stores' }, C: Market },
+  { id: 'dashboard', name: { ar: 'لوحة التاجر الجديدة · للاعتماد', en: 'New merchant dashboard · for approval' }, who: { ar: 'مرجع الجودة: رئيسية التاجر', en: 'Quality reference: merchant home' }, C: Dashboard },
   { id: 'v2', name: { ar: 'التصميم الجديد · للاعتماد', en: 'New design · for approval' }, who: { ar: 'ثلاث شاشات لاعتماد المستوى البصري قبل تعميمه', en: 'Three screens to approve the visual standard before rollout' }, C: V2 },
 ];
 
@@ -39,6 +42,15 @@ export function App() {
     try { return localStorage.getItem('lak.direction') === 'b' ? 'b' : 'a'; } catch { return 'a'; }
   });
   useEffect(() => { document.documentElement.dataset.surface = current?.id ?? 'hub'; }, [current?.id]);
+  useEffect(() => syncReviewMode(route.query), [route]);
+  const review = useReviewMode();
+  const fromRedesign = fromRedesignStore.use();
+  useEffect(() => {
+    if (route.query.get('from') === 'v2') fromRedesignStore.set(true);
+    else if (current?.id === 'v2' || current?.id === 'dashboard') fromRedesignStore.set(false);
+  }, [route, current?.id]);
+  // The redesign is shown as the product: no prototype chrome unless review mode is on.
+  const bare = (current?.id === 'v2' || current?.id === 'dashboard') && !review;
   useEffect(() => {
     document.documentElement.dataset.direction = direction;
     try { localStorage.setItem('lak.direction', direction); } catch { /* preference only */ }
@@ -47,7 +59,7 @@ export function App() {
   return (
     <>
       <a className="skip" href="#main">{t.skip}</a>
-      <header className="topbar">
+      {!bare && <header className="topbar">
         <a className="logo" href={link('/')} aria-label="LAK | لك">
           <img src="/lak-mark.png" alt="" width="28" height="40" />
           <bdi dir="ltr" className="wordmark">LAK | لك</bdi>
@@ -67,7 +79,13 @@ export function App() {
           <button type="button" className="btn small" onClick={resetAll}>{t.reset}</button>
           <button type="button" className="btn small" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>{t.other}</button>
         </div>
-      </header>
+      </header>}
+      {fromRedesign && current?.id === 'merchant' && (
+        <div className="legacy-bar" role="status">
+          <span>{lang === 'ar' ? 'هذا القسم بالإصدار السابق ولم يُعَد تصميمه بعد.' : 'This section is still the previous version; it has not been redesigned yet.'}</span>
+          <a href={link('/dashboard')}>{lang === 'ar' ? 'العودة إلى اللوحة الجديدة' : 'Back to the new dashboard'}</a>
+        </div>
+      )}
       <main id="main" tabIndex={-1}>
         {current ? <Suspense fallback={<div className="main" aria-busy="true"><p className="muted" role="status">{t.loading}</p></div>}><current.C route={sub(route, 1)} /></Suspense> : (
           <div className="main hub">

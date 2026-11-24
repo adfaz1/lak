@@ -6,7 +6,7 @@ import { formatInt } from '../../core/format';
 import { ordersStore } from '../merchant/stores';
 import { VIEWS, VIEW_IDS, search, total, units, type BulkAction, type Order, type View } from '../merchant/domain';
 import { EmptyState, Icon, Money, Ref, Skeleton, Thumb, ThumbStack, Toast, useTx } from './ui';
-import { age, itemImage, reviewStore, vhref } from './data';
+import { age, itemImage, reviewStore, vhref, useView } from './data';
 import {
   CHANNELS, FULS, PAGE_SIZE, PAYS, SORTS, Layer, Menu, MenuItem, StageHints, StagePill, queryParams, readQuery, useLabels, useMedia, type ListQuery,
 } from './orders-shared';
@@ -26,7 +26,7 @@ export function OrdersList({ route, selected, compact }: { route: Route; selecte
   const tx = useTx();
   const { lang } = useLang();
   const L = useLabels();
-  const { dir, state } = reviewStore.use();
+  const { dir, state } = useView();
   const stored = ordersStore.use();
   const phone = useMedia('(max-width: 720px)');
   const all = state === 'empty' ? [] : stored;

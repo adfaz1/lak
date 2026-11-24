@@ -1,4 +1,5 @@
 // Shared vocabulary for the redesigned orders list and order detail: labels, stage pills, URL query, small controls.
+import { useReviewMode } from '../../core/review';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useLang } from '../../core/lang';
@@ -145,6 +146,8 @@ export function MenuItem({ icon, children, onClick, href, hint, tone }: { icon?:
 /** Clearly marked control that drives a simulated provider; never looks like a product control. */
 export function TestControl({ title, children }: { title?: string; children: ReactNode }) {
   const tx = useTx();
+  // Simulation switches belong to review mode only; the product view never shows them.
+  if (!useReviewMode()) return null;
   return (
     <div className="ord-test" role="group" aria-label={title ?? tx('أداة اختبار', 'Test control')}>
       <span className="ord-test-h">{title ?? tx('أداة اختبار · ليست جزءًا من المنتج', 'Test control · not part of the product')}</span>

@@ -223,3 +223,7 @@ select.input { padding-inline-end: 28px; }
 
 /* The redesign preview needs the full phone screen: the surface switcher is reachable from the logo (hub). */
 @media (max-width: 600px) { [data-surface='v2'] .surfaces { display: none; } }
+
+/* Shown when a merchant leaves the redesign for a not-yet-redesigned section. */
+.legacy-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 16px; padding: 10px 16px; background: #141938; color: #fff; font-size: 14px; }
+.legacy-bar a { color: #9fe3f7; font-weight: 600; }

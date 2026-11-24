@@ -9,7 +9,7 @@ import { createStore } from '../../core/store';
 import type { Product } from '../merchant/catalog';
 import { draftsStore, productsStore } from '../merchant/stores';
 import { Banner, Dialog, EmptyState, Icon, Pill, Ref, Skeleton, Toast, useTx, SrHeading } from './ui';
-import { reviewStore, vhref } from './data';
+import { reviewStore, vhref, useView } from './data';
 import { Page } from './index';
 import { fieldId, mediaSrc, sectionOf, useEditor, useLeaveGuard, type Editor, type SectionId } from './product-model';
 import { Photo, useFieldName, useColorName } from './product-fields';
@@ -24,7 +24,7 @@ const toastStore = createStore<{ text: string; n: number } | null>(() => null);
 
 export default function ProductEdit({ route }: { route: Route }) {
   const tx = useTx();
-  const { dir, state } = reviewStore.use();
+  const { dir, state } = useView();
   const products = productsStore.use();
   const id = route.path[1] ?? 'new';
   const toast = toastStore.use();
@@ -76,6 +76,7 @@ function Crumb() {
 
 function EditorView({ product, dir }: { product: Product | undefined; dir: 'a' | 'b' }) {
   const tx = useTx();
+  const reviewOn = useView().review;
   const { lang } = useLang();
   const st = useStatusText();
   const fieldName = useFieldName();
@@ -191,7 +192,7 @@ function EditorView({ product, dir }: { product: Product | undefined; dir: 'a' |
     </>
   );
 
-  const failTool = (
+  const failTool = !reviewOn ? null : (
     <label className="pe-testtool">
       <input type="checkbox" checked={ed.failNext} onChange={(e) => ed.setFailNext(e.target.checked)} />
       <span className="lk-col"><span className="lk-small lk-strong">{tx('أداة مراجعة: حاكِ انقطاع الشبكة عند الحفظ التالي', 'Review tool: simulate a network drop on the next save')}</span><span className="lk-micro lk-3">{tx('ليست جزءًا من المنتج.', 'Not part of the product.')}</span></span>

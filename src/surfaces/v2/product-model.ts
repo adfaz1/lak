@@ -197,7 +197,7 @@ export function discountPct(price: string, compareAt: string): number | null {
 /* ---------- Media ---------- */
 
 /** Fixture media ids mapped to the licensed product photos. */
-const FIXTURE_SRC: Record<string, string> = { m1: '/products/p1.jpg', m2: '/products/p1-2.jpg', m3: '/products/p2.jpg', m4: '/products/p3.jpg' };
+const FIXTURE_SRC: Record<string, string> = { m1: '/products/p1.jpg', m3: '/products/p2.jpg', m4: '/products/p3.jpg' };
 const PHOTO = 'ph:';
 export function mediaSrc(m: Media): string | undefined {
   if (m.id.startsWith(PHOTO)) return m.id.slice(PHOTO.length).split('#')[0];
@@ -206,9 +206,9 @@ export function mediaSrc(m: Media): string | undefined {
 export interface LibraryPhoto { src: string; label: L }
 /** Photos offered by "Add photos": this product's own set first, then the store's other product photos. No file is uploaded. */
 export function photoLibrary(productId: string | undefined, inUse: Set<string>): LibraryPhoto[] {
-  const own = productId === 'p1' ? ['p1', 'p1-2', 'p1-3'] : productId === 'p3' ? ['p3', 'p3-2'] : productId ? [productId] : [];
+  const own = productId ? [productId] : [];
   const rest = Array.from({ length: 12 }, (_, i) => `p${i + 1}`).filter((x) => !own.includes(x));
-  return [...own, ...rest].filter((n) => n !== 'p7').map((n) => ({ src: `/products/${n}.jpg`, label: { ar: `صورة ${n}`, en: `Photo ${n}` } })).filter((p) => !inUse.has(p.src));
+  return [...own, ...rest].filter((n) => n !== 'p7' && n !== 'p10').map((n) => ({ src: `/products/${n}.jpg`, label: { ar: `صورة ${n}`, en: `Photo ${n}` } })).filter((p) => !inUse.has(p.src));
 }
 export const photoMedia = (src: string, n: number): Media => ({ id: `${PHOTO}${src}#${Date.now().toString(36)}${n}`, label: { ar: 'صورة', en: 'Photo' }, alt: '' });
 

@@ -10,7 +10,7 @@ import {
 } from '../merchant/domain';
 import { refundTx } from '../merchant/finance';
 import { Avatar, Banner, Dialog, EmptyState, Icon, Money, Pill, Ref, Sim, Skeleton, Thumb, Toast, useTx, type IconName, type Tone, SrHeading } from './ui';
-import { age, isLate, itemImage, reviewStore, vhref } from './data';
+import { age, isLate, itemImage, reviewStore, vhref, useView } from './data';
 import { FUL_ICON, FUL_TONE, Menu, MenuItem, PAY_ICON, PAY_TONE, SHIP_ICON, SHIP_TONE, Layer, TestControl, saveOrder, useLabels, useMedia } from './orders-shared';
 import { FulfilDialog } from './order-fulfil';
 import { RefundDialog } from './order-refund';
@@ -54,7 +54,7 @@ export function OrderDetail({ refId, mode, backHref, backLabel, onClose }: { ref
   const tx = useTx();
   const { lang } = useLang();
   const L = useLabels();
-  const { dir, state } = reviewStore.use();
+  const { dir, state } = useView();
   const all = ordersStore.use();
   const phone = useMedia('(max-width: 720px)');
   const nextOf = useNext();

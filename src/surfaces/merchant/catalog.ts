@@ -46,22 +46,22 @@ const matrix = (base: string, price: number, colors: string[], sizes: string[]):
 
 export function productFixtures(): Product[] {
   return [
-    prod('p1', 'عباية كتّان صيفية', 'Summer linen abaya', 'ABY-LIN', 29000, {
+    prod('p1', 'عباية سوداء مطرّزة', 'Embroidered black abaya', 'ABY-LIN', 29000, {
       compareAt: 34000, cost: 15500, colors: ['Black', 'Navy'], sizes: ['S', 'M', 'L'], variants: matrix('ABY-LIN', 29000, ['Black', 'Navy'], ['S', 'M', 'L']),
-      desc: { ar: 'عباية خفيفة من الكتان بقصة واسعة.', en: 'A light linen abaya with a relaxed cut.' },
-      media: [m('m1', 'صورة أمامية', 'Front photo', 'Black linen abaya, front view'), m('m2', 'صورة جانبية', 'Side photo', '')], weight: 650,
+      desc: { ar: 'عباية سوداء بتطريز يدوي على الصدر والأكمام.', en: 'Black abaya with hand embroidery on the front and sleeves.' },
+      media: [m('m1', 'صورة أمامية', 'Front photo', 'Black embroidered abaya on a mannequin, front view')], weight: 650,
     }),
-    prod('p2', 'شال حرير', 'Silk shawl', 'SHL-SLK-01', 9800, { cost: 4200, media: [m('m3', 'صورة الشال', 'Shawl photo', 'Silk shawl folded')], weight: 150 }),
-    prod('p3', 'عطر عود 100 مل', 'Oud perfume 100 ml', 'OUD-100', 12900, { cost: 6100, category: cat('عطور', 'Fragrance'), weight: 400, media: [m('m4', 'زجاجة العطر', 'Bottle', 'Oud perfume bottle')] }),
-    prod('p4', 'حقيبة يد جلد', 'Leather handbag', 'BAG-LTH-01', 42000, { compareAt: 48000, category: cat('حقائب', 'Bags'), weight: 900 }),
+    prod('p2', 'شال حرير موغا', 'Muga silk stole', 'SHL-SLK-01', 9800, { cost: 4200, media: [m('m3', 'صورة الشال', 'Shawl photo', 'Gold Muga silk stole, folded')], weight: 150 }),
+    prod('p3', 'زجاجة عطر كوبالت', 'Cobalt perfume bottle', 'OUD-100', 12900, { cost: 6100, category: cat('عطور', 'Fragrance'), weight: 400, media: [m('m4', 'زجاجة العطر', 'Bottle', 'Cobalt blue glass perfume bottle')] }),
+    prod('p4', 'حقيبة جلد بنية', 'Tan leather handbag', 'BAG-LTH-01', 42000, { compareAt: 48000, category: cat('حقائب', 'Bags'), weight: 900 }),
     prod('p5', 'محفظة جلد', 'Leather wallet', 'WLT-LTH-01', 16100, { cost: 7000, category: cat('حقائب', 'Bags'), weight: 200 }),
-    prod('p6', 'طقم قهوة عربية', 'Arabic coffee set', 'COF-SET-01', 24000, { cost: 13000, category: cat('منزل', 'Home'), weight: 1800 }),
+    prod('p6', 'دلّة وفناجين قهوة', 'Dallah and coffee cups', 'COF-SET-01', 24000, { cost: 13000, category: cat('منزل', 'Home'), weight: 1800 }),
     prod('p7', 'ثوب قطني', 'Cotton thobe', 'THB-COT', 18500, { colors: ['White', 'Beige'], sizes: ['54', '56', '58'], variants: matrix('THB-COT', 18500, ['White', 'Beige'], ['54', '56', '58']), weight: 500 }),
     prod('p8', 'سجادة صلاة', 'Prayer mat', 'MAT-PRY-01', 8900, { category: cat('منزل', 'Home'), weight: 700 }),
     prod('p9', 'مبخرة نحاسية', 'Brass incense burner', 'INC-BRS-01', 13500, { category: cat('منزل', 'Home'), weight: 1100, channels: { online: true, market: false, app: true } }),
     prod('p10', 'بطاقة هدية إلكترونية 100', 'E-gift card 100', 'GFT-100', 10000, { type: 'digital', weight: null, category: cat('هدايا', 'Gifts') }),
-    prod('p11', 'علبة تمور فاخرة', 'Premium dates box', 'DAT-BOX-01', 7500, { status: 'draft', category: cat('أغذية', 'Food'), weight: 1000, channels: { online: false, market: false, app: false } }),
-    prod('p12', 'وشاح صوف شتوي', 'Winter wool scarf', 'SCF-WOL-01', 11000, { status: 'archived', weight: 250 }),
+    prod('p11', 'تمر مجدول فاخر', 'Premium Medjool dates', 'DAT-BOX-01', 7500, { status: 'draft', category: cat('أغذية', 'Food'), weight: 1000, channels: { online: false, market: false, app: false } }),
+    prod('p12', 'وشاح صوف زيتي', 'Olive wool scarf', 'SCF-WOL-01', 11000, { status: 'archived', weight: 250 }),
   ];
 }
 

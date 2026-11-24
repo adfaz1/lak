@@ -2,7 +2,7 @@
 // direction B, and narrow screens, show the detail as its own page. The list's filters travel in the URL both ways.
 import { useEffect } from 'react';
 import { navigate, type Route } from '../../core/router';
-import { reviewStore, vhref } from './data';
+import { vhref, useView } from './data';
 import { OrdersList, focusAfterClose } from './orders-list';
 import { OrderDetail } from './order-detail';
 import { queryParams, readQuery, useLabels, useMedia, useShellInsets } from './orders-shared';
@@ -12,7 +12,7 @@ import './orders.css';
 export default function Orders({ route }: { route: Route }) {
   const tx = useTx();
   const L = useLabels();
-  const { dir } = reviewStore.use();
+  const { dir } = useView();
   const wide = useMedia('(min-width: 1280px)');
   useShellInsets();
   const ref = route.path[1];

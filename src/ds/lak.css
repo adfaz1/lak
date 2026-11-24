@@ -1,0 +1,101 @@
+/* ================================================================
+   LAK design system — tokens and base. One source of truth.
+   Tailwind v4 theme + utilities only; no global preflight, so the older
+   prototype surfaces are untouched. The base reset is scoped to .lak.
+   Brand hues come from the LAK logo: cyan → blue → violet.
+   ================================================================ */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "@fontsource/ibm-plex-sans-arabic/400.css";
+@import "@fontsource/ibm-plex-sans-arabic/500.css";
+@import "@fontsource/ibm-plex-sans-arabic/600.css";
+@import "@fontsource/ibm-plex-sans-arabic/700.css";
+
+@source not "../";
+@source "./";
+@source "../surfaces/dashboard";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@font-face { font-family: 'SaudiRiyal'; src: url('/fonts/saudi_riyal.ttf') format('truetype'); font-display: block; }
+
+/* Surface colours read the live variables, so .dark switches them anywhere in the tree. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-subtle: var(--subtle);
+}
+
+@theme {
+  --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+
+  /* LAK brand scale (indigo-violet, from the logo's lower stroke) */
+  --color-brand-50: #f1f1fe;
+  --color-brand-100: #e4e4fd;
+  --color-brand-200: #cccbfb;
+  --color-brand-300: #aaa6f7;
+  --color-brand-400: #8a7ff1;
+  --color-brand-500: #6f5ce8;
+  --color-brand-600: #5c45d8;
+  --color-brand-700: #4c37b8;
+  --color-brand-800: #3f2f94;
+  --color-brand-900: #2c2366;
+  /* LAK sky (the logo's upper stroke) */
+  --color-sky-400: #22c3ee;
+  --color-sky-500: #0ab2ec;
+  --color-sky-600: #0794c7;
+
+
+  --radius-xl: 14px;
+  --radius-2xl: 18px;
+  --shadow-card: 0 1px 2px rgb(16 18 40 / 0.04);
+  --shadow-pop: 0 12px 32px -12px rgb(16 18 40 / 0.28);
+}
+
+:root {
+  --bg: #f6f7fb;
+  --surface: #ffffff;
+  --surface-2: #f1f2f8;
+  --border: #e5e7f0;
+  --fg: #12142b;
+  --muted: #5c6080;   /* 6.4:1 on white */
+  --subtle: #8a8ea8;  /* decorative text only, never body copy */
+}
+.dark {
+  --bg: #0b0c1a;
+  --surface: #12142a;
+  --surface-2: #191c36;
+  --border: #252949;
+  --fg: #eceefb;
+  --muted: #a0a5c6;
+  --subtle: #6e7396;
+}
+
+/* Scoped base: the new LAK app root. In the base layer so utilities always win. */
+@layer base {
+.lak { font-family: var(--font-sans); background: var(--bg); color: var(--fg); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; min-height: 100vh; font-feature-settings: 'tnum' 1; }
+.lak *, .lak *::before, .lak *::after { box-sizing: border-box; border: 0 solid; }
+.lak :where(h1, h2, h3, h4, p, figure, blockquote, dl, dd, ul, ol) { margin: 0; }
+.lak :where(ul, ol) { list-style: none; padding: 0; }
+.lak :where(button, input, select, textarea) { font: inherit; color: inherit; background: transparent; }
+.lak :where(button) { cursor: pointer; }
+.lak :where(a) { color: inherit; text-decoration: inherit; }
+.lak :where(img, svg) { display: block; max-width: 100%; }
+.lak :where(table) { border-collapse: collapse; }
+.lak :focus-visible { outline: 2px solid var(--color-brand-500); outline-offset: 2px; }
+.lak ::selection { background: color-mix(in oklab, var(--color-brand-500) 25%, transparent); }
+
+}
+
+@utility text-gradient {
+  background-image: linear-gradient(120deg, var(--color-sky-500), var(--color-brand-500) 60%, var(--color-brand-700));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+@utility bg-brand-gradient { background-image: linear-gradient(135deg, var(--color-sky-500), var(--color-brand-500) 55%, var(--color-brand-700)); }
+@utility glass { background: color-mix(in oklab, var(--surface) 75%, transparent); backdrop-filter: blur(16px) saturate(140%); }
+@utility scrollbar-thin { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+@utility riyal { font-family: 'SaudiRiyal'; font-weight: 400; }

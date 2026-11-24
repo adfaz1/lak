@@ -36,7 +36,9 @@ describe('product editor validation (QA07)', () => {
     expect(e.compareAt).toBe('compareAt');
     expect(e.slug).toBe('slug');
     expect(validateDraft(toDraft(products[1]), takenSkus(products)).sku).toBe('skuTaken');
-    expect(validateDraft(toDraft(products[0]), takenSkus(products, 'p1'))['media.1']).toBe('alt');
+    const p1 = toDraft(products[0]);
+    const noAlt = { ...p1, media: [...p1.media, { id: 'mx', label: { ar: 'صورة', en: 'Photo' }, alt: '' }] };
+    expect(validateDraft(noAlt, takenSkus(products, 'p1'))[`media.${noAlt.media.length - 1}`]).toBe('alt');
   });
   it('builds a colour × size matrix, keeps typed values and blocks duplicate option values', () => {
     const d = { ...emptyDraft(), sku: 'TEE', price: '50', colors: ['Red', 'Blue'], sizes: ['S', 'M'] };

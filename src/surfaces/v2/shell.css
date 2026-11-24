@@ -176,3 +176,7 @@
 .lk-b-bar .sh-search { color: var(--lk-text-3); }
 .home-dot-s { min-width: 10px; }
 .sh-foot { margin-top: 24px; padding-top: 16px; border-top: 1px solid #eceef4; } .sh-foot a { color: var(--lk-text-2); }
+.sh-tools { display: inline-flex; align-items: center; gap: 6px; }
+.sh-demo { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 99px; background: #fff5e0; color: #7a4a00; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.nav-flat-later { padding: 1px 6px; border-radius: 5px; background: rgba(20, 25, 56, 0.05); font-size: 11px; font-weight: 600; }
+@media (max-width: 600px) { .sh-tools .lk-btn { display: none; } }

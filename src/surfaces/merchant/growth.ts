@@ -134,7 +134,7 @@ export const SAMPLE_EVENTS: SampleEvent[] = [
   { id: 'E2', trigger: 'cartAbandoned', label: { ar: 'سلة بقيمة 90 ر.س', en: 'SAR 90 cart' }, cartValue: 9000, consent: true, channel: 'online' },
   { id: 'E3', trigger: 'cartAbandoned', label: { ar: 'سلة بقيمة 610 ر.س، بلا موافقة تواصل', en: 'SAR 610 cart, no marketing consent' }, cartValue: 61000, consent: false, channel: 'app' },
   { id: 'E4', trigger: 'cartAbandoned', label: { ar: 'سلة بقيمة 300 ر.س، وصلتها رسالة من حملة يدوية اليوم', en: 'SAR 300 cart, already messaged by a manual campaign today' }, cartValue: 30000, consent: true, alreadyMessaged: true, channel: 'online' },
-  { id: 'E5', trigger: 'lowStock', label: { ar: 'عطر عود: متاح 3 في الرياض', en: 'Oud perfume: 3 available in Riyadh' }, stock: 3 },
+  { id: 'E5', trigger: 'lowStock', label: { ar: 'زجاجة عطر كوبالت: متاح 3 في الرياض', en: 'Oud perfume: 3 available in Riyadh' }, stock: 3 },
   { id: 'E6', trigger: 'lowStock', label: { ar: 'شال حرير: متاح 8 في جدة', en: 'Silk shawl: 8 available in Jeddah' }, stock: 8 },
   { id: 'E7', trigger: 'orderLate', label: { ar: 'طلب مدفوع لم يُجهّز منذ 30 ساعة', en: 'Paid order unfulfilled for 30 hours' }, hoursLate: 30, channel: 'online' },
   { id: 'E8', trigger: 'orderLate', label: { ar: 'طلب مدفوع لم يُجهّز منذ 6 ساعات', en: 'Paid order unfulfilled for 6 hours' }, hoursLate: 6, channel: 'market' },
@@ -175,7 +175,7 @@ export function runFixtures(): Run[] {
     R('RUN-899', 'AU-11', 'أمس 22:05', 'Yesterday 22:05', 'سلة CRT-3120', 'Cart CRT-3120', 'skipped', 'لا موافقة على التواصل بالبريد', 'No email marketing consent'),
     R('RUN-898', 'AU-11', 'أمس 19:30', 'Yesterday 19:30', 'سلة CRT-3127', 'Cart CRT-3127', 'failed', 'رفض المزود العنوان: بريد غير صالح. لن يُعاد تلقائيًا', 'Provider rejected the address: invalid email. Not retried automatically'),
     R('RUN-897', 'AU-11', 'أمس 16:00', 'Yesterday 16:00', 'سلة CRT-3102', 'Cart CRT-3102', 'skipped', 'وصلته رسالة للسلة نفسها من مسار آخر (منع التكرار)', 'Already messaged for this cart by another flow (deduplicated)'),
-    R('RUN-896', 'AU-12', 'قبل 3 أيام', '3 days ago', 'عطر عود · الرياض', 'Oud perfume · Riyadh', 'succeeded', 'أُنشئت مهمة إعادة طلب للمخزون', 'Restock task created'),
+    R('RUN-896', 'AU-12', 'قبل 3 أيام', '3 days ago', 'زجاجة عطر كوبالت · الرياض', 'Oud perfume · Riyadh', 'succeeded', 'أُنشئت مهمة إعادة طلب للمخزون', 'Restock task created'),
   ];
 }
 

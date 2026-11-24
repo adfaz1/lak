@@ -5,6 +5,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { link, type Route } from '../../core/router';
 import { useLang } from '../../core/lang';
+import { useReviewMode } from '../../core/review';
 import { ordersStore, settingsStore } from '../merchant/stores';
 import { VIEWS } from '../merchant/domain';
 import { Icon, useTx } from './ui';
@@ -21,9 +22,10 @@ import './shell.css';
 type Section = 'home' | 'orders' | 'products' | 'compare';
 
 export default function V2({ route }: { route: Route }) {
-  const { lang } = useLang();
+  const { lang, setLang } = useLang();
   const tx = useTx();
   const review = reviewStore.use();
+  const reviewMode = useReviewMode();
   const orders = ordersStore.use();
   const settings = settingsStore.use();
   const [menu, setMenu] = useState(false);
@@ -61,12 +63,18 @@ export default function V2({ route }: { route: Route }) {
       <Icon name="search" size="sm" /><span className="lk-grow">{tx('ابحث عن طلب أو عميل', 'Search orders or customers')}</span>
     </a>
   );
-  const user = <span className="sh-user" title={tx('سارة · المالكة', 'Sara · Owner')}><span className="lk-avatar">س</span></span>;
+  const user = (
+    <span className="sh-tools">
+      <span className="sh-demo" title={tx('كل البيانات أمثلة اختبار، والعمليات الخارجية محاكاة.', 'All data are test examples; external operations are simulated.')}>{tx('نسخة تجريبية', 'Demo')}</span>
+      <button type="button" className="lk-btn sm ghost" lang={lang === 'ar' ? 'en' : 'ar'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}>{lang === 'ar' ? 'English' : 'العربية'}</button>
+      <span className="sh-user" title={tx('سارة · المالكة', 'Sara · Owner')}><span className="lk-avatar">س</span></span>
+    </span>
+  );
 
   return (
-    <div className="lk lk-app" data-dir={review.dir}>
+    <div className="lk lk-app" data-dir={reviewMode ? review.dir : 'a'}>
       <div className="sh-glow" aria-hidden="true" />
-      {review.dir === 'a' ? (
+      {(reviewMode ? review.dir : 'a') === 'a' ? (
         <div className="lk-a">
           <nav className={`lk-a-nav${menu ? ' open' : ''}`} aria-label={tx('تنقل لوحة التاجر', 'Merchant navigation')}>
             <div className="lk-row lk-between">
@@ -119,7 +127,7 @@ export default function V2({ route }: { route: Route }) {
         </>
       )}
       {all && <AllMenu onClose={() => setAll(false)} />}
-      <ReviewBar />
+      {reviewMode && <ReviewBar />}
       <span hidden>{lang}</span>
     </div>
   );

@@ -65,12 +65,12 @@ export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {
 
 const item = (ar: string, en: string, sku: string, qty: number, unit: number, stock?: Item['stock']): Item => ({ name: { ar, en }, qty, unit, sku, stock });
 export const P = {
-  abaya: (q: number, s?: Item['stock']) => item('عباية كتّان صيفية', 'Summer linen abaya', 'ABY-LIN-BLA-M', q, 29000, s),
-  shawl: (q: number, s?: Item['stock']) => item('شال حرير', 'Silk shawl', 'SHL-SLK-01', q, 9800, s),
-  oud: (q: number, s?: Item['stock']) => item('عطر عود 100 مل', 'Oud perfume 100 ml', 'OUD-100', q, 12900, s),
-  bag: (q: number, s?: Item['stock']) => item('حقيبة يد جلد', 'Leather handbag', 'BAG-LTH-01', q, 42000, s),
+  abaya: (q: number, s?: Item['stock']) => item('عباية سوداء مطرّزة', 'Embroidered black abaya', 'ABY-LIN-BLA-M', q, 29000, s),
+  shawl: (q: number, s?: Item['stock']) => item('شال حرير موغا', 'Muga silk stole', 'SHL-SLK-01', q, 9800, s),
+  oud: (q: number, s?: Item['stock']) => item('زجاجة عطر كوبالت', 'Cobalt perfume bottle', 'OUD-100', q, 12900, s),
+  bag: (q: number, s?: Item['stock']) => item('حقيبة جلد بنية', 'Tan leather handbag', 'BAG-LTH-01', q, 42000, s),
   wallet: (q: number, s?: Item['stock']) => item('محفظة جلد', 'Leather wallet', 'WLT-LTH-01', q, 16100, s),
-  coffee: (q: number, s?: Item['stock']) => item('طقم قهوة عربية', 'Arabic coffee set', 'COF-SET-01', q, 24000, s),
+  coffee: (q: number, s?: Item['stock']) => item('دلّة وفناجين قهوة', 'Dallah and coffee cups', 'COF-SET-01', q, 24000, s),
 };
 
 function order(

@@ -8,7 +8,7 @@ import { VIEWS, total, type Order } from '../merchant/domain';
 import { lowStock, available } from '../merchant/inventory';
 import { analyticsSeries, summarize, change, periods } from '../merchant/growth';
 import { Icon, Money, Ref, Skeleton, EmptyState, ThumbStack, Thumb, useTx, type IconName, type Tone } from './ui';
-import { reviewStore, vhref, isLate, itemImage, productImage, productIdForSku, age, stageOf } from './data';
+import { reviewStore, vhref, isLate, itemImage, productImage, productIdForSku, age, stageOf, useView } from './data';
 import { Page } from './index';
 import { QuickAccess } from './nav';
 import './home.css';
@@ -19,7 +19,7 @@ interface Task { id: string; tone: Tone; icon: IconName; title: string; why: str
 export default function Home() {
   const { lang } = useLang();
   const tx = useTx();
-  const { dir, state } = reviewStore.use();
+  const { dir, state } = useView();
   const orders = ordersStore.use();
   const levels = levelsStore.use();
   const products = productsStore.use();

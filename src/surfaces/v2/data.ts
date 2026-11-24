@@ -2,6 +2,7 @@
 // The redesign reuses the merchant workspace's domain and stores: same data, same rules, new experience.
 import { createStore } from '../../core/store';
 import { link } from '../../core/router';
+import { useReviewMode } from '../../core/review';
 import type { Item, Order } from '../merchant/domain';
 import { refundable, total, units } from '../merchant/domain';
 
@@ -12,6 +13,13 @@ export type DemoState = 'live' | 'loading' | 'empty' | 'error';
 /** The review toolbar starts collapsed on phones so it never covers the screen being reviewed. */
 const wide = () => { try { return window.innerWidth >= 700; } catch { return true; } };
 export const reviewStore = createStore.key('v2.review')<{ dir: Direction; state: DemoState; open: boolean }>(() => ({ dir: 'a', state: 'live', open: wide() }));
+
+/** What a screen should render. Outside review mode the product always shows live data in the default direction. */
+export function useView(): { dir: Direction; state: DemoState; review: boolean } {
+  const r = reviewStore.use();
+  const review = useReviewMode();
+  return review ? { dir: r.dir, state: r.state, review } : { dir: 'a', state: 'live', review };
+}
 
 export const vhref = (path: string, q?: Record<string, string | undefined>) => link(`/v2${path ? `/${path.replace(/^\//, '')}` : ''}`, q);
 
@@ -24,8 +32,9 @@ const SKU_TO_PRODUCT: [prefix: string, id: string][] = [
 export function productIdForSku(sku: string): string | undefined {
   return SKU_TO_PRODUCT.find(([p]) => sku.startsWith(p))?.[1];
 }
-/** Products with a licensed photo (see public/products/credits.json). p7 has none yet: it shows a neutral placeholder. */
-const HAS_PHOTO = new Set(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p8', 'p9', 'p10', 'p11', 'p12']);
+/** Products with a licensed photo that shows exactly that product (see public/products/credits.json).
+ *  p7 (thobe) has no suitable licensed photo; p10 is a digital gift card. Both show a neutral monogram tile. */
+const HAS_PHOTO = new Set(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p8', 'p9', 'p11', 'p12']);
 export const productImage = (id: string | undefined, thumb = true): string | undefined =>
   id && HAS_PHOTO.has(id) ? `/products/${thumb ? 'thumb/' : ''}${id}.jpg` : undefined;
 export const itemImage = (i: Item) => productImage(productIdForSku(i.sku));
