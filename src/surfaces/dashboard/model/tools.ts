@@ -2,7 +2,7 @@
 // directory, favourites and recents. A tool is a place the merchant can open (a section, a tab, a
 // saved view or a flow), not a button inside a page. Sections add their tools here as they are built.
 import type { L } from '../../merchant/domain';
-import type { Role } from '../../merchant/perms';
+import { canSee, type Page, type Role } from '../../merchant/perms';
 
 export type ToolGroup = 'operate' | 'catalog' | 'customers' | 'money' | 'store' | 'team' | 'help';
 
@@ -83,4 +83,22 @@ export const TOOLS: Tool[] = [
 ];
 
 export const toolById = (id: string): Tool | undefined => TOOLS.find((x) => x.id === id);
-export const canUseTool = (tool: Tool, role: Role): boolean => !tool.roles || tool.roles.includes(role);
+/** The permission page a dashboard route belongs to. Channels follow the online-store permission. */
+export function pageOf(path: string): Page | null {
+  const head = path.split('/')[0];
+  if (head === 'channel' || head === 'appmaker') return 'storefront';
+  if (head === 'tools') return null;
+  return head as Page;
+}
+/** A tool is usable when the role can open its section and, if narrowed further, is listed. */
+export const canUseTool = (tool: Tool, role: Role): boolean => {
+  const page = pageOf(tool.path);
+  return (!page || canSee(role, page)) && (!tool.roles || tool.roles.includes(role));
+};
+
+/** The most specific tool for a route: same path, and every query key of the tool present with the same value. */
+export function matchTool(path: string[], query: URLSearchParams, tools: Tool[] = TOOLS): Tool | undefined {
+  const p = path.join('/');
+  const fits = tools.filter((x) => x.path === p && Object.entries(x.query ?? {}).every(([k, v]) => query.get(k) === v));
+  return fits.sort((a, b) => Object.keys(b.query ?? {}).length - Object.keys(a.query ?? {}).length)[0];
+}

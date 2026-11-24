@@ -56,3 +56,19 @@ describe('global search', () => {
     for (const x of TOOLS) expect(x.label.ar && x.label.en && x.desc.ar && x.desc.en).toBeTruthy();
   });
 });
+
+describe('tool registry', () => {
+  it('matches a route to its most specific tool', async () => {
+    const { matchTool } = await import('./tools');
+    expect(matchTool(['inventory'], new URLSearchParams('tab=low'))?.id).toBe('inventory-low');
+    expect(matchTool(['inventory'], new URLSearchParams(''))?.id).toBe('inventory');
+    expect(matchTool(['orders', '10479'], new URLSearchParams(''))).toBeUndefined();
+  });
+  it('follows role permissions: fulfilment sees no finance or customer tools', async () => {
+    const { TOOLS, canUseTool } = await import('./tools');
+    const ids = TOOLS.filter((x) => canUseTool(x, 'fulfilment')).map((x) => x.id);
+    expect(ids).toContain('orders-needs');
+    expect(ids).not.toContain('payouts');
+    expect(ids).not.toContain('customers');
+  });
+});

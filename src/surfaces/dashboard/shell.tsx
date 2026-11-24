@@ -1,8 +1,8 @@
 // Merchant dashboard shell: navigation, top bar, theme and language. Pages render inside <main>.
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import {
-  LayoutDashboard, ShoppingBag, Package, Warehouse, Users, BarChart3, Wallet, Megaphone, Workflow, Store, Globe2, Smartphone,
-  Blocks, Settings, LifeBuoy, Search, Bell, Menu, X, Moon, Sun, Languages, ChevronsLeft, ChevronsRight, ArrowUpLeft, ExternalLink,
+  LayoutDashboard, ShoppingBag, Package, Warehouse, Users, BarChart3, Wallet, Megaphone,
+  Settings, LifeBuoy, LayoutGrid, Star, Search, Bell, Menu, X, Moon, Sun, Languages, ChevronsLeft, ChevronsRight, ArrowUpLeft, ExternalLink,
 } from 'lucide-react';
 import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
@@ -10,6 +10,9 @@ import { cn, IconButton, useTx } from '../../ds/ui';
 import { BUILT } from './pages';
 import { SearchDialog } from './search';
 import { testStore } from '../merchant/stores';
+import { canSee, type Page, type Role } from '../merchant/perms';
+import { canUseTool, toolById, type Tool } from './model/tools';
+import { useFavourites } from './prefs';
 
 export const dhref = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard${path ? `/${path}` : ''}`, q);
 /** A section that is not rebuilt yet opens the previous workspace, which shows a bar to come back. */
@@ -20,28 +23,24 @@ const to = (key: string, legacyPage = key) => (BUILT.has(key) ? dhref(key) : leg
 type Item = { key: string; label: L; icon: ComponentType<{ className?: string }>; href: string; built: boolean; count?: number };
 type Group = { label: L; items: Item[] };
 
-export function navGroups(counts: { orders: number }): Group[] {
+/** Daily sections stay in the sidebar; every other tool lives in the directory (#/dashboard/tools), with favourites pinned here. */
+export function navGroups(counts: { orders: number }, role: Role, fav: Tool[]): Group[] {
+  const daily: Item[] = [
+    { key: 'home', label: { ar: 'الرئيسية', en: 'Home' }, icon: LayoutDashboard, href: dhref(), built: true },
+    { key: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, icon: ShoppingBag, href: to('orders'), built: BUILT.has('orders'), count: counts.orders },
+    { key: 'products', label: { ar: 'المنتجات', en: 'Products' }, icon: Package, href: to('products'), built: BUILT.has('products') },
+    { key: 'inventory', label: { ar: 'المخزون', en: 'Inventory' }, icon: Warehouse, href: to('inventory'), built: BUILT.has('inventory') },
+    { key: 'customers', label: { ar: 'العملاء', en: 'Customers' }, icon: Users, href: to('customers'), built: BUILT.has('customers') },
+    { key: 'marketing', label: { ar: 'التسويق والعروض', en: 'Marketing' }, icon: Megaphone, href: to('marketing'), built: BUILT.has('marketing') },
+    { key: 'finance', label: { ar: 'المالية', en: 'Finance' }, icon: Wallet, href: to('finance'), built: BUILT.has('finance') },
+    { key: 'analytics', label: { ar: 'التقارير', en: 'Reports' }, icon: BarChart3, href: to('analytics'), built: BUILT.has('analytics') },
+  ].filter((i) => canSee(role, i.key as Page));
+  const pinned: Item[] = fav.map((t) => ({ key: `fav:${t.id}`, label: t.label, icon: Star, href: dhref(t.path, t.query), built: true }));
   return [
-    { label: { ar: 'التشغيل', en: 'Operate' }, items: [
-      { key: 'home', label: { ar: 'الرئيسية', en: 'Home' }, icon: LayoutDashboard, href: dhref(), built: true },
-      { key: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, icon: ShoppingBag, href: to('orders'), built: BUILT.has('orders'), count: counts.orders },
-      { key: 'products', label: { ar: 'المنتجات', en: 'Products' }, icon: Package, href: to('products'), built: BUILT.has('products') },
-      { key: 'inventory', label: { ar: 'المخزون', en: 'Inventory' }, icon: Warehouse, href: to('inventory'), built: BUILT.has('inventory') },
-      { key: 'customers', label: { ar: 'العملاء', en: 'Customers' }, icon: Users, href: to('customers'), built: BUILT.has('customers') },
-    ] },
-    { label: { ar: 'الأداء', en: 'Performance' }, items: [
-      { key: 'analytics', label: { ar: 'التحليلات', en: 'Analytics' }, icon: BarChart3, href: to('analytics'), built: BUILT.has('analytics') },
-      { key: 'finance', label: { ar: 'المالية', en: 'Finance' }, icon: Wallet, href: to('finance'), built: BUILT.has('finance') },
-    ] },
-    { label: { ar: 'النمو', en: 'Growth' }, items: [
-      { key: 'marketing', label: { ar: 'التسويق والعروض', en: 'Marketing' }, icon: Megaphone, href: to('marketing'), built: BUILT.has('marketing') },
-      { key: 'automations', label: { ar: 'الأتمتة', en: 'Automations' }, icon: Workflow, href: to('automations'), built: BUILT.has('automations') },
-    ] },
-    { label: { ar: 'القنوات', en: 'Channels' }, items: [
-      { key: 'storefront', label: { ar: 'المتجر الإلكتروني', en: 'Online store' }, icon: Store, href: to('storefront'), built: BUILT.has('storefront') },
-      { key: 'channel', label: { ar: 'سوق لك', en: 'LAK marketplace' }, icon: Globe2, href: BUILT.has('channel') ? dhref('channel') : link('/market/seller'), built: BUILT.has('channel') },
-      { key: 'appmaker', label: { ar: 'تطبيق متجرك', en: 'Your store app' }, icon: Smartphone, href: BUILT.has('appmaker') ? dhref('appmaker') : link('/appmaker'), built: BUILT.has('appmaker') },
-      { key: 'apps', label: { ar: 'التطبيقات', en: 'Apps' }, icon: Blocks, href: to('apps'), built: BUILT.has('apps') },
+    { label: { ar: 'اليومي', en: 'Daily' }, items: daily },
+    ...(pinned.length ? [{ label: { ar: 'المفضلة', en: 'Favourites' }, items: pinned }] : []),
+    { label: { ar: 'الأدوات', en: 'Tools' }, items: [
+      { key: 'tools', label: { ar: 'كل الأدوات', en: 'All tools' }, icon: LayoutGrid, href: dhref('tools'), built: true },
     ] },
   ];
 }
@@ -73,7 +72,8 @@ export function Shell({ active, counts, store, children }: { active: string; cou
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
-  const groups = navGroups(counts);
+  const favIds = useFavourites();
+  const groups = navGroups(counts, role, favIds.map(toolById).filter((t): t is Tool => !!t && canUseTool(t, role)));
   const Collapse = lang === 'ar' ? (collapsed ? ChevronsLeft : ChevronsRight) : (collapsed ? ChevronsRight : ChevronsLeft);
 
   const link_ = (i: Item, compact: boolean) => {
