@@ -81,6 +81,8 @@ export interface Product {
   /** False when the item cannot be returned (opened fragrance in the rule fixtures, digital goods in the store). */
   returnable?: boolean;
   digital?: boolean;
+  /** Type, brand, details, size chart, pre-order and purchase limits from the merchant (catalog-extras StoreX). */
+  x?: import('../merchant/catalog-extras').StoreX;
 }
 
 export function productById(products: Product[], id: string): Product | undefined {
@@ -219,13 +221,13 @@ export function validateCart(cart: Cart, products: Product[]): LineIssue[] {
   return out;
 }
 
-export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number; sku?: string; weight?: number }
+export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number; sku?: string; weight?: number; /** Needs delivery (false for downloads, codes, services, bookings). */ ships?: boolean; perishable?: boolean }
 
 export function pricedLines(cart: Cart, products: Product[]): PricedLine[] {
   return cart.lines.flatMap((l) => {
     const f = variantById(products, l.vid);
     if (!f) return [];
-    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty, sku: f.variant.sku, weight: f.product.weight }];
+    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty, sku: f.variant.sku, weight: f.product.weight, ...(f.product.x ? { ships: f.product.x.ships, perishable: f.product.x.perishable } : {}) }];
   });
 }
 

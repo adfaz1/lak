@@ -15,6 +15,7 @@ import { setDashState, useDashState } from '../review';
 import { CHANNELS, FULS, LIST_VIEWS, NO_FILTERS, PAYS, PAY_METHODS, SHIPS, SORTS, activeFilters, exceptions, listOrders, orderPerms, readQuery, selectionRefs, toParams, undoConfirm, type ListQuery, type OpsBulk } from './model';
 import { FulBadge, PayBadge, ShipBadge, ohref, useActor, useAge, useLabels } from './ui';
 import { BulkModal, type BulkOutcome } from './bulk';
+import { ExportDialog } from '../exports/ui';
 import { MoreBulkModal, type MoreOutcome } from './bulk-more';
 import { Menu, MenuButtonLabel, MenuItem, MenuNote } from './ui';
 import { SavedViewsBar } from './saved-views-ui';
@@ -300,7 +301,11 @@ export default function OrdersList({ route }: { route: Route }) {
           <Field label={tx('تاريخ الطلب (من – إلى)', 'Order date (from – to)')}>{() => dateRange}</Field>
         </Drawer>
       )}
-      {bulk && <BulkModal action={bulk} orders={selectedOrders} allMatching={allMatching} onClose={onBulkDone} />}
+      {bulk === 'export' ? (
+        // Export goes through the shared export templates: choose columns/template, preview the first rows, then download (logged).
+        <ExportDialog entity="orders" records={{ orders: selectedOrders }} onClose={(n) => onBulkDone(n === null ? null : { action: 'export', ok: selectedOrders.map((o) => o.ref) })}
+          scopeLabel={allMatching ? tx(`كل النتائج المطابقة (${formatInt(selectedOrders.length)})`, `All ${formatInt(selectedOrders.length)} matching results`) : tx(`${formatInt(selectedOrders.length)} طلبات حددتها`, `${formatInt(selectedOrders.length)} selected orders`)} />
+      ) : bulk && <BulkModal action={bulk} orders={selectedOrders} allMatching={allMatching} onClose={onBulkDone} />}
       {subBulk && <SubBulkModal orders={selectedOrders} allMatching={allMatching} onClose={onSubDone} />}
       {more && <MoreBulkModal action={more} orders={selectedOrders} allMatching={allMatching} canRefund={perms.refund} tags={tags} onClose={onMoreDone} />}
     </div>

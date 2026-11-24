@@ -14,9 +14,9 @@ import type { Order } from '../../merchant/domain';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, LinkButton, Money, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { Alert, DataTable, Field, FilterChip, Modal, PageHeader, Pagination, SearchInput, Select, Simulated, Tabs, Textarea, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
-import { downloadCsv } from '../finance/download';
+import { ExportDialog } from '../exports/ui';
 import {
-  SEGMENTS, SMS_MAX_PARTS, channels, customerRows, customersCsv, filterCustomers, inSaved, lifetime, mask, messageProblems, paginate, parseSegment, parseSort, savedId, segmentCounts, smsParts,
+  SEGMENTS, SMS_MAX_PARTS, channels, customerRows, filterCustomers, inSaved, lifetime, mask, messageProblems, paginate, parseSegment, parseSort, savedId, segmentCounts, smsParts,
   type CustomerRow, type MsgChannel, type MsgProblem, type Purpose,
 } from './model';
 import { Activity, AddressesCard, BlockModal, RewardsCard, WithdrawConsent } from './activity';
@@ -87,12 +87,14 @@ function List({ route }: { route: Route }) {
   const pg = paginate(filtered, Number(route.query.get('page')) || 1);
   const segParam = custom ? `custom:${custom.id}` : seg ?? undefined;
   const qs = (o: Record<string, string | undefined>) => ({ q: q || undefined, seg: segParam, sort: sort === 'recent' ? undefined : sort, blocked: blocked ? '1' : undefined, ...o });
-  const exportCsv = () => downloadCsv(`customers-${custom?.id ?? seg ?? 'all'}.csv`, customersCsv(filtered, contact, lang));
+  // Export goes through the shared export templates (preview first rows, choose template, logged); contact masked by role.
+  const [exporting, setExporting] = useState(false);
 
   const header = <PageHeader title={tx('العملاء', 'Customers')} description={empty || state !== 'live' ? undefined : tx(`${all.length} عميلًا`, `${all.length} customers`)}
     actions={state === 'live' && !empty ? <div className="flex flex-wrap gap-2">
       {manage && <LinkButton variant="secondary" href={href('import')}><Upload className="size-4" aria-hidden="true" />{tx('استيراد', 'Import')}</LinkButton>}
-      <Button variant="secondary" onClick={exportCsv}><Download className="size-4" aria-hidden="true" />{tx(`تصدير ${filtered.length}`, `Export ${filtered.length}`)}</Button>
+      <Button variant="secondary" onClick={() => setExporting(true)}><Download className="size-4" aria-hidden="true" />{tx(`تصدير ${filtered.length}`, `Export ${filtered.length}`)}</Button>
+      {exporting && <ExportDialog entity="customers" records={{ customers: filtered.map((r) => r.c) }} scopeLabel={tx(`${filtered.length} عميلًا من النتائج الحالية`, `${filtered.length} customers from the current results`)} onClose={() => setExporting(false)} />}
     </div> : undefined} />;
   if (state === 'loading') return <div className="space-y-6" aria-busy="true">{header}<ListSkeleton /></div>;
   if (state === 'error') return (

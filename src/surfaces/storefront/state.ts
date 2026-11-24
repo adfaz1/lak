@@ -3,7 +3,9 @@
    checkout form, the account (saved addresses, wishlist) and the checkout record of each order placed here (payment
    attempts, address, returns). Simulated state for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
-import { couponsStore, customersStore, financeStore, levelsStore, locationsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { catalogXStore, couponsStore, customersStore, financeStore, levelsStore, locationsStore, ordersStore as merchantOrders, productsStore, settingsStore, wishEventsStore } from '../merchant/stores';
+import { assignCodes, bookSlots, campaignTake, type OrderExtras } from '../merchant/catalog-extras';
+import { addWish } from '../merchant/demand';
 import { CUSTOMER as CUSTOMER_ACTOR, cancelBlock, cancelOrder, requestCancel } from '../merchant/ops';
 import { applyStockEffects } from '../merchant/inventory';
 import { refundTx } from '../merchant/finance';
@@ -16,14 +18,16 @@ import {
 } from './domain';
 import {
   autoOfferResult, couponUses, matchCustomer, scopedResult, nextStoreRef, phoneKey, shipFrom, shipOptions, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
-  mirrorReturns, withMerchant, type StoreConfig,
+  mirrorReturns, withMerchant, riyadhDate, type StoreConfig,
 } from './bridge';
+
+import { attributeOrder } from '../dashboard/storefront/state';
 
 const sid = () => Math.random().toString(36).slice(2, 10);
 
 /* ───────────── Live reads of the merchant's data ───────────── */
 
-export const liveCatalog = (): Product[] => toStoreProducts(productsStore.get(), levelsStore.get());
+export const liveCatalog = (): Product[] => toStoreProducts(productsStore.get(), levelsStore.get(), catalogXStore.get());
 export const liveConfig = (): StoreConfig => storeConfig(settingsStore.get(), checkoutSettingsStore.get());
 
 export const cartStore = createStore.key('storefront.cartStore')<Cart>(() => ({ lines: [] }));
@@ -56,6 +60,10 @@ export interface CheckoutState {
   giftMsg: string;
   /** Last payment problem shown on the checkout, kept until the next attempt. */
   notice?: { kind: 'declined' | 'challenge' | 'verify_failed'; ref: string };
+  /** Answers to the store's checkout questions (order custom fields, appointment dates), by question id. */
+  answers?: Record<string, string>;
+  /** The shopper confirmed the minimum age a restricted product asks for. */
+  ageOk?: boolean;
 }
 const freshCheckout = (): CheckoutState => ({ sessionId: sid(), mode: 'guest', email: '', addr: {}, ship: 'standard', method: 'card', gift: false, giftMsg: '' });
 export const checkoutStore = createStore.key('storefront.checkoutStore')<CheckoutState>(freshCheckout);
@@ -114,10 +122,15 @@ export function buildDraft(): Draft {
   };
 }
 
-/** Idempotent: the same draft returns the same order. */
-export function submit(draft: Draft): { order: Order; created: boolean } {
+/** What the checkout adds to each order (answers, pre-order terms, bookings…), by order reference. Catalogue extras. */
+export const extrasStore = createStore.key('storefront.orderExtras')<Record<string, OrderExtras>>(() => ({}));
+
+/** Idempotent: the same draft returns the same order. `extras` (answers, pre-order…) are kept for that order. */
+export function submit(draft: Draft, extras?: OrderExtras): { order: Order; created: boolean } {
   let res!: ReturnType<typeof submitOrder>;
   ordersStore.set((all) => { res = submitOrder(all, draft, Date.now()); return res.orders; });
+  if (res.created) attributeOrder(res.order.ref);
+  if (extras && !isSettled(res.order.pay.state)) extrasStore.set((m) => ({ ...m, [res.order.ref]: extras }));
   return { order: res.order, created: res.created };
 }
 
@@ -182,9 +195,25 @@ export function payEvent(ref: string, e: PayEvent, method: PayMethod): Order | u
   const { order, applied } = applyPayment(before, e, method, Date.now(), liveConfig().codFee);
   if (!applied) return before;
   updateOrder(ref, () => order);
+  let extras = extrasStore.get()[ref];
+  if (extras && !isSettled(before.pay.state) && isSettled(order.pay.state)) {
+    // Paid: deliver codes from the pool, take booking places and count the pre-order — once, on this transition.
+    const products = liveCatalog();
+    const lines = order.lines.map((l) => ({ productId: l.productId, sku: l.sku ?? '', qty: l.qty }));
+    const given = assignCodes(productsStore.get(), lines, ref);
+    const booked = bookSlots(given.products, order.lines.flatMap((l) => {
+      const size = products.find((p) => p.id === l.productId && p.x?.type === 'booking')?.variants.find((v) => v.id === l.vid)?.size;
+      const [date, time] = (size ?? '').split(' ');
+      return date && time ? [{ productId: l.productId, date, time, qty: l.qty }] : [];
+    }));
+    if (booked !== productsStore.get()) productsStore.set(booked);
+    catalogXStore.set((x) => ({ ...x, campaigns: campaignTake(x.campaigns, lines, extras) }));
+    extras = { ...extras, ...(given.codes.length ? { codes: given.codes } : {}) };
+    extrasStore.set((m) => ({ ...m, [ref]: extras! }));
+  }
   const book = syncOrder(
     { orders: merchantOrders.get(), levels: levelsStore.get(), customers: customersStore.get(), coupons: couponsStore.get() },
-    before, order, { products: liveCatalog(), now: Date.now(), prefer: shipFrom(liveConfig(), order.address?.city, locationsStore.get()), gift: order.key.startsWith(checkoutStore.get().sessionId) && checkoutStore.get().gift ? { message: checkoutStore.get().giftMsg.trim() || undefined } : undefined },
+    before, order, { products: liveCatalog(), now: Date.now(), prefer: shipFrom(liveConfig(), order.address?.city, locationsStore.get()), extras, gift: order.key.startsWith(checkoutStore.get().sessionId) && checkoutStore.get().gift ? { message: checkoutStore.get().giftMsg.trim() || undefined } : undefined },
   );
   if (book.customers !== customersStore.get()) customersStore.set(book.customers);
   if (book.levels !== levelsStore.get()) levelsStore.set(book.levels);
@@ -198,7 +227,7 @@ function settle(order: Order): void {
   // The bag is emptied only if it is still the basket this order was made from.
   if (order.key.startsWith(checkoutStore.get().sessionId)) {
     cartStore.set({ lines: [] });
-    checkoutStore.set((c) => ({ ...c, sessionId: sid(), notice: undefined, gift: false, giftMsg: '' }));
+    checkoutStore.set((c) => ({ ...c, sessionId: sid(), notice: undefined, gift: false, giftMsg: '', answers: {}, ageOk: false }));
   }
 }
 
@@ -216,7 +245,10 @@ export function openCodCount(): number {
 }
 
 export function toggleWish(id: string): void {
-  accountStore.set((a) => ({ ...a, wishlist: a.wishlist.includes(id) ? a.wishlist.filter((x) => x !== id) : [...a.wishlist, id] }));
+  const had = accountStore.get().wishlist.includes(id);
+  accountStore.set((a) => ({ ...a, wishlist: had ? a.wishlist.filter((x) => x !== id) : [...a.wishlist, id] }));
+  // Wishlist demand for the merchant's reports (product id only, no shopper details).
+  wishEventsStore.set((l) => addWish(l, id, had ? 'remove' : 'add', riyadhDate(Date.now())));
 }
 
 export function signIn(): void {

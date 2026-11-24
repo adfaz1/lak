@@ -36,13 +36,14 @@ export function MetricCards({ metrics, compare }: { metrics: Metric[]; compare: 
                   : <span className="text-muted">{tx('مقابل', 'vs')} <MetricValue m={m} v={m.prev} /></span>}
             </div>
           )}
+          {m.href && m.act && <a href={m.href} className="mt-2 inline-block text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{m.act[lang]}</a>}
         </div>
       ))}
     </section>
   );
 }
 
-function CellView({ c, v, pid }: { c: Col; v: Cell; pid?: string }) {
+function CellView({ c, v, pid, href, hint }: { c: Col; v: Cell; pid?: string; href?: string; hint?: Cell }) {
   const { lang } = useLang();
   const tx = useTx();
   const day = useDay();
@@ -51,8 +52,9 @@ function CellView({ c, v, pid }: { c: Col; v: Cell; pid?: string }) {
     const name = typeof v === 'object' && v ? v[lang] : String(v ?? '');
     return <span className="flex w-[9rem] min-w-0 items-center gap-2.5 sm:w-[14rem]"><ProductImage src={pid ? productPhoto(pid) : undefined} alt={name} size={36} /><span className="truncate font-medium text-fg">{products.find((p) => p.id === pid)?.name[lang] ?? name}</span></span>;
   }
+  if (c.unit === 'action') return v && typeof v === 'object' && href ? <a href={href} className="whitespace-nowrap text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{v[lang]}</a> : <span className="text-subtle">—</span>;
   if (v === null || v === undefined) return <span className="text-subtle" title={tx('لا بيانات', 'No data')}>—</span>;
-  if (typeof v === 'object') return <>{v[lang]}</>;
+  if (typeof v === 'object') return <span className="inline-flex items-center gap-1">{v[lang]}{hint && typeof hint === 'object' ? <InfoHint>{hint[lang]}</InfoHint> : null}</span>;
   if (c.unit === 'money' && typeof v === 'number') return <Money v={v} />;
   if (c.unit === 'percent') return <bdi dir="ltr" className="tabular-nums">{v}%</bdi>;
   if (c.unit === 'delta') return <Delta v={typeof v === 'number' ? v : null} />;
@@ -89,12 +91,12 @@ export function ReportTable({ t, meta, file }: { t: Table; meta: { from: string;
             </thead>
             <tbody className="divide-y divide-border">
               {t.rows.map((r, ri) => (
-                <tr key={ri} className="hover:bg-surface-2/50">
+                <tr key={ri} className={cn('hover:bg-surface-2/50', r._strong ? 'bg-surface-2/40 font-semibold' : '')}>
                   {t.cols.map((c, i) => {
                     const El = i === 0 ? 'th' : 'td';
                     return (
                       <El key={c.key} {...(i === 0 ? { scope: 'row' } : {})} className={cn('py-2.5', i === 0 ? 'max-w-[9.5rem] ps-5 pe-3 text-start font-medium text-fg sm:max-w-[14rem]' : i === t.cols.length - 1 ? 'ps-3 pe-5' : 'px-3', c.end ? 'text-end' : 'text-start', i > 0 && 'whitespace-nowrap', hide(c))}>
-                        <CellView c={c} v={r[c.key]} pid={typeof r._pid === 'string' ? r._pid : undefined} />
+                        <CellView c={c} v={r[c.key]} pid={typeof r._pid === 'string' ? r._pid : undefined} href={typeof r[`_href:${c.key}`] === 'string' ? (r[`_href:${c.key}`] as string) : undefined} hint={i === 0 ? r._hint : undefined} />
                       </El>
                     );
                   })}

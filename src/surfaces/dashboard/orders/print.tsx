@@ -2,24 +2,24 @@
 // number, ZATCA phase-1 QR), packing slips (no prices for gifts) and shipping labels, one per page, for one or many orders.
 // window.print() prints only the documents; the dashboard chrome is hidden by the print stylesheet below.
 import { useState } from 'react';
-import { FileText, Pencil, Printer } from 'lucide-react';
+import { FileText, Pencil, Printer, Settings2 } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { createStore } from '../../../core/store';
 import { replace, type Route } from '../../../core/router';
-import { customersStore, logAction, ordersStore, settingsStore, testStore } from '../../merchant/stores';
+import { customersStore, invoiceConfigStore, logAction, ordersStore, settingsStore, testStore } from '../../merchant/stores';
 import { CARRIERS, LOCATIONS, type Order } from '../../merchant/domain';
-import { act, payView, placedAt, validVatNo, zatcaTlv } from '../../merchant/ops';
+import { act, payView, placedAt, validVatNo } from '../../merchant/ops';
 import { normaliseDigits } from '../../merchant/catalog';
 import { Alert, Field, Input, Modal, PageHeader, Simulated, useToast } from '../../../ds/kit';
-import { Badge, Button, Card, EmptyState, InfoHint, Money, Ref, Segmented, cn, useTx } from '../../../ds/ui';
-import { contactOf, invoiceOf, orderPerms } from './model';
+import { Badge, Button, Card, EmptyState, InfoHint, Money, Ref, Segmented, useTx } from '../../../ds/ui';
+import { contactOf, orderPerms } from './model';
 import { ohref, useActor } from './ui';
 import { DOCS, printJobStore, type Doc } from './print-link';
 import { qrPath } from './qr';
+import { OrderExtrasPrint } from '../products/order-extras';
 
-/** Seller details printed on invoices. The default VAT number is a demo value and is labelled as such. */
-export const DEMO_VAT = '310123456700003';
-export const invoiceStore = createStore.key('dashboard.orders.invoice')(() => ({ vatNo: DEMO_VAT, cr: '1010123456', address: 'الرياض، حي السلي، المدينة الصناعية الثانية' }));
+import { DEMO_VAT, InvoiceDoc, invoiceStore, useInvoiceSetup } from '../settings/invoice-doc';
+// Seller details and the invoice document live with Settings → Invoice, so the settings preview is exactly what prints.
+export { DEMO_VAT, invoiceStore };
 
 export default function PrintView({ route }: { route: Route }) {
   const tx = useTx();
@@ -31,6 +31,8 @@ export default function PrintView({ route }: { route: Route }) {
   const job = printJobStore.use();
   const seller = invoiceStore.use();
   const store = settingsStore.use().store;
+  const cfg = invoiceConfigStore.use();
+  const inv = useInvoiceSetup();
   const [edit, setEdit] = useState(false);
   const doc = (DOCS as string[]).includes(route.query.get('doc') ?? '') ? (route.query.get('doc') as Doc) : 'invoice';
   const refs = route.query.get('job') && route.query.get('job') === job.id ? job.refs : (route.query.get('refs') ?? '').split(',').filter(Boolean);
@@ -71,6 +73,7 @@ export default function PrintView({ route }: { route: Route }) {
         <div className="flex flex-wrap items-center gap-3">
           <Segmented label={tx('نوع المستند', 'Document')} value={doc} onChange={setDoc} options={[{ value: 'invoice', label: tx('الفاتورة', 'Invoice') }, { value: 'slip', label: tx('قائمة التعبئة', 'Packing slip') }, { value: 'label', label: tx('الملصق', 'Label') }]} />
           {doc === 'invoice' && <Button variant="ghost" size="sm" onClick={() => setEdit(true)}><Pencil className="size-4" aria-hidden="true" />{tx('بيانات البائع', 'Seller details')}</Button>}
+          {doc === 'invoice' && <a href="#/dashboard/settings/invoice" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-semibold text-muted hover:bg-surface-2 hover:text-fg"><Settings2 className="size-4" aria-hidden="true" />{tx('تخصيص الفاتورة', 'Customise invoice')}</a>}
         </div>
         {doc === 'invoice' && <Alert tone="info" title={<span className="flex items-center gap-2">{tx('مستند للطباعة فقط', 'Printable document only')}<InfoHint>{tx('الربط مع منصة فاتورة (المرحلة الثانية: التوقيع والإبلاغ للهيئة) يحتاج خادمًا.', 'Integration with the FATOORA platform (phase 2: signing and reporting) needs a server.')}</InfoHint></span>}>
           {tx('رمز QR بصيغة المرحلة الأولى. الإبلاغ الإلكتروني للهيئة غير مفعّل بعد.', 'QR in phase-1 format. Electronic reporting to ZATCA is not active yet.')}{seller.vatNo === DEMO_VAT && <> {tx('الرقم الضريبي تجريبي.', 'The VAT number is a demo value.')}</>}
@@ -85,8 +88,9 @@ export default function PrintView({ route }: { route: Route }) {
         <div className="lak-print space-y-6">
           {usable.map((o) => (
             <article key={o.ref} className="lak-doc mx-auto max-w-[210mm] overflow-hidden rounded-2xl border border-border bg-white p-6 text-[13px] text-neutral-900 shadow-sm sm:p-8" dir={lang === 'ar' ? 'rtl' : 'ltr'}>
-              {doc === 'invoice' && <InvoiceDoc o={o} seller={{ ...seller, name: store.name }} />}
+              {doc === 'invoice' && <InvoiceDoc o={o} seller={inv.seller} cfg={cfg} accent={inv.accentFor(cfg)} logo={inv.logo} langs={inv.langsFor(cfg, o)} customers={inv.customers} />}
               {doc === 'slip' && <SlipDoc o={o} store={store.name} />}
+              {(doc === 'invoice' || doc === 'slip') && <OrderExtrasPrint o={o} lang={inv.langsFor(cfg, o)[0]} />}
               {doc === 'label' && <LabelDoc o={o} store={store.name} />}
             </article>
           ))}
@@ -122,67 +126,7 @@ function Qr({ text, size = 112, label }: { text: string; size?: number; label: s
 }
 
 const two = (ar: string, en: string) => <span className="block leading-tight"><span className="block font-semibold">{ar}</span><span className="block text-[11px] text-neutral-500" dir="ltr">{en}</span></span>;
-const fmtTime = (at: number) => new Date(at).toISOString().replace(/\.\d{3}Z$/, 'Z');
 const dateStr = (at: number, lang: string) => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Riyadh' }).format(at);
-
-function InvoiceDoc({ o, seller }: { o: Order; seller: { name: string; vatNo: string; cr: string; address: string } }) {
-  const { lang } = useLang();
-  const inv = invoiceOf(o);
-  const at = placedAt(o, Date.now());
-  const customer = contactOf(o, customersStore.get());
-  const tlv = zatcaTlv(seller.name, seller.vatNo, fmtTime(at), inv.total, inv.vat);
-  const r = (v: number) => <Money v={v} />;
-  return (
-    <>
-      <header className="flex items-start justify-between gap-4 border-b border-neutral-300 pb-4">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xl font-bold">{seller.name}</p>
-          <p className="text-neutral-600">{seller.address}</p>
-          <p>{lang === 'ar' ? 'الرقم الضريبي' : 'VAT No.'}: <bdi dir="ltr" className="font-semibold tabular-nums">{seller.vatNo}</bdi>{seller.vatNo === DEMO_VAT && <span className="ms-1 rounded bg-amber-100 px-1 text-[10px] text-amber-800">{lang === 'ar' ? 'تجريبي' : 'demo'}</span>}</p>
-          {seller.cr && <p>{lang === 'ar' ? 'السجل التجاري' : 'CR No.'}: <bdi dir="ltr" className="tabular-nums">{seller.cr}</bdi></p>}
-        </div>
-        <Qr text={tlv} label={lang === 'ar' ? 'رمز الفاتورة (هيئة الزكاة)' : 'Invoice QR (ZATCA)'} />
-      </header>
-      <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
-        {two('فاتورة ضريبية مبسطة', 'Simplified Tax Invoice')}
-        <dl className="grid grid-cols-[auto_auto] gap-x-4 gap-y-0.5 text-[12px]">
-          <dt className="text-neutral-500">{lang === 'ar' ? 'رقم الفاتورة' : 'Invoice no.'}</dt><dd><Ref>{inv.no}</Ref></dd>
-          <dt className="text-neutral-500">{lang === 'ar' ? 'التاريخ' : 'Date'}</dt><dd>{dateStr(at, lang)}</dd>
-          <dt className="text-neutral-500">{lang === 'ar' ? 'الطلب' : 'Order'}</dt><dd><Ref>#{o.ref}</Ref></dd>
-          <dt className="text-neutral-500">{lang === 'ar' ? 'العميل' : 'Customer'}</dt><dd>{o.customer[lang]}{customer.city[lang] ? ` · ${customer.city[lang]}` : ''}</dd>
-        </dl>
-      </div>
-      {o.cancelled && <p className="mt-3 rounded border border-red-400 px-3 py-1 text-center font-bold text-red-700">{lang === 'ar' ? 'طلب ملغى — يصدر إشعار دائن عند الاسترداد' : 'Cancelled order — a credit note is issued on refund'}</p>}
-      <div className="mt-5 overflow-x-auto"><table className="w-full min-w-[30rem] border-collapse text-[12px]">
-        <thead><tr className="border-y border-neutral-300 bg-neutral-50 text-start">
-          {[['الصنف', 'Item'], ['الكمية', 'Qty'], ['سعر الوحدة', 'Unit'], ['الضريبة', 'VAT'], ['المجموع', 'Total']].map(([a, e], i) => <th key={e} className={cn('px-2 py-2 font-semibold', i === 0 ? 'text-start' : 'text-end')}>{lang === 'ar' ? a : e}</th>)}
-        </tr></thead>
-        <tbody>
-          {inv.lines.map((l, i) => (
-            <tr key={i} className="border-b border-neutral-200">
-              <td className="px-2 py-2">{l.name[lang]}{l.variant && <span className="text-neutral-500"> · {l.variant[lang]}</span>}<span className="block text-[11px] text-neutral-500"><Ref>{l.sku}</Ref></span></td>
-              <td className="px-2 py-2 text-end tabular-nums">{l.qty}</td>
-              <td className="px-2 py-2 text-end">{r(l.unit)}</td>
-              <td className="px-2 py-2 text-end">{r(l.vat)}</td>
-              <td className="px-2 py-2 text-end font-semibold">{r(l.amount)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table></div>
-      <dl className="ms-auto mt-4 w-full max-w-xs space-y-1 text-[12px]">
-        {[
-          [lang === 'ar' ? 'المجموع' : 'Subtotal', r(inv.subtotal)],
-          ...(inv.discount ? [[`${lang === 'ar' ? 'الخصم' : 'Discount'}${o.coupon ? ` (${o.coupon})` : ''}`, <span className="inline-flex">−{r(inv.discount)}</span>]] : []),
-          [lang === 'ar' ? 'الشحن' : 'Shipping', r(inv.shipping)],
-          [lang === 'ar' ? 'الإجمالي غير شامل الضريبة' : 'Total excl. VAT', r(inv.excl)],
-          [lang === 'ar' ? 'ضريبة القيمة المضافة 15%' : 'VAT 15%', r(inv.vat)],
-        ].map(([k, v], i) => <div key={i} className="flex justify-between gap-3"><dt className="text-neutral-600">{k}</dt><dd>{v}</dd></div>)}
-        <div className="flex justify-between gap-3 border-t border-neutral-400 pt-1.5 text-[14px] font-bold"><dt>{lang === 'ar' ? 'الإجمالي شامل الضريبة' : 'Total incl. VAT'}</dt><dd>{r(inv.total)}</dd></div>
-      </dl>
-      <p className="mt-6 text-[11px] text-neutral-500">{payView(o) === 'cod_due' ? (lang === 'ar' ? 'الدفع عند الاستلام.' : 'Payment on delivery.') : (lang === 'ar' ? 'مدفوعة.' : 'Paid.')} {lang === 'ar' ? 'الأسعار شاملة ضريبة القيمة المضافة.' : 'Prices include VAT.'}</p>
-    </>
-  );
-}
 
 function SlipDoc({ o, store }: { o: Order; store: string }) {
   const { lang } = useLang();

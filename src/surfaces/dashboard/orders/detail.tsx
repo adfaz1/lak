@@ -28,6 +28,7 @@ import { MessagesCard, useNoticeName } from './notices-ui';
 import { SubBadge, SubPicker } from './substatus-ui';
 import { rulesStore } from '../../merchant/stores';
 import { subTextOf } from '../../merchant/ops';
+import { OrderExtrasCard } from '../products/order-extras';
 
 type Dialog = 'fulfil' | 'refund' | 'contact' | 'cancel' | 'decline' | 'ship' | 'deliver' | 'return' | 'transfer' | null;
 
@@ -303,6 +304,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
               {o.address?.notes && <p className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-fg"><b>{tx('ملاحظة العنوان: ', 'Address note: ')}</b>{o.address.notes}</p>}
               {o.customerNote && <p className="rounded-xl bg-amber-500/10 px-3 py-2 text-xs text-fg"><b>{tx('ملاحظة العميل: ', 'Customer note: ')}</b>{o.customerNote}</p>}
               {o.gift && <p className="flex items-start gap-2 rounded-xl bg-brand-500/10 px-3 py-2 text-xs text-fg"><Gift className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><b>{tx('هدية', 'Gift')}</b>{o.gift.to && ` · ${o.gift.to}`}{o.gift.message && <span className="block">«{o.gift.message}»</span>}<span className="block text-muted">{tx('قائمة التعبئة تُطبع بلا أسعار', 'The packing slip prints without prices')}</span></span></p>}
+              <OrderExtrasCard o={o} canSeeCodes={seeContact} />
               <div className="flex flex-wrap gap-2">
                 {customerOrderCount(all, o) > 1 && <LinkButton variant="secondary" size="sm" href={ohref('', { q: o.customer[lang] })}>{tx(`${customerOrderCount(all, o)} طلبات`, `${customerOrderCount(all, o)} orders`)}</LinkButton>}
                 {perms.contact && next.kind !== 'contact' && <Button variant="ghost" size="sm" onClick={() => setDialog('contact')}><MessageSquare className="size-4" aria-hidden="true" />{tx('راسل', 'Message')}</Button>}

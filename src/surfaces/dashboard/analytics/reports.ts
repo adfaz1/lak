@@ -8,10 +8,11 @@ import { couponRedemptions } from '../../merchant/growth';
 import type { Tx } from '../../merchant/finance';
 import { toCsv } from '../../merchant/catalog';
 import { productIdForSku } from '../model/media';
+import { demandReport, financeReport, returnsReport, searchReport, substatusReport } from './demand-reports';
 import { TODAY, addDays, covered, daysOf, inRange, orderDay, ordersIn, pct, type Range } from './range';
 
-export type ReportId = 'sales' | 'funnel' | 'products' | 'customers' | 'channels' | 'coupons' | 'carts' | 'payments';
-export const REPORTS: ReportId[] = ['sales', 'funnel', 'products', 'customers', 'channels', 'coupons', 'carts', 'payments'];
+export type ReportId = 'sales' | 'funnel' | 'products' | 'customers' | 'channels' | 'coupons' | 'carts' | 'payments' | 'finance' | 'search' | 'returns' | 'demand' | 'substatus';
+export const REPORTS: ReportId[] = ['sales', 'finance', 'funnel', 'products', 'returns', 'demand', 'search', 'customers', 'channels', 'coupons', 'carts', 'payments', 'substatus'];
 export const isReport = (v: string | null): v is ReportId => !!v && (REPORTS as string[]).includes(v);
 
 export const REPORT_LABEL: Record<ReportId, L> = {
@@ -23,12 +24,39 @@ export const REPORT_LABEL: Record<ReportId, L> = {
   coupons: { ar: 'الكوبونات', en: 'Coupons' },
   carts: { ar: 'السلال المتروكة', en: 'Abandoned carts' },
   payments: { ar: 'المدفوعات', en: 'Payments' },
+  finance: { ar: 'الملخص المالي', en: 'Financial summary' },
+  search: { ar: 'البحث في المتجر', en: 'Store search' },
+  returns: { ar: 'المرتجعات والاستردادات', en: 'Returns & refunds' },
+  demand: { ar: 'أعلمني والمفضلة', en: 'Notify-me & wishlists' },
+  substatus: { ar: 'الحالات الفرعية', en: 'Sub-statuses' },
+};
+/** Report directory groups (overview): the reports a merchant looks for together. */
+export const REPORT_GROUPS: { id: string; label: L; reports: ReportId[] }[] = [
+  { id: 'money', label: { ar: 'المبيعات والمال', en: 'Sales & money' }, reports: ['sales', 'finance', 'payments', 'channels', 'coupons'] },
+  { id: 'catalog', label: { ar: 'المنتجات والطلب', en: 'Products & demand' }, reports: ['products', 'returns', 'demand', 'search'] },
+  { id: 'customers', label: { ar: 'العملاء والتحويل', en: 'Customers & conversion' }, reports: ['customers', 'funnel', 'carts'] },
+  { id: 'ops', label: { ar: 'التشغيل', en: 'Operations' }, reports: ['substatus'] },
+];
+export const REPORT_DESC: Record<ReportId, L> = {
+  sales: { ar: 'الإجمالي والخصومات والصافي يوميًا', en: 'Gross, discounts and net per day' },
+  finance: { ar: 'من المبيعات إلى صافي الإيراد بعد الضريبة والرسوم', en: 'From sales to net revenue after VAT and fees' },
+  payments: { ar: 'طرق الدفع والفشل والرسوم', en: 'Methods, failures and fees' },
+  channels: { ar: 'المتجر والسوق والتطبيق', en: 'Store, marketplace and app' },
+  coupons: { ar: 'الاستخدام والخصم والإيراد لكل كوبون', en: 'Use, discount and revenue per coupon' },
+  products: { ar: 'الأكثر والأقل مبيعًا والأعلى هامشًا', en: 'Best, worst and highest margin' },
+  returns: { ar: 'حسب السبب والمنتج', en: 'By reason and product' },
+  demand: { ar: 'المنتظرون للتوفر وإضافات المفضلة', en: 'Waiting for stock and wishlist adds' },
+  search: { ar: 'الأكثر بحثًا، ومن بحث ولم يجد', en: 'Most searched, and searches that found nothing' },
+  customers: { ar: 'الجدد والعائدون والأعلى إنفاقًا', en: 'New, returning and top spenders' },
+  funnel: { ar: 'زيارة ← سلة ← دفع ← طلب', en: 'Visit → cart → checkout → order' },
+  carts: { ar: 'المتروكة والمسترجعة وإيرادها', en: 'Abandoned, recovered and their revenue' },
+  substatus: { ar: 'الطلبات في كل حالة فرعية ومدة انتظارها', en: 'Orders in each sub-status and how long they wait' },
 };
 
 export type Unit = 'money' | 'count' | 'percent';
-export interface Metric { id: string; label: L; hint: L; unit: Unit; value: number | null; prev: number | null; delta: number | null; invert?: boolean }
+export interface Metric { id: string; label: L; hint: L; unit: Unit; value: number | null; prev: number | null; delta: number | null; invert?: boolean; href?: string; act?: L }
 export type Cell = string | number | null | L;
-export interface Col { key: string; label: L; hint?: L; unit: Unit | 'text' | 'delta' | 'product'; end?: boolean; hideOnPhone?: boolean }
+export interface Col { key: string; label: L; hint?: L; unit: Unit | 'text' | 'delta' | 'product' | 'action'; end?: boolean; hideOnPhone?: boolean }
 export interface Table { id: string; title: L; hint: L; cols: Col[]; rows: Record<string, Cell>[]; empty: L }
 export interface Report { id: ReportId; metrics: Metric[]; tables: Table[]; notes: L[]; source: L }
 
@@ -41,6 +69,13 @@ export interface Inputs {
   txs: Tx[];
   /** Whether customer names may be shown (role can open customers). */
   names: boolean;
+  /* Demand signals and operations (optional: older callers and tests do not pass them). */
+  searches?: import('../../merchant/demand').SearchEvent[];
+  redirects?: import('../../merchant/demand').SearchRedirect[];
+  notify?: import('../../merchant/demand').NotifyRequest[];
+  wishes?: import('../../merchant/demand').WishEvent[];
+  levels?: import('../../merchant/inventory').Level[];
+  subs?: import('../../merchant/ops').SubStatus[];
 }
 
 const l = (ar: string, en: string): L => ({ ar, en });
@@ -467,8 +502,13 @@ export function paymentsReport(x: Inputs, r: Range, c: Range | null): Report {
   };
 }
 
-export function buildReport(id: ReportId, x: Inputs, r: Range, c: Range | null, opts: { sort?: ProductSort } = {}): Report {
+export function buildReport(id: ReportId, x: Inputs, r: Range, c: Range | null, opts: { sort?: ProductSort; q?: Record<string, string | undefined> } = {}): Report {
   switch (id) {
+    case 'finance': return financeReport(x, r, c, opts.q);
+    case 'search': return searchReport(x, r, c, opts.q);
+    case 'returns': return returnsReport(x, r, c);
+    case 'demand': return demandReport(x, r, c, opts.q);
+    case 'substatus': return substatusReport(x, r, c);
     case 'sales': return salesReport(x, r, c);
     case 'funnel': return funnelReport(x, r, c);
     case 'products': return productsReport(x, r, c, opts.sort);
@@ -484,17 +524,19 @@ export function buildReport(id: ReportId, x: Inputs, r: Range, c: Range | null, 
 
 const csvCell = (v: Cell, unit: Col['unit'], lang: 'ar' | 'en'): string | number => {
   if (v === null || v === undefined) return '';
+  if (unit === 'action') return '';
   if (typeof v === 'object') return v[lang];
   if (unit === 'money' && typeof v === 'number') return (v / 100).toFixed(2);
   return v;
 };
 /** A table as CSV in the viewer's language: the rows shown for the chosen period, money in SAR with two decimals. */
 export function tableCsv(t: Table, lang: 'ar' | 'en', meta: { from: string; to: string; cmp: string }): string {
-  const head = t.cols.map((c) => c.label[lang] + (c.unit === 'money' ? ' (SAR)' : c.unit === 'percent' || c.unit === 'delta' ? ' (%)' : ''));
+  const cols = t.cols.filter((c) => c.unit !== 'action');
+  const head = cols.map((c) => c.label[lang] + (c.unit === 'money' ? ' (SAR)' : c.unit === 'percent' || c.unit === 'delta' ? ' (%)' : ''));
   return toCsv([
     [lang === 'ar' ? 'الفترة' : 'Period', `${meta.from} → ${meta.to}`, lang === 'ar' ? 'المقارنة' : 'Comparison', meta.cmp],
     head,
-    ...t.rows.map((row) => t.cols.map((c) => csvCell(row[c.key], c.unit, lang))),
+    ...t.rows.map((row) => cols.map((c) => csvCell(row[c.key], c.unit, lang))),
   ]);
 }
 /** Headline metrics of a report as CSV (value, comparison and change). */

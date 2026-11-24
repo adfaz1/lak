@@ -8,7 +8,7 @@ import { Lock, Wallet, ShoppingBag, Receipt, MousePointerClick, Eye, BarChart3, 
 import { useLang } from '../../../core/lang';
 import { formatMoney } from '../../../core/format';
 import { link, replace, type Route } from '../../../core/router';
-import { cartsStore, couponsStore, financeStore, ordersStore, productsStore, testStore } from '../../merchant/stores';
+import { cartsStore, couponsStore, financeStore, levelsStore, notifyStore, ordersStore, productsStore, searchLogStore, searchRedirectsStore, subStatusesStore, testStore, wishEventsStore } from '../../merchant/stores';
 import { canSee } from '../../merchant/perms';
 import { Badge, Button, Card, CardHeader, Delta, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Field, Input, Modal, PageHeader, Tabs, useToast } from '../../../ds/kit';
@@ -19,7 +19,8 @@ import { sectionHref } from '../pages';
 import { downloadCsv } from '../finance/download';
 import { byChannel, figuresFor, history, overviewCsv, parseMetric, periodProducts, rangePoints, rangeRows, topCities, type ChartMetric, type Figure } from './model';
 import { compareRange, ordersIn, periodQuery, readCompare, readPeriod, type CompareMode, type Preset, type Range } from './range';
-import { REPORTS, REPORT_LABEL, buildReport, isReport, parseProductSort, type Inputs, type ReportId } from './reports';
+import { REPORTS, REPORT_DESC, REPORT_GROUPS, REPORT_LABEL, buildReport, isReport, parseProductSort, type Inputs, type ReportId } from './reports';
+import { SearchFixModal, StockAlertModal } from './actions';
 import { PeriodBar, useDay } from './period';
 import { ReportView } from './report-view';
 import { addView, checkViewName, currentView, removeView, viewQuery, viewsStore, type ViewError } from './views';
@@ -50,6 +51,12 @@ function Page({ route }: { route: Route }) {
   const carts = cartsStore.use();
   const coupons = couponsStore.use();
   const fin = financeStore.use();
+  const searches = searchLogStore.use();
+  const redirects = searchRedirectsStore.use();
+  const notify = notifyStore.use();
+  const wishes = wishEventsStore.use();
+  const levels = levelsStore.use();
+  const subs = subStatusesStore.use();
   const full = useMemo(() => history(), []);
   const q = route.query;
   const rp = q.get('report');
@@ -97,19 +104,25 @@ function Page({ route }: { route: Route }) {
     href: href({ ...qs({}, false), report: t === 'overview' ? undefined : t }),
     label: t === 'overview' ? tx('نظرة عامة', 'Overview') : REPORT_LABEL[t][lang], current: tab === t,
   }));
-  const inputs: Inputs = { orders: empty ? [] : allOrders, series: empty ? [] : full, products, carts: empty ? [] : carts, coupons: empty ? [] : coupons, txs: empty ? [] : fin.txs, names: canSee(role, 'customers') };
+  const inputs: Inputs = { orders: empty ? [] : allOrders, series: empty ? [] : full, products, carts: empty ? [] : carts, coupons: empty ? [] : coupons, txs: empty ? [] : fin.txs, names: canSee(role, 'customers'),
+    searches: empty ? [] : searches, redirects, notify: empty ? [] : notify, wishes: empty ? [] : wishes, levels, subs };
+  const fix = tab === 'search' ? q.get('fix') : null;
+  const alertKey = tab === 'demand' ? q.get('alert') : null;
+  const closeAction = () => go({ fix: undefined, alert: undefined });
 
   return (
     <div className="space-y-6">
       {header}
       <Tabs label={tx('التقارير', 'Reports')} items={tabs} />
       {tab === 'overview'
-        ? <Overview series={inputs.series} orders={inputs.orders} range={per.range} cmp={cmp} compare={c} metric={metric} empty={empty} go={go} qs={qs} />
-        : <ReportView rep={buildReport(tab, inputs, per.range, c, { sort })} range={per.range} cmp={cmp} compareOn={cmp !== 'off'}
+        ? <><Overview series={inputs.series} orders={inputs.orders} range={per.range} cmp={cmp} compare={c} metric={metric} empty={empty} go={go} qs={qs} /><ReportLibrary hrefFor={(id) => href({ ...qs({}, false), report: id })} /></>
+        : <ReportView rep={buildReport(tab, inputs, per.range, c, { sort, q: { ...qs({}, false), report: tab } })} range={per.range} cmp={cmp} compareOn={cmp !== 'off'}
             extra={tab === 'products' ? (
               <Segmented label={tx('الترتيب', 'Sort')} value={sort} onChange={(v) => go({ sort: v === 'best' ? undefined : v })}
                 options={[{ value: 'best', label: tx('الأكثر مبيعًا', 'Best selling') }, { value: 'worst', label: tx('الأقل مبيعًا', 'Lowest selling') }, { value: 'margin', label: tx('الأعلى هامشًا', 'Highest margin') }]} />
             ) : undefined} />}
+      {fix && <SearchFixModal term={fix} onClose={closeAction} />}
+      {alertKey && <StockAlertModal k={alertKey} onClose={closeAction} />}
       {tab !== 'overview' && !empty && <p className="text-xs text-subtle">{tx(`الفترة ${day(per.range.from)} – ${day(per.range.to, true)}. الأرقام بيانات تجريبية للمعاينة.`, `Period ${day(per.range.from)} – ${day(per.range.to, true)}. Figures are demo data for this preview.`)}</p>}
     </div>
   );
@@ -360,6 +373,34 @@ function Overview({ series, orders, range, cmp, compare: c, metric, empty, go, q
       </div>
       {!empty && <p className="text-xs text-subtle">{tx(`المؤشرات اليومية من إحصاءات المتجر، والتوزيعات من ${po.length} طلبًا مدفوعًا في دفتر الطلبات للفترة نفسها. بيانات تجريبية.`, `Daily figures come from store statistics; breakdowns from ${po.length} paid orders in the order book for the same period. Demo data.`)}</p>}
     </div>
+  );
+}
+
+/** Every report in one place, grouped, each with one line saying what it answers. No report opens by itself. */
+function ReportLibrary({ hrefFor }: { hrefFor: (id: ReportId) => string }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  return (
+    <Card aria-labelledby="h-lib">
+      <CardHeader id="h-lib" title={tx('كل التقارير', 'All reports')} hint={tx('كل تقرير بفترة ومقارنة وتعريف لكل رقم وملف CSV.', 'Every report has a period, a comparison, a definition per number and a CSV.')} />
+      <div className="grid gap-x-6 gap-y-5 px-5 pb-5 sm:grid-cols-2 xl:grid-cols-4">
+        {REPORT_GROUPS.map((g) => (
+          <section key={g.id} aria-label={g.label[lang]}>
+            <h3 className="text-xs font-semibold text-muted">{g.label[lang]}</h3>
+            <ul className="mt-2 space-y-1">
+              {g.reports.map((id) => (
+                <li key={id}>
+                  <a href={hrefFor(id)} className="block rounded-xl px-2 py-1.5 hover:bg-surface-2">
+                    <span className="block text-sm font-semibold text-fg">{REPORT_LABEL[id][lang]}</span>
+                    <span className="block text-xs text-muted">{REPORT_DESC[id][lang]}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+    </Card>
   );
 }
 

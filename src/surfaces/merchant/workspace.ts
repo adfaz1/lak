@@ -176,7 +176,9 @@ export interface StoreDetails {
 export const storeFixture = (): StoreDetails => ({ name: 'دار نُوى', category: 'fashion', email: 'owner@darnuwa.test', phone: '+966 5x xxx 0123', timezone: 'Asia/Riyadh', weightUnit: 'kg' });
 export const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
-export interface StoreStatus { published: boolean; accepting: boolean; maintenance: boolean; message: string }
+export interface StoreStatus { published: boolean; accepting: boolean; maintenance: boolean; message: string;
+  /** Additive: maintenance ends by itself at this time (epoch ms). Absent/null = until switched off. */
+  until?: number | null }
 export const statusFixture = (): StoreStatus => ({ published: true, accepting: true, maintenance: false, message: '' });
 
 /* ---------- Team ---------- */

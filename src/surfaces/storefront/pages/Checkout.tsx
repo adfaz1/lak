@@ -20,6 +20,7 @@ import {
 import { useCatalog, useConfig } from '../data';
 import { shipOptions } from '../bridge';
 import { simNow, useSim } from '../review';
+import { CheckoutQuestions, useCheckoutExtras } from '../../dashboard/products/storefront-parts';
 
 const FIELD_ORDER: (keyof AddrErr)[] = ['email', 'name', 'phone', 'city', 'district', 'street', 'building', 'nationalCode'];
 const radioCard = 'flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-fg/30 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-500/[.04] has-[:checked]:ring-1 has-[:checked]:ring-brand-600 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:border-border';
@@ -69,6 +70,8 @@ export default function Checkout() {
   const methodOk = offered.includes(co.method) && !elig(co.method);
   const totals = computeTotals(lines, { discount, ship, freeShip, cod: co.method === 'cod' && methodOk, codFee: cfg.codFee });
   const errs = validateAddress(co.addr, { email: co.email });
+  // Store questions (order custom fields), purchase limits, age confirmation and pre-order terms (dashboard → Products).
+  const cx = useCheckoutExtras(lines, products, city);
   const pending = pendingForSession();
   const showErr = (k: keyof AddrErr) => (tried || touched[k] ? errs[k] : undefined);
   const touch = (k: keyof AddrErr) => () => setTouched((x) => ({ ...x, [k]: true }));
@@ -116,6 +119,7 @@ export default function Checkout() {
     const first = FIELD_ORDER.find((k) => errs[k]);
     if (first) { document.getElementById(`sf-f-${first}`)?.focus(); return false; }
     if (!shipOk) { document.getElementById('sf-ship-h')?.focus(); return false; }
+    if (!cx.ok) { document.getElementById('sf-x-h')?.focus(); return false; }
     if (!methodOk) { document.getElementById('sf-pay-h')?.focus(); return false; }
     return true;
   };
@@ -126,7 +130,7 @@ export default function Checkout() {
     lock.current = true;
     setBusy(true);
     checkoutStore.set((c) => ({ ...c, notice: undefined }));
-    const { order } = submit(buildDraft());
+    const { order } = submit(buildDraft(), cx.extras);
     if (!canPay(order.pay.state)) {
       lock.current = false;
       setBusy(false);
@@ -140,8 +144,8 @@ export default function Checkout() {
   const doubleSubmit = () => {
     if (lock.current || pending || !valid()) return;
     const d = buildDraft();
-    const a = submit(d);
-    const b = submit(d);
+    const a = submit(d, cx.extras);
+    const b = submit(d, cx.extras);
     const n = ordersStore.get().filter((o) => o.key === a.order.key).length;
     setDouble(t.doubleNote(String(n), b.order.ref));
     lock.current = true;
@@ -378,6 +382,14 @@ export default function Checkout() {
             )}
             {city && <SimNote>{t.shipSim}</SimNote>}
           </>, true)}
+
+          {(cx.questions.length > 0 || cx.problems.length > 0 || !!cx.age || !!cx.preorder) && (
+            <section aria-labelledby="sf-x-h" className={cn(PANEL, 'space-y-5 p-5 sm:p-6')}>
+              <h2 id="sf-x-h" tabIndex={-1} className="text-[17px] font-semibold focus:outline-none">{tx('تفاصيل يطلبها المتجر', 'Details the store needs')}</h2>
+              <CheckoutQuestions questions={cx.questions} answers={cx.answers} errors={cx.errors} show={tried} problems={cx.problems} age={cx.age} ageOk={cx.ageOk} preorder={cx.preorder}
+                onAnswer={(id, v) => checkoutStore.set((c) => ({ ...c, answers: { ...(c.answers ?? {}), [id]: v } }))} onAge={(v) => checkoutStore.set((c) => ({ ...c, ageOk: v }))} />
+            </section>
+          )}
 
           {step(4, 'sf-pay-h', t.sPay, <>
             {notice}

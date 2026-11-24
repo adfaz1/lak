@@ -8,6 +8,7 @@ import {
 } from '../../merchant/catalog';
 import { available, levelOf, lowStock, type AdjReason, type Level, type StockLog } from '../../merchant/inventory';
 import { productPhoto } from '../model/media';
+import { emptySpecDraft, fromSpecDraft, riyadhToday, stockFor, toSpecDraft, traits, type SpecDraft } from '../../merchant/catalog-extras';
 
 export const STATUSES: ProductStatus[] = ['active', 'draft', 'archived'];
 export const CHANNELS: Channel[] = ['online', 'market', 'app'];
@@ -21,22 +22,23 @@ export interface ListFilter { q: string; tab: StatusTab; category: string; chann
 export const readTab = (v: string | null): StatusTab => (v === 'active' || v === 'draft' || v === 'archived' ? v : 'all');
 export const readChannel = (v: string | null): Channel | '' => (v === 'online' || v === 'market' || v === 'app' ? v : '');
 
-/** Units that can still be sold across warehouses; null for digital products (no stock). */
+/**
+ * Units that can still be sold: warehouse stock for physical goods and food, unsold codes, open booking places, the
+ * scarcest bundle component; null when there is no limit (digital download, service). Rules: merchant/catalog-extras.
+ */
 export function stockOf(p: Product, levels: Level[]): number | null {
-  if (p.type === 'digital') return null;
-  const skus = new Set(skusOf(p));
-  return levels.filter((l) => skus.has(l.sku)).reduce((s, l) => s + available(l), 0);
+  return stockFor(p, levels, riyadhToday());
 }
 /** Whether any of the product's SKUs is at its reorder point in a warehouse. */
 export function isLow(p: Product, levels: Level[]): boolean {
-  if (p.type === 'digital') return false;
+  if (!traits(p.type).warehouse) return false;
   const skus = new Set(skusOf(p));
   return lowStock(levels).some((l) => skus.has(l.sku));
 }
 
 /** How many of the product's SKUs are at or below their threshold in at least one warehouse. */
 export function lowSkuCount(p: Product, levels: Level[]): number {
-  if (p.type === 'digital') return 0;
+  if (!traits(p.type).warehouse) return 0;
   const skus = new Set(skusOf(p));
   return new Set(lowStock(levels).filter((l) => skus.has(l.sku)).map((l) => l.sku)).size;
 }
@@ -120,6 +122,10 @@ export interface EditDraft extends Omit<ProductDraft, 'variants'> {
   variants: EditVariant[]; category: L; stockBy: StockBy; tags: string[]; /** Name of the product this unsaved draft was copied from. */ copyOf?: string;
   /** VAT applies (default). Older session drafts may lack it. */ taxable?: boolean;
   /** Colour × size combinations the merchant removed on purpose, as `colour|size` keys (lower case); never re-added by a rebuild. */ skip?: string[];
+  /* Catalogue depth (Phase C). Older session drafts may lack these. */
+  /** Type-specific fields as typed (catalog-extras SpecDraft). */ spec?: SpecDraft;
+  /** Brand id; '' = none. */ brand?: string;
+  /** Product custom-field values by field id. */ attrs?: Record<string, string>;
 }
 
 export const CATEGORIES: L[] = [
@@ -149,9 +155,12 @@ export function mediaOf(p: Product): Media[] {
 export const listPhoto = (p: Product) => (p.media.length ? mediaSrc(p.media[0]) : productPhoto(p.id));
 
 export function toEditDraft(p: Product | undefined): EditDraft {
-  if (!p) return { ...emptyDraft(), variants: [], category: CATEGORIES[0], stockBy: zeroStock(), tags: [], taxable: true };
+  if (!p) return { ...emptyDraft(), variants: [], category: CATEGORIES[0], stockBy: zeroStock(), tags: [], taxable: true, spec: emptySpecDraft(), brand: '', attrs: {} };
   const d = toDraft(p);
-  return { ...d, media: mediaOf(p), variants: d.variants.map((v) => ({ ...v, stockBy: zeroStock() })), category: p.category, stockBy: zeroStock(), tags: [...(p.tags ?? [])], taxable: p.taxable !== false, skip: missingCombos(p.colors, p.sizes, p.variants) };
+  return {
+    ...d, media: mediaOf(p), variants: d.variants.map((v) => ({ ...v, stockBy: zeroStock() })), category: p.category, stockBy: zeroStock(), tags: [...(p.tags ?? [])], taxable: p.taxable !== false, skip: missingCombos(p.colors, p.sizes, p.variants),
+    spec: toSpecDraft(p.spec), brand: p.brand ?? '', attrs: { ...(p.attrs ?? {}) },
+  };
 }
 
 /** Rebuild the colour × size matrix (catalogue rule), keeping typed values and giving new rows per-warehouse stock. */
@@ -168,7 +177,7 @@ const okStock = (s: string | undefined) => { const n = parseIntStrict((s ?? '').
  */
 export function validateEdit(d: EditDraft, taken: Set<string>, known: Set<string>): Record<string, DraftError> {
   const e = validateDraft({ ...d, stock: '0', variants: d.variants.map((v) => ({ ...v, stock: '0' })) }, taken);
-  if (d.type === 'physical') {
+  if (traits(d.type).warehouse) {
     if (!d.variants.length && !known.has(d.sku.trim())) for (const loc of LOC_IDS) if (!okStock(d.stockBy[loc])) e[`stock.${loc}`] = 'stock';
     d.variants.forEach((v, i) => { if (!known.has(v.sku.trim())) for (const loc of LOC_IDS) if (!okStock(v.stockBy[loc])) e[`v.${i}.stock.${loc}`] = 'stock'; });
   }
@@ -197,12 +206,20 @@ export function sectionOf(k: string): SectionId {
 
 export function fromEditDraft(d: EditDraft, id: string, version: number): Product {
   const tags = normaliseTags(d.tags ?? []);
-  return { ...fromDraft(d as ProductDraft, id, version, d.media), category: d.category, ...(tags.length ? { tags } : {}), ...(d.taxable === false ? { taxable: false } : {}) };
+  const spec = fromSpecDraft(d.type, d.spec ?? emptySpecDraft());
+  const attrs = Object.fromEntries(Object.entries(d.attrs ?? {}).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v));
+  // Types without colour/size options keep no variants (codes, slots and components are the "options").
+  const noVariants = d.type === 'code' || d.type === 'booking' || d.type === 'bundle' || d.type === 'service';
+  const base = fromDraft(noVariants ? { ...(d as ProductDraft), colors: [], sizes: [], variants: [] } : (d as ProductDraft), id, version, d.media);
+  return {
+    ...base, category: d.category, ...(tags.length ? { tags } : {}), ...(d.taxable === false ? { taxable: false } : {}),
+    ...(spec ? { spec } : {}), ...(d.brand ? { brand: d.brand } : {}), ...(Object.keys(attrs).length ? { attrs } : {}),
+  };
 }
 
 /** Inventory levels for SKUs that do not exist yet, with the initial quantities typed per warehouse. */
 export function levelsForNew(d: EditDraft, known: Set<string>): Level[] {
-  if (d.type !== 'physical') return [];
+  if (!traits(d.type).warehouse) return [];
   const fresh: { sku: string; by: StockBy }[] = d.variants.length
     ? d.variants.filter((v) => !known.has(v.sku.trim())).map((v) => ({ sku: v.sku.trim(), by: v.stockBy }))
     : known.has(d.sku.trim()) ? [] : [{ sku: d.sku.trim(), by: d.stockBy }];
@@ -352,6 +369,8 @@ export function duplicateDraft(p: Product, products: Product[]): EditDraft {
     // Media ids are only unique within a product, so the copy keeps them (and with them the licensed photos).
     media: d.media.map((m) => ({ ...m })),
     variants: d.variants.map((v) => ({ ...v, sku: variantSku(sku, v.color, v.size), isNew: true, stock: '0', stockBy: Object.fromEntries(LOC_IDS.map((l) => [l, '0'])) })),
+    // Codes and bookings belong to the original: a copy starts with an empty pool and empty slots.
+    spec: { ...(d.spec ?? emptySpecDraft()), codesText: '', sold: [], slots: (d.spec?.slots ?? []).map((x) => ({ ...x, booked: 0 })) },
   };
 }
 
@@ -431,7 +450,7 @@ export function previewBulk(products: Product[], levels: Level[], ids: string[],
         break;
       }
       case 'stock': {
-        if (p.type === 'digital') { error = 'digital'; break; }
+        if (!traits(p.type).warehouse) { error = 'digital'; break; }
         const n = parseIntStrict(v.replace(/^\+/, '')) ?? 0;
         const loc = op.loc ?? '';
         before = onHandAt(p, levels, loc);
@@ -640,7 +659,7 @@ export function exportRows(products: Product[], levels: Level[], cols: ExportCol
   for (const p of products) {
     const units = perVariant && p.variants.length ? p.variants.map((v) => ({ sku: v.sku, price: v.price, variant: [v.color, v.size].filter(Boolean).join(' / '), skus: [v.sku] })) : [{ sku: p.sku, price: p.price, variant: '', skus: skusOf(p) }];
     for (const u of units) {
-      const avail = p.type === 'digital' ? '' : levels.filter((l) => u.skus.includes(l.sku)).reduce((s, l) => s + available(l), 0);
+      const avail = !traits(p.type).warehouse ? '' : levels.filter((l) => u.skus.includes(l.sku)).reduce((s, l) => s + available(l), 0);
       const m = margin(u.price, p.cost);
       const val: Record<ExportCol, string | number> = {
         name: p.name.en, nameAr: p.name.ar, sku: u.sku, variant: u.variant, status: p.status, price: money(u.price), compareAt: money(p.compareAt), cost: money(p.cost),

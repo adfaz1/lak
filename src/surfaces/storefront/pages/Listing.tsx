@@ -10,6 +10,12 @@ import {
 import { Crumbs, H1, Price, ProductPhoto, Swatch, WRAP, sizeLabel, to, useS } from '../kit';
 import { accountStore, toggleWish } from '../state';
 import { useCatalog, useCategories } from '../data';
+import { catalogXStore } from '../../merchant/stores';
+import { filterKeys, filterPreview, type FilterKey } from '../../merchant/catalog-extras';
+import { BrandMark } from '../../dashboard/products/storefront-parts';
+import { searchLogStore, searchRedirectsStore } from '../../merchant/stores';
+import { addSearch, redirectFor } from '../../merchant/demand';
+import { riyadhDate } from '../bridge';
 
 const csv = (s: string | null) => (s ? s.split(',').filter(Boolean) : []);
 
@@ -27,12 +33,22 @@ export function readQuery(route: Route, cat?: CatId): ListQuery {
   };
 }
 
-function hrefFor(base: string, q: ListQuery): string {
+/** Brand and custom-field filters (dashboard → Products → Options → Shopper filters): `brand=a,b` and `attr=<field>:<value>,…`. */
+interface XQuery { brands: string[]; attrs: string[] }
+const readX = (route: Route): XQuery => ({ brands: csv(route.query.get('brand')), attrs: csv(route.query.get('attr')) });
+function hrefFor(base: string, q: ListQuery, xq: XQuery = { brands: [], attrs: [] }): string {
   return to(base, {
     q: q.q, sort: q.sort === 'featured' ? undefined : q.sort, size: q.sizes.join(','), color: q.colors.join(','),
-    stock: q.inStockOnly ? '1' : undefined, price: q.price,
+    stock: q.inStockOnly ? '1' : undefined, price: q.price, brand: xq.brands.join(',') || undefined, attr: xq.attrs.join(',') || undefined,
   });
 }
+const xMatch = (p: Product, xq: XQuery) => {
+  if (xq.brands.length && !xq.brands.includes(p.x?.brand?.id ?? '')) return false;
+  const byField = new Map<string, string[]>();
+  for (const a of xq.attrs) { const i = a.indexOf(':'); if (i > 0) byField.set(a.slice(0, i), [...(byField.get(a.slice(0, i)) ?? []), a.slice(i + 1)]); }
+  for (const [f, vals] of byField) if (!vals.includes(p.x?.attrValues[f] ?? '')) return false;
+  return true;
+};
 
 const chip = 'inline-flex h-10 cursor-pointer select-none items-center gap-2 rounded-full border border-border bg-surface px-3.5 text-[13px] font-medium text-fg transition-colors hover:border-fg/40 has-[:checked]:border-fg has-[:checked]:bg-fg has-[:checked]:text-bg has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-brand-500';
 
@@ -44,15 +60,31 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
   const validCat = search || cat === 'all' || !!category;
   const base = search ? '/search' : `/c/${cat ?? 'all'}`;
   const q = readQuery(route, category?.id);
-  const results = validCat ? listProducts(products, q) : [];
-  const f = facets(products, category?.id, q.q);
+  const redirects = searchRedirectsStore.use();
+  const xq = readX(route);
+  const found = validCat ? listProducts(products, q).filter((p) => xMatch(p, xq)) : [];
+  // A term that finds nothing may have a redirect the merchant set from the search report (category or product).
+  const redirect = search && q.q && !found.length ? redirectFor(redirects, q.q) : undefined;
+  const results = redirect ? products.filter((p) => (redirect.target.kind === 'product' ? p.id === redirect.target.id : p.cat === redirect.target.id)) : found;
+  // Record the search for the merchant's report once the shopper settles on a term (not every keystroke).
+  useEffect(() => {
+    if (!search || !q.q) return;
+    const t = window.setTimeout(() => searchLogStore.set((l) => addSearch(l, q.q ?? '', found.length, riyadhDate(Date.now()), lang)), 1200);
+    return () => window.clearTimeout(t);
+  }, [search, q.q]); // eslint-disable-line react-hooks/exhaustive-deps
+  const f = facets(products.filter((p) => p.x?.type !== 'booking'), category?.id, q.q);
+  const cx = catalogXStore.use();
+  const keys = filterKeys(cx.filters, cx.fields);
+  const scope = products.filter((p) => (!category || p.cat === category.id) && (!q.q || listProducts([p], { ...q, sizes: [], colors: [], inStockOnly: false, price: undefined }).length));
+  const preview = filterPreview(scope.map((p) => ({ brand: p.x?.brand?.id, colors: p.colors, sizes: p.sizes, attrs: p.x?.attrValues, inStock: p.variants.some((v) => v.stock > 0), price: Math.min(...p.variants.map((v) => v.price)) })), keys, cx.filters, { brands: cx.brands, fields: cx.fields });
+  const shown = (k: FilterKey) => preview.find((x) => x.key === k)?.hiddenWhy !== 'off';
   const [drawer, setDrawer] = useState(false);
   const [typed, setTyped] = useState(q.q ?? '');
   useEffect(() => { setTyped(q.q ?? ''); }, [q.q]);
-  const set = (patch: Partial<ListQuery>) => replace(hrefFor(base, { ...q, ...patch }));
+  const set = (patch: Partial<ListQuery>, xPatch?: Partial<XQuery>) => replace(hrefFor(base, { ...q, ...patch }, { ...xq, ...xPatch }));
   const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
-  const nActive = q.sizes.length + q.colors.length + (q.inStockOnly ? 1 : 0) + (q.price ? 1 : 0);
-  const clear = () => set({ sizes: [], colors: [], inStockOnly: false, price: undefined });
+  const nActive = q.sizes.length + q.colors.length + (q.inStockOnly ? 1 : 0) + (q.price ? 1 : 0) + xq.brands.length + xq.attrs.length;
+  const clear = () => set({ sizes: [], colors: [], inStockOnly: false, price: undefined }, { brands: [], attrs: [] });
   const isPerfume = category?.id === 'fragrance';
 
   if (!validCat) {
@@ -71,18 +103,35 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
       <div className="flex flex-wrap gap-2">{children}</div>
     </fieldset>
   );
+  // The merchant chooses which filters show and their order; a brand or field filter shows only with enough values.
+  const block = (k: FilterKey): ReactNode => {
+    if (!shown(k)) return null;
+    if (k === 'size') return f.sizes.length > 0 && group(isPerfume ? t.volume : t.size, f.sizes.map((s) => (
+      <label key={s} className={chip}><input type="checkbox" className="sr-only" checked={q.sizes.includes(s)} onChange={() => set({ sizes: toggle(q.sizes, s) })} /><bdi>{sizeLabel(s, lang)}</bdi></label>
+    )));
+    if (k === 'color') return f.colors.length > 0 && group(t.color, f.colors.map((c) => (
+      <label key={c} className={chip}><input type="checkbox" className="sr-only" checked={q.colors.includes(c)} onChange={() => set({ colors: toggle(q.colors, c) })} /><Swatch c={c} />{l(colorInfo(c).name)}</label>
+    )));
+    if (k === 'price') return group(t.price, (Object.keys(PRICE_BANDS) as PriceBand[]).map((b) => (
+      <label key={b} className={chip}><input type="checkbox" className="sr-only" checked={q.price === b} onChange={() => set({ price: q.price === b ? undefined : b })} />{t.bands[b]}</label>
+    )));
+    if (k === 'availability') return group(t.avail, <label className={chip}><input type="checkbox" className="sr-only" checked={q.inStockOnly} onChange={(e) => set({ inStockOnly: e.target.checked })} />{t.inStockOnly}</label>);
+    const pv = preview.find((x) => x.key === k);
+    if (!pv || pv.hiddenWhy) return null;
+    if (k === 'brand') return group(lang === 'ar' ? 'العلامة التجارية' : 'Brand', pv.values.map((v) => {
+      const b = cx.brands.find((x) => x.id === v.value);
+      return <label key={v.value} className={chip}><input type="checkbox" className="sr-only" checked={xq.brands.includes(v.value)} onChange={() => set({}, { brands: toggle(xq.brands, v.value) })} />{b && <BrandMark b={b} size={18} />}{l(v.label)}<span className="text-[11px] opacity-70 tabular-nums">{v.count}</span></label>;
+    }));
+    const field = cx.fields.find((x) => `field:${x.id}` === k);
+    if (!field) return null;
+    return group(l(field.label), pv.values.map((v) => {
+      const token = `${field.id}:${v.value}`;
+      return <label key={v.value} className={chip}><input type="checkbox" className="sr-only" checked={xq.attrs.includes(token)} onChange={() => set({}, { attrs: toggle(xq.attrs, token) })} />{l(v.label)}<span className="text-[11px] opacity-70 tabular-nums">{v.count}</span></label>;
+    }));
+  };
   const filters = (
     <div className="space-y-7">
-      {f.sizes.length > 0 && group(isPerfume ? t.volume : t.size, f.sizes.map((s) => (
-        <label key={s} className={chip}><input type="checkbox" className="sr-only" checked={q.sizes.includes(s)} onChange={() => set({ sizes: toggle(q.sizes, s) })} /><bdi>{sizeLabel(s, lang)}</bdi></label>
-      )))}
-      {f.colors.length > 0 && group(t.color, f.colors.map((c) => (
-        <label key={c} className={chip}><input type="checkbox" className="sr-only" checked={q.colors.includes(c)} onChange={() => set({ colors: toggle(q.colors, c) })} /><Swatch c={c} />{l(colorInfo(c).name)}</label>
-      )))}
-      {group(t.price, (Object.keys(PRICE_BANDS) as PriceBand[]).map((b) => (
-        <label key={b} className={chip}><input type="checkbox" className="sr-only" checked={q.price === b} onChange={() => set({ price: q.price === b ? undefined : b })} />{t.bands[b]}</label>
-      )))}
-      {group(t.avail, <label className={chip}><input type="checkbox" className="sr-only" checked={q.inStockOnly} onChange={(e) => set({ inStockOnly: e.target.checked })} />{t.inStockOnly}</label>)}
+      {keys.map((k) => <div key={k} className="empty:hidden">{block(k)}</div>)}
     </div>
   );
 
@@ -91,6 +140,8 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
     ...q.colors.map((c) => ({ k: `c-${c}`, label: l(colorInfo(c).name), off: () => set({ colors: q.colors.filter((x) => x !== c) }) })),
     ...(q.price ? [{ k: 'p', label: t.bands[q.price], off: () => set({ price: undefined }) }] : []),
     ...(q.inStockOnly ? [{ k: 'st', label: t.inStockOnly, off: () => set({ inStockOnly: false }) }] : []),
+    ...xq.brands.map((b) => ({ k: `b-${b}`, label: l(cx.brands.find((x) => x.id === b)?.name ?? { ar: b, en: b }), off: () => set({}, { brands: xq.brands.filter((x) => x !== b) }) })),
+    ...xq.attrs.map((a) => { const fid = a.slice(0, a.indexOf(':')), val = a.slice(a.indexOf(':') + 1); const o = cx.fields.find((x) => x.id === fid)?.options.find((x) => x.en === val); return { k: `a-${a}`, label: o ? l(o) : val, off: () => set({}, { attrs: xq.attrs.filter((x) => x !== a) }) }; }),
   ];
 
   const noCatalogue = products.length === 0;
@@ -160,6 +211,7 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
               </div>
             )}
             <div className="mt-6">
+              {redirect && results.length > 0 && <p role="status" className="mb-4 text-sm text-muted">{lang === 'ar' ? `لا نتائج لـ«${q.q}». نعرض لك: ${redirect.target.name.ar}` : `No results for “${q.q}”. Showing: ${redirect.target.name.en}`}</p>}
               {results.length ? <ProductGrid products={results} /> : search && !nActive ? (
                 <EmptyState as="h2" icon={<Search className="size-6" aria-hidden="true" />} title={t.noSearch(q.q ?? '')}>{t.noSearchHint}</EmptyState>
               ) : (

@@ -18,6 +18,7 @@ import {
   type Actor, type PayView, type StockEffect,
 } from '../../merchant/ops';
 import { available, type Level, type StockLog } from '../../merchant/inventory';
+import { orderExtrasText } from '../../merchant/catalog-extras';
 
 /* ---------- List query (lives in the URL) ---------- */
 
@@ -408,12 +409,12 @@ export function runOpsBulk(all: Order[], refs: string[], action: OpsBulk, fails:
 const csvCell = (v: string | number) => { const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
 /** One row per order. Money in riyals with two decimals; UTF-8 with BOM so Excel shows Arabic. */
 export function ordersCsv(orders: Order[], lang: 'ar' | 'en', now: number): string {
-  const head = ['ref', 'date', 'customer', 'city', 'channel', 'payment', 'pay_method', 'fulfilment', 'shipment', 'cancelled', 'items', 'units', 'subtotal', 'discount', 'shipping', 'total', 'vat', 'refunded', 'tags'];
+  const head = ['ref', 'date', 'customer', 'city', 'channel', 'payment', 'pay_method', 'fulfilment', 'shipment', 'cancelled', 'items', 'units', 'subtotal', 'discount', 'shipping', 'total', 'vat', 'refunded', 'tags', 'custom_fields'];
   const rows = orders.map((o) => {
     const m = moneyBreakdown(o);
     return [o.ref, placedDay(o, now), o.customer[lang], o.city[lang], o.channel, payView(o), methodOf(o) ?? '', o.ful, o.ship, o.cancelled ? 'yes' : '',
       o.items.map((i) => `${i.sku} x${i.qty}`).join(' | '), m.units, (m.subtotal / 100).toFixed(2), (m.discount / 100).toFixed(2), (m.shipping / 100).toFixed(2),
-      (m.total / 100).toFixed(2), (m.vat / 100).toFixed(2), (m.refunded / 100).toFixed(2), (o.tags ?? []).join(' | ')];
+      (m.total / 100).toFixed(2), (m.vat / 100).toFixed(2), (m.refunded / 100).toFixed(2), (o.tags ?? []).join(' | '), orderExtrasText(o.extras, lang)];
   });
   return '﻿' + [head, ...rows].map((r) => r.map(csvCell).join(',')).join('\n');
 }

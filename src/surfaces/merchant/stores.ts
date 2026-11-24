@@ -2,7 +2,7 @@
 // Simulated state only: not a ledger, not a permission system.
 import { createStore } from '../../core/store';
 import { allOrders, bindLocations, locationFixtures, type Location } from './domain';
-import { categoryFixtures, collectionFixtures, productFixtures, skusOf, type Category, type Collection, type ProductDraft } from './catalog';
+import { categoryFixtures, collectionFixtures, productFixtures, shipsWeighed, skusOf, typeFixtures, type Category, type Collection, type ProductDraft } from './catalog';
 import { initialLevels, syncStockAlerts, transferFixtures, withStateFixtures, type StockAlertEntry, type StockLog } from './inventory';
 import { financeFixtures, type BankDetails, type Plan } from './finance';
 import {
@@ -18,10 +18,10 @@ import { shippingFixture, type ShippingSetup } from './workspace';
 import type { Role } from './perms';
 
 export const ordersStore = createStore.key('merchant.ordersStore')(allOrders);
-export const productsStore = createStore.key('merchant.productsStore')(productFixtures);
+export const productsStore = createStore.key('merchant.productsStore')(() => [...productFixtures(), ...typeFixtures()]);
 // Digital products (gift cards) have no warehouse stock.
 // withStateFixtures: a few demo holds (awaiting payment, damaged, safety reserve) so every stock state has an example.
-export const levelsStore = createStore.key('merchant.levelsStore')(() => withStateFixtures(initialLevels(productFixtures().filter((p) => p.type !== 'digital').flatMap(skusOf))));
+export const levelsStore = createStore.key('merchant.levelsStore')(() => withStateFixtures(initialLevels([...productFixtures(), ...typeFixtures()].filter((p) => shipsWeighed(p.type)).flatMap(skusOf))));
 export const stockLogStore = createStore.key('merchant.stockLogStore')<StockLog[]>(() => [
   { id: 'ADJ-201', sku: 'OUD-100', loc: 'ryd', delta: -2, before: 6, after: 4, reason: 'damaged', who: 'فيصل', note: 'انكسرت أثناء التغليف' },
   { id: 'ADJ-200', sku: 'BAG-LTH-01', loc: 'ryd', delta: 5, before: 2, after: 7, reason: 'received', who: 'فيصل', note: 'توريد من المورّد' },
@@ -166,3 +166,47 @@ import { cannedFixtures, caseFixtures, type Canned, type Case } from './inbox';
 export const inboxStore = createStore.key('merchant.inboxStore')<Case[]>(() => caseFixtures());
 /** Bilingual canned replies, editable in the inbox. */
 export const cannedStore = createStore.key('merchant.cannedStore')<Canned[]>(cannedFixtures);
+
+/* ---------- Shopper demand signals (reports group; merchant/demand.ts). Recorded by the storefront. ---------- */
+import { notifyFixtures, searchFixtures, wishFixtures, type NotifyRequest, type SearchEvent, type SearchRedirect, type WishEvent } from './demand';
+/** Settled storefront searches with the number of results the shopper saw (seeded history + this session). */
+export const searchLogStore = createStore.key('merchant.searchLogStore')<SearchEvent[]>(() => searchFixtures());
+/** «Notify me when available» requests on sold-out SKUs. No shopper contact is kept here (simulated). */
+export const notifyStore = createStore.key('merchant.notifyStore')<NotifyRequest[]>(notifyFixtures);
+/** Wishlist adds and removes from the storefront. */
+export const wishEventsStore = createStore.key('merchant.wishEventsStore')<WishEvent[]>(wishFixtures);
+/** Search terms that found nothing, sent to a product or category the merchant chose. */
+export const searchRedirectsStore = createStore.key('merchant.searchRedirectsStore')<SearchRedirect[]>(() => []);
+
+/* ---------- Invoice customisation (reports group; merchant/invoice.ts). Simulated sending. ---------- */
+import { invoiceConfigFixture, invoiceDue, type InvoiceConfig } from './invoice';
+import { composeNotice, noticeEvents, withMessages, SYSTEM as INVOICE_SYSTEM } from './ops';
+/** How the simplified tax invoice looks and when it is sent (Settings → Invoice). */
+export const invoiceConfigStore = createStore.key('merchant.invoiceConfigStore')<InvoiceConfig>(invoiceConfigFixture);
+{
+  // When the merchant chose «send when paid/delivered», the order that reaches that state records the «Invoice»
+  // customer message on the channels set in customer notifications. Nothing leaves the browser.
+  const write = ordersStore.set;
+  ordersStore.set = (next) => {
+    const before = ordersStore.get();
+    write(next);
+    const cfg = invoiceConfigStore.get();
+    if (cfg.sendOn === 'manual') return;
+    const after = ordersStore.get();
+    const prev = new Map(before.map((o) => [o.ref, o]));
+    let changed = false;
+    const out = after.map((o) => {
+      const b = prev.get(o.ref);
+      if (b === o) return o;
+      if (!invoiceDue(cfg, b, o, noticeEvents(b, o).map((e) => e.event))) return o;
+      changed = true;
+      return withMessages(o, composeNotice(o, 'invoice', noticesStore.get(), noticeCtx(o), INVOICE_SYSTEM));
+    });
+    if (changed) write(out);
+  };
+}
+
+/* ---------- Catalogue depth (Phase C, products group; merchant/catalog-extras.ts) ---------- */
+import { catalogXFixtures, type CatalogX } from './catalog-extras';
+/** Brands, custom fields, size charts, shopper filters, pre-order campaigns and purchase restrictions. */
+export const catalogXStore = createStore.key('merchant.catalogXStore')<CatalogX>(() => catalogXFixtures());

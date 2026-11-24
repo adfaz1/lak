@@ -3,7 +3,7 @@
 import { catKey, type Category, type Media, type Product } from '../../merchant/catalog';
 import type { L } from '../../merchant/domain';
 import { productPhoto } from '../model/media';
-import { parseIntStrict, parseMoney } from '../../merchant/catalog';
+import { parseIntStrict, parseMoney, shipsWeighed } from '../../merchant/catalog';
 import type { EditDraft, SectionId } from './model';
 
 export type QualityKey = 'price' | 'nameEn' | 'descAr' | 'descEn' | 'image' | 'alt' | 'images3' | 'category' | 'cost' | 'seo' | 'weight' | 'barcode';
@@ -71,11 +71,11 @@ export function quality(x: QualityInput, cats: Category[]): Quality {
 
 export const productInput = (p: Product): QualityInput => ({
   price: p.price, nameEn: p.name.en, descAr: p.desc.ar, descEn: p.desc.en, media: p.media, hasPhoto: !!productPhoto(p.id), category: p.category,
-  cost: p.cost, seoTitle: p.seo.title, seoDesc: p.seo.desc, physical: p.type === 'physical', weight: p.weight, barcode: p.barcode,
+  cost: p.cost, seoTitle: p.seo.title, seoDesc: p.seo.desc, physical: shipsWeighed(p.type), weight: p.weight, barcode: p.barcode,
 });
 export const draftInput = (d: EditDraft): QualityInput => ({
   price: parseMoney(d.price), nameEn: d.nameEn, descAr: d.descAr, descEn: d.descEn, media: d.media, hasPhoto: false, category: d.category,
-  cost: d.cost.trim() ? parseMoney(d.cost) : null, seoTitle: d.seoTitle, seoDesc: d.seoDesc, physical: d.type === 'physical',
+  cost: d.cost.trim() ? parseMoney(d.cost) : null, seoTitle: d.seoTitle, seoDesc: d.seoDesc, physical: shipsWeighed(d.type),
   weight: parseIntStrict(d.weight.trim() || 'x'), barcode: d.barcode,
 });
 export const productQuality = (p: Product, cats: Category[]) => quality(productInput(p), cats);

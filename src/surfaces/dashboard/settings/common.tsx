@@ -2,7 +2,7 @@
 // review-only tools (role preview, failing save) and the no-permission state.
 import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
-import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical, UserCircle, BadgeCheck, ListTree } from 'lucide-react';
+import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical, UserCircle, BadgeCheck, ListTree, ReceiptText, FileSpreadsheet } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, navigate, useRoute } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
@@ -15,11 +15,13 @@ import { CATEGORIES, ROLE_LABEL, canOpen, rolesFor, type CatId } from './model';
 import { settingsSimStore } from './stores';
 
 export const ICON: Record<CatId, ComponentType<{ className?: string }>> = {
-  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages, account: UserCircle, verification: BadgeCheck, 'order-statuses': ListTree,
+  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages, account: UserCircle, verification: BadgeCheck, 'order-statuses': ListTree, invoice: ReceiptText, exports: FileSpreadsheet,
 };
 export const settingsHref = (cat?: string, q?: Record<string, string | undefined>) => link(`/dashboard/settings${cat ? `/${cat}` : ''}`, q);
 
 /** Category page frame: back link, title, side navigation on desktop. */
+/** Pages that need the full width (live document preview beside the form). */
+const WIDE: CatId[] = ['invoice'];
 export function Frame({ cat, actions, children, meta }: { cat: CatId; actions?: ReactNode; children: ReactNode; meta?: ReactNode }) {
   const tx = useTx();
   const { lang } = useLang();
@@ -30,8 +32,8 @@ export function Frame({ cat, actions, children, meta }: { cat: CatId; actions?: 
     <div className="space-y-6">
       <ReviewTools />
       <PageHeader back={{ href: settingsHref(), label: tx('الإعدادات', 'Settings') }} title={c.title[lang]} description={c.desc[lang]} actions={actions} meta={meta} />
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav aria-label={tx('أقسام الإعدادات', 'Settings sections')} className="hidden lg:block">
+      <div className={cn('grid grid-cols-1 gap-6', WIDE.includes(cat) ? '2xl:grid-cols-[220px_minmax(0,1fr)]' : 'lg:grid-cols-[220px_minmax(0,1fr)]')}>
+        <nav aria-label={tx('أقسام الإعدادات', 'Settings sections')} className={WIDE.includes(cat) ? 'hidden 2xl:block' : 'hidden lg:block'}>
           <ul className="sticky top-24 space-y-0.5">
             {CATEGORIES.map((x) => {
               const I = ICON[x.id];
@@ -48,7 +50,7 @@ export function Frame({ cat, actions, children, meta }: { cat: CatId; actions?: 
             })}
           </ul>
         </nav>
-        <div className="min-w-0 max-w-3xl space-y-6">{children}</div>
+        <div className={cn('min-w-0 space-y-6', !WIDE.includes(cat) && 'max-w-3xl')}>{children}</div>
       </div>
     </div>
   );

@@ -2,13 +2,16 @@
 // the announcement bar and homepage sections, all in one draft; preview on phone and desktop in the store's own look,
 // compare draft with live, publish with a change list, roll back to an earlier version, and the store status switches.
 import { useState, type ReactNode } from 'react';
-import { ArrowLeftRight, Eye, ExternalLink, Globe2, History, ShoppingBag, Smartphone, Upload } from 'lucide-react';
+import { ArrowLeftRight, Eye, ExternalLink, Globe2, History, ShoppingBag, Smartphone, Upload, Wrench } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, type Route } from '../../../core/router';
 import { StoreTabs, SubNotFound, storeHref } from './nav';
 import PagesPage from './pages';
 import MenusPage from './menus';
 import SeoPage from './seo';
+import LandingPages from './landing';
+import RedirectsPage from './redirects';
+import BlogPage from './blog';
 import { can, canSee } from '../../merchant/perms';
 import { logAction, settingsStore, themeStore } from '../../merchant/stores';
 import type { StoreIdentity, StoreStatus } from '../../merchant/workspace';
@@ -18,7 +21,7 @@ import { Alert, Field, Input, Modal, PageHeader, Simulated, Switch, Tabs, Textar
 import { useDashState, setDashState } from '../review';
 import { Locked, NoAccess, ReviewRole, useRole } from '../marketing/access';
 import {
-  MAINT_MAX, canRollback, identityPending, maintenanceError, nextVersion, pendingChanges, publish, publishBlock, rollbackTheme, sectionIssue, shopperView, toggleStatus, type StatusKey,
+  MAINT_MAX, canRollback, identityPending, maintenanceError, maintenanceExpired, maintenanceOn, nextVersion, untilIssue, pendingChanges, publish, publishBlock, rollbackTheme, sectionIssue, shopperView, toggleStatus, type StatusKey,
 } from './model';
 import { draftIdentity, type IdentityChange } from './identity';
 import IdentityPanel, { useIdentityLabels } from './identity-panel';
@@ -26,12 +29,18 @@ import SectionsPanel, { C_TONE, K_ICON, useKindLabels } from './sections';
 import AnnouncementPanel from './announcement';
 import { StorePreview } from './preview';
 import { mediaStore } from './state';
+import { riyadhMs, toRiyadh } from './landing-model';
+import { STORE_PALETTE } from './model';
+import { useUnsaved } from '../unsaved';
 
 export default function StorefrontSection({ route }: { route: Route }) {
   const sub = route.path[0];
   if (sub === 'pages') return <PagesPage route={route} />;
   if (sub === 'menus') return <MenusPage />;
   if (sub === 'seo') return <SeoPage route={route} />;
+  if (sub === 'landing') return <LandingPages route={route} />;
+  if (sub === 'redirects') return <RedirectsPage route={route} />;
+  if (sub === 'blog') return <BlogPage route={route} />;
   if (sub) return <SubNotFound />;
   return <ThemePage route={route} />;
 }
@@ -54,7 +63,7 @@ function ThemePage({ route }: { route: Route }) {
   const [review, setReview] = useState(false);
   const [note, setNote] = useState('');
   const [rollback, setRollback] = useState<number | null>(null);
-  const [statusDlg, setStatusDlg] = useState<StatusKey | null>(null);
+  const [statusDlg, setStatusDlg] = useState<StatusKey | null>(() => (route.query.get('dlg') === 'maintenance' ? 'maintenance' : null));
   const qEdit = route.query.get('edit') as EditTab | null;
   const edit: EditTab = qEdit && EDIT_TABS.includes(qEdit) ? qEdit : 'identity';
 
@@ -104,7 +113,7 @@ function ThemePage({ route }: { route: Route }) {
   const statusRows: { key: StatusKey; label: string; on: boolean; onText: string; offText: string; tone: Tone }[] = [
     { key: 'published', label: tx('ظهور المتجر', 'Store visible'), on: st.published, onText: tx('العملاء يجدون المتجر', 'Shoppers can find the store'), offText: tx('المتجر مخفي عن العملاء', 'Hidden from shoppers'), tone: st.published ? 'green' : 'gray' },
     { key: 'accepting', label: tx('استقبال الطلبات', 'Accepting orders'), on: st.accepting, onText: tx('يمكن إتمام الطلبات', 'Orders can be placed'), offText: tx('تصفح فقط، بلا طلبات', 'Browse only, no orders'), tone: st.accepting ? 'green' : 'amber' },
-    { key: 'maintenance', label: tx('وضع الصيانة', 'Maintenance mode'), on: st.maintenance, onText: st.message || tx('رسالة الصيانة تظهر', 'Maintenance message shown'), offText: tx('غير مفعّل', 'Off'), tone: st.maintenance ? 'amber' : 'gray' },
+    { key: 'maintenance', label: tx('وضع الصيانة', 'Maintenance mode'), on: maintenanceOn(st), onText: st.until ? tx(`حتى ${fmtUntil(st.until, 'ar')}`, `Until ${fmtUntil(st.until, 'en')}`) : st.message || tx('رسالة الصيانة تظهر', 'Maintenance message shown'), offText: maintenanceExpired(st) ? tx('انتهت تلقائيًا في موعدها', 'Ended by itself on schedule') : tx('غير مفعّل', 'Off'), tone: maintenanceOn(st) ? 'amber' : 'gray' },
   ];
   const sView = shopperView(st);
   const viewText = { hidden: tx('العملاء لا يرون المتجر', 'Shoppers cannot see the store'), maintenance: tx('العملاء يرون رسالة الصيانة', 'Shoppers see the maintenance message'), browseOnly: tx('العملاء يتصفحون ولا يطلبون', 'Shoppers can browse but not order'), open: tx('المتجر مفتوح ويستقبل الطلبات', 'The store is open and taking orders') }[sView];
@@ -280,15 +289,21 @@ function StatusModal({ k, st, onClose }: { k: StatusKey; st: StoreStatus; onClos
   const tx = useTx();
   const toast = useToast();
   const [msg, setMsg] = useState(st.message || tx('نُحدّث المتجر وسنعود قريبًا.', 'We are updating the store and will be back soon.'));
+  const [ends, setEnds] = useState<'manual' | 'at'>('manual');
+  const [until, setUntil] = useState(() => toRiyadh(Date.now() + 2 * 3600_000));
   const [tried, setTried] = useState(false);
-  const turningOn = !st[k];
+  const turningOn = k === 'maintenance' ? !maintenanceOn(st) : !st[k];
   const mErr = k === 'maintenance' && turningOn ? maintenanceError(msg) : null;
+  const untilMs = ends === 'at' ? riyadhMs(until) : null;
+  const uErr = k === 'maintenance' && turningOn ? untilIssue(untilMs, Date.now()) : null;
+  useUnsaved(k === 'maintenance' && turningOn && msg !== (st.message || msg), { ar: 'رسالة الصيانة', en: 'Maintenance message' });
   const apply = () => {
     setTried(true);
-    const next = toggleStatus(st, k, msg);
+    if (uErr) return;
+    const next = toggleStatus(st, k, msg, k === 'maintenance' && turningOn ? untilMs : undefined);
     if (!next) return;
     settingsStore.set((x) => ({ ...x, status: next }));
-    logAction('store', { ar: `${T[k].title[0]}`, en: `${T[k].title[1]}` }, { before: turningOn ? 'off' : 'on', after: turningOn ? 'on' : 'off' });
+    logAction('store', { ar: `${T[k].title[0]}${next.until ? ` حتى ${fmtUntil(next.until, 'ar')}` : ''}`, en: `${T[k].title[1]}${next.until ? ` until ${fmtUntil(next.until, 'en')}` : ''}` }, { before: turningOn ? 'off' : 'on', after: turningOn ? 'on' : 'off' });
     toast({ tone: 'ok', text: tx('حُدّثت حالة المتجر', 'Store status updated') });
     onClose();
   };
@@ -303,14 +318,37 @@ function StatusModal({ k, st, onClose }: { k: StatusKey; st: StoreStatus; onClos
       footer={<><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button><Button variant={turningOn ? 'primary' : 'danger'} onClick={apply}>{tx(...t.title)}</Button></>}>
       <p className="text-sm text-fg">{tx(...(turningOn ? t.on : t.off))}</p>
       {k === 'maintenance' && turningOn && (
-        <Field label={tx('رسالة الصيانة', 'Maintenance message')} hint={<bdi dir="ltr">{msg.length} / {MAINT_MAX}</bdi>} error={tried && mErr ? (mErr === 'empty' ? tx('اكتب رسالة للعملاء', 'Write a message for shoppers') : tx(`الحد ${MAINT_MAX} حرفًا`, `Max ${MAINT_MAX} characters`)) : null}>
-          {(p) => <Textarea {...p} value={msg} dir="auto" onChange={(e) => setMsg(e.target.value)} />}
-        </Field>
+        <>
+          <Field label={tx('رسالة الصيانة', 'Maintenance message')} hint={<bdi dir="ltr">{msg.length} / {MAINT_MAX}</bdi>} error={tried && mErr ? (mErr === 'empty' ? tx('اكتب رسالة للعملاء', 'Write a message for shoppers') : tx(`الحد ${MAINT_MAX} حرفًا`, `Max ${MAINT_MAX} characters`)) : null}>
+            {(p) => <Textarea {...p} value={msg} dir="auto" onChange={(e) => setMsg(e.target.value)} />}
+          </Field>
+          <div className="space-y-2">
+            <Segmented label={tx('متى تنتهي', 'When it ends')} value={ends} onChange={setEnds} options={[{ value: 'manual', label: tx('حين أطفئها', 'When I switch it off') }, { value: 'at', label: tx('في وقت محدد', 'At a set time') }]} />
+            {ends === 'at' && <Field label={tx('تنتهي في (بتوقيت الرياض)', 'Ends at (Riyadh time)')} error={tried && uErr ? ({ format: tx('وقت غير صالح', 'Not a valid time'), past: tx('الوقت مضى', 'That time has passed'), far: tx('خلال 30 يومًا كحد أقصى', 'Within 30 days at most') })[uErr] : null}
+              hint={tx('يعود المتجر تلقائيًا دون أن تتذكر', 'The store comes back by itself')}>{(p) => <Input {...p} type="datetime-local" dir="ltr" value={until} onChange={(e) => setUntil(e.target.value)} />}</Field>}
+          </div>
+          <figure className="rounded-xl border border-border bg-surface-2/50 p-4 text-center" aria-label={tx('ما يراه العميل', 'What shoppers see')}>
+            <figcaption className="mb-3 text-start text-xs font-semibold text-muted">{tx('ما يراه العميل', 'What shoppers see')}</figcaption>
+            <div className="mx-auto max-w-xs rounded-xl p-5" style={{ background: STORE_PALETTE.bg, color: STORE_PALETTE.ink }}>
+              <Wrench className="mx-auto size-6" style={{ color: STORE_PALETTE.accent }} aria-hidden="true" />
+              <p className="mt-2 text-sm font-bold">{tx('المتجر في صيانة', 'The store is under maintenance')}</p>
+              <p className="mt-1 text-xs" style={{ color: STORE_PALETTE.muted }} dir="auto">{msg || '—'}</p>
+              {ends === 'at' && !uErr && untilMs && <p className="mt-2 text-xs font-semibold">{tx(`نعود ${fmtUntil(untilMs, 'ar')}`, `Back ${fmtUntil(untilMs, 'en')}`)}</p>}
+              <p className="mt-3 text-[11px] underline" style={{ color: STORE_PALETTE.muted }}>{tx('تتبع طلبك', 'Track your order')}</p>
+            </div>
+            <p className="mt-2 text-start text-xs text-muted">{tx('تتبع الطلبات والسياسات يبقيان متاحين. أنت ترى المتجر من «المتجر المنشور» مع وضع المراجعة.', 'Order tracking and policies stay open. You can still see the store via Live store in review mode.')}</p>
+          </figure>
+        </>
       )}
       <Alert tone="info">{tx('الإعدادان الآخران لا يتغيران.', 'The other two settings do not change.')}</Alert>
       <Simulated />
     </Modal>
   );
+}
+
+/** A maintenance end time, Riyadh, short. */
+function fmtUntil(ms: number, lang: 'ar' | 'en') {
+  return new Date(ms).toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { timeZone: 'Asia/Riyadh', weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
 
 function ChannelLink({ href, icon, title, sub }: { href: string; icon: ReactNode; title: string; sub: string }) {

@@ -6,28 +6,33 @@ import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { canSee, can } from '../../merchant/perms';
 import { categoriesStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
-import { applyBulkEdit, toCsv, type BulkRow, type Product, type ProductStatus } from '../../merchant/catalog';
+import { applyBulkEdit, type BulkRow, type Product, type ProductStatus } from '../../merchant/catalog';
 import type { Channel } from '../../merchant/domain';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, BulkBar, Checkbox, DataTable, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Switch, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import {
-  DEFAULT_EXPORT, EXPORT_COLS, STATUSES, activeChannels, allTags, bulkChanged, bulkCheck, bulkRowsFor, categoryOptions, exportRows, filterProducts, listPhoto, lowSkuCount,
+  DEFAULT_EXPORT, EXPORT_COLS, EXPORT_HEADER, STATUSES, activeChannels, allTags, bulkChanged, bulkCheck, bulkRowsFor, categoryOptions, exportRows, filterProducts, listPhoto, lowSkuCount,
   paginate, priceRange, readChannel, readTab, selectionScope, stockOf, tabCounts, type ExportCol, type StatusTab,
 } from './model';
 import { sortProducts } from './views';
 import { BulkOpModal, UndoBanner, rememberUndo, useUndo } from './bulk';
 import { CatalogNav } from './common';
+import { ExportDialog, SheetPreview, quickProductExport, runExport, useExportData } from '../exports/ui';
 import { ColumnsIcon, ColumnsModal, QualityDrawer, QualityPill, QuickBar, SaveViewModal, SortSelect, ViewsDrawer } from './views-ui';
 import { applyQuick, quickCounts, readCols, readQuick, readSort, sameQuery, toggleQuick, viewQuery, viewsFor, writeCols, writeQuick, type ColKey } from './views';
 import { productViewsStore } from './views-store';
 import { currentActor } from '../../merchant/stores';
-import { NoAccess, ReviewTools, STATUS_TONE, downloadText, phref, roleBadge, useNames, useRole } from './common';
+import { NoAccess, ReviewTools, STATUS_TONE, phref, roleBadge, useNames, useRole } from './common';
 
 const Editor = lazy(() => import('./editor'));
 const ImportWizard = lazy(() => import('./import'));
 const Categories = lazy(() => import('./categories'));
 const Collections = lazy(() => import('./collections'));
+const Brands = lazy(() => import('./brands'));
+const Options = lazy(() => import('./options'));
+const Preorders = lazy(() => import('./preorders'));
+const Restrictions = lazy(() => import('./restrictions'));
 
 export default function Products({ route }: { route: Route }) {
   const tx = useTx();
@@ -37,7 +42,11 @@ export default function Products({ route }: { route: Route }) {
   if (sub === 'import') return <ImportWizard />;
   if (sub === 'categories') return <Categories />;
   if (sub === 'collections') return <Collections id={route.path[1]} />;
-  if (sub) return <Editor key={sub} id={sub} focus={route.query.get('focus')} />;
+  if (sub === 'brands') return <Brands />;
+  if (sub === 'options') return <Options route={route} />;
+  if (sub === 'preorders') return <Preorders route={route} />;
+  if (sub === 'restrictions') return <Restrictions route={route} />;
+  if (sub) return <Editor key={`${sub}:${route.query.get('type') ?? ''}`} id={sub} focus={route.query.get('focus')} type={route.query.get('type')} />;
   return <ProductList route={route} />;
 }
 
@@ -357,7 +366,12 @@ function ExportModal({ rows, onClose }: { rows: Product[]; onClose: () => void }
   };
   const ordered = EXPORT_COLS.filter((c) => cols.includes(c));
   const data = exportRows(rows, levels, ordered, perVariant);
-  const go = () => { downloadText('products.csv', toCsv(data)); onClose(); };
+  // Shared export templates: a saved template opens the template dialog; the quick picker is previewed and logged too.
+  const [useTpl, setUseTpl] = useState(false);
+  const exData = useExportData();
+  const quick = useMemo(() => quickProductExport(rows, ordered, perVariant, EXPORT_HEADER, exData), [rows, ordered.join(), perVariant, exData]); // eslint-disable-line react-hooks/exhaustive-deps
+  const go = () => { runExport(quick.t, quick.sheet, 'section', rows.map((p) => p.id)); onClose(); };
+  if (useTpl) return <ExportDialog entity="products" records={{ products: rows }} scopeLabel={tx(`${rows.length} منتجًا من النتائج الحالية`, `${rows.length} products from the current results`)} onClose={() => onClose()} />;
   return (
     <Modal title={tx('تصدير المنتجات', 'Export products')} onClose={onClose}
       description={tx(`${rows.length} منتجًا من النتائج الحالية · ${data.length - 1} سطرًا`, `${rows.length} products from the current results · ${data.length - 1} rows`)}
@@ -374,6 +388,8 @@ function ExportModal({ rows, onClose }: { rows: Product[]; onClose: () => void }
       </fieldset>
       <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2.5 text-sm font-medium text-fg">{tx('سطر لكل متغير', 'One row per variant')}<Switch checked={perVariant} onChange={setPerVariant} label={tx('سطر لكل متغير', 'One row per variant')} /></label>
       {!ordered.length && <Alert tone="bad">{tx('اختر عمودًا واحدًا على الأقل.', 'Choose at least one column.')}</Alert>}
+      {ordered.length > 0 && <SheetPreview sheet={quick.sheet} max={3} />}
+      <button type="button" onClick={() => setUseTpl(true)} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('استخدم قالب تصدير محفوظًا', 'Use a saved export template')}</button>
     </Modal>
   );
 }

@@ -1,7 +1,7 @@
 /* Data hooks for pages. The catalogue, settings and order book are the merchant's live stores, mapped through
    bridge.ts; review mode can force the empty state. */
 import { useMemo } from 'react';
-import { categoriesStore, couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { catalogXStore, categoriesStore, couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
 import { arrangeStoreCategories } from '../merchant/catalog';
 import { checkoutStore as checkoutSettingsStore } from '../dashboard/settings/stores';
 import type { Cart, Order, Product } from './domain';
@@ -19,7 +19,9 @@ const NO_CART: Cart = { lines: [] };
 export function useCatalog(): Product[] {
   const ps = productsStore.use();
   const lv = levelsStore.use();
-  const all = useMemo(() => toStoreProducts(ps, lv), [ps, lv]);
+  // Brands, fields, size charts, pre-orders and restrictions (dashboard → Products) shape what the store shows.
+  const x = catalogXStore.use();
+  const all = useMemo(() => toStoreProducts(ps, lv, x), [ps, lv, x]);
   return useSfState() === 'empty' ? NO_PRODUCTS : all;
 }
 export function useCategories(): Category[] {

@@ -25,9 +25,10 @@ export const SECTIONS: Record<string, Page> = {
   work: lazy(() => import('./work')),
   assistant: lazy(() => import('./assistant')),
   inbox: lazy(() => import('./inbox')),
+  calendar: lazy(() => import('./calendar')),
 };
 /** Sections rebuilt on the LAK design system and linked from navigation. */
-export const BUILT = new Set<string>(['orders', 'products', 'inventory', 'customers', 'finance', 'analytics', 'marketing', 'automations', 'storefront', 'apps', 'settings', 'help', 'appmaker', 'channel', 'tools', 'work', 'assistant', 'inbox']);
+export const BUILT = new Set<string>(['orders', 'products', 'inventory', 'customers', 'finance', 'analytics', 'marketing', 'automations', 'storefront', 'apps', 'settings', 'help', 'appmaker', 'channel', 'tools', 'work', 'assistant', 'inbox', 'calendar']);
 
 /** Link to a merchant section: the rebuilt page when it exists, otherwise the previous workspace (labelled there). */
 export function sectionHref(key: string, path = '', query?: Record<string, string | undefined>): string {

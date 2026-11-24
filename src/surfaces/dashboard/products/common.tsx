@@ -2,7 +2,7 @@
 // New shared components (not in src/ds): Stepper, NoAccess, ReviewTools, useLeaveGuard, LeaveModal.
 import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Check, Lock, FlaskConical, FolderTree, LayoutGrid, Layers } from 'lucide-react';
+import { Check, Lock, FlaskConical, FolderTree, LayoutGrid, Layers, BadgeCheck, SlidersHorizontal, CalendarClock, ShieldCheck } from 'lucide-react';
 import { link, navigate } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
 import { ROLES, type Role } from '../../merchant/perms';
@@ -146,6 +146,10 @@ export function CatalogNav() {
     { href: phref(), label: tx('المنتجات', 'Products'), icon: LayoutGrid, on: here === '#/dashboard/products' },
     { href: phref('categories'), label: tx('الفئات', 'Categories'), icon: FolderTree, on: here.startsWith('#/dashboard/products/categories') },
     { href: phref('collections'), label: tx('المجموعات', 'Collections'), icon: Layers, on: here.startsWith('#/dashboard/products/collections') },
+    { href: phref('brands'), label: tx('العلامات التجارية', 'Brands'), icon: BadgeCheck, on: here.startsWith('#/dashboard/products/brands') },
+    { href: phref('options'), label: tx('الحقول والمقاسات والمرشحات', 'Fields, sizes & filters'), icon: SlidersHorizontal, on: here.startsWith('#/dashboard/products/options') },
+    { href: phref('preorders'), label: tx('الطلب المسبق', 'Pre-orders'), icon: CalendarClock, on: here.startsWith('#/dashboard/products/preorders') },
+    { href: phref('restrictions'), label: tx('قيود الشراء', 'Purchase limits'), icon: ShieldCheck, on: here.startsWith('#/dashboard/products/restrictions') },
   ];
   return (
     <nav aria-label={tx('أقسام الكتالوج', 'Catalogue sections')} className="scrollbar-thin -mx-1 flex gap-1 overflow-x-auto px-1">

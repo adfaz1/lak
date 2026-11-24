@@ -2,7 +2,7 @@ import { useRef, useState } from 'react';
 import { Bell, Check, ChevronDown, Heart, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { Alert, Select } from '../../../ds/kit';
-import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
+import { Button, EmptyState, InfoHint, LinkButton, cn, useTx } from '../../../ds/ui';
 import { settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
@@ -13,10 +13,13 @@ import { Crumbs, H2, PANEL, Price, ProductPhoto, Stepper, Swatch, WRAP, sizeLabe
 import { accountStore, cartStore, toggleWish } from '../state';
 import { useCatalog, useCategories, useConfig } from '../data';
 import { deliverableCities, shipOptions } from '../bridge';
-import { locationsStore } from '../../merchant/stores';
+import { locationsStore, notifyStore } from '../../merchant/stores';
+import { addNotify } from '../../merchant/demand';
+import { riyadhDate } from '../bridge';
 import { ProductGrid } from './Listing';
 import { ProductReviews } from '../../dashboard/marketing/storefront-reviews';
 import { AskQuestion } from './Help';
+import { ProductDetails, ProductFacts, SlotPicker } from '../../dashboard/products/storefront-parts';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
   const { t, l, lang, dl, m } = useS();
@@ -27,7 +30,11 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const acc = accountStore.use();
   const canOrder = shopperView(settingsStore.use().status) === 'open';
   const p = productById(products, id);
-  const [qty, setQty] = useState(1);
+  const tx = useTx();
+  // Catalogue extras (type, brand, details, size chart, pre-order, purchase limits) from the merchant's dashboard.
+  const x = p?.x;
+  const minQ = x?.limits?.min ?? 1;
+  const [qty, setQty] = useState(minQ);
   const [err, setErr] = useState<('color' | 'size')[]>([]);
   const [added, setAdded] = useState<string | null>(null);
   const [city, setCity] = useState<CityId>('riyadh');
@@ -57,7 +64,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const isPerfume = p.cat === 'fragrance';
   const cities = deliverableCities(cfg.zones);
   // Delivery methods the merchant's shipping setup offers for one unit to this city; the promise shown is the fastest.
-  const shipList = shipOptions(cfg, city, [{ productId: p.id, cat: p.cat, qty: 1, amount: Math.min(...p.variants.map((v) => v.price)), weight: p.weight }], { now: Date.now(), locations });
+  const shipList = shipOptions(cfg, city, [{ productId: p.id, cat: p.cat, qty: 1, amount: Math.min(...p.variants.map((v) => v.price)), weight: p.weight, ships: x?.ships, perishable: x?.perishable }], { now: Date.now(), locations });
   const std = [...shipList].sort((a, b) => (a.handling ?? 1) + (a.transit[a.zones[0]]?.[1] ?? 0) - ((b.handling ?? 1) + (b.transit[b.zones[0]]?.[1] ?? 0)))[0];
   const est = std && deliveryEstimate(std, city, Date.now());
   const price = variant?.price ?? Math.min(...p.variants.map((v) => v.price));
@@ -68,7 +75,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const pick = (k: 'color' | 'size', v: string) => {
     setErr((e) => e.filter((x) => x !== k));
     setAdded(null);
-    setQty(1);
+    setQty(minQ);
     replace(to(`/p/${p.id}`, { color: k === 'color' ? v : qColor, size: k === 'size' ? v : qSize }));
   };
 
@@ -82,7 +89,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
     if (!variant || room <= 0 || !canOrder) return;
     cartStore.set((c) => addToCart(c, variant.id, Math.min(qty, room), variant.stock));
     setAdded(variantLabel(p, color, size, lang));
-    setQty(1);
+    setQty(minQ);
   };
 
   const sizeVariants = (s: string) => p.variants.filter((v) => v.size === s && (!color || v.color === color));
@@ -115,6 +122,13 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             <p className="max-w-prose leading-relaxed text-muted">{l(p.blurb)}</p>
           </div>
 
+          {x && <ProductFacts x={x} price={price} brandHref={x.brand ? to('/c/all', { brand: x.brand.id }) : undefined} />}
+          {x?.type === 'booking' && (
+            <div ref={sizeRef as never}>
+              <SlotPicker slots={p.variants.map((v) => ({ id: v.id, size: v.size ?? '', left: v.stock }))} value={size} onPick={(s) => pick('size', s)} error={err.includes('size') ? tx('اختر موعدًا', 'Choose a time') : undefined} />
+            </div>
+          )}
+
           {p.colors.length > 1 && (
             <fieldset ref={colorRef} aria-describedby={err.includes('color') ? 'sf-err-color' : undefined}>
               <legend className="mb-3 text-sm font-semibold">{t.color}{color && <span className="font-normal text-muted"> · {l(colorInfo(color).name)}</span>}</legend>
@@ -135,7 +149,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </fieldset>
           )}
 
-          {p.sizes.length > 1 && (
+          {p.sizes.length > 1 && x?.type !== 'booking' && (
             <fieldset ref={sizeRef} aria-describedby={err.includes('size') ? 'sf-err-size' : undefined}>
               <legend className="mb-3 text-sm font-semibold">{isPerfume ? t.volume : t.size}</legend>
               <div className="flex flex-wrap gap-2">
@@ -167,14 +181,20 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
 
           <div className="flex items-center gap-2">
             {unavailable ? (
-              <Button size="lg" variant="secondary" className="h-12 flex-1" disabled={notified} onClick={() => setNotify((n) => [...n, notifyKey])}>
+              <Button size="lg" variant="secondary" className="h-12 flex-1" disabled={notified} onClick={() => {
+                setNotify((n) => [...n, notifyKey]);
+                // The merchant's «notify me» demand report counts this request against the SKU (any option when none was chosen).
+                const skuOf = (vid: string) => vid.split('~')[1] ?? '';
+                const sku = !allOut && variant ? skuOf(variant.id) : p.variants.length === 1 ? skuOf(p.variants[0].id) : '';
+                notifyStore.set((l) => addNotify(l, p.id, sku, riyadhDate(Date.now())));
+              }}>
                 <Bell className="size-5" aria-hidden="true" />{notified ? t.notifyOn : t.notifyMe}
               </Button>
             ) : (
               <>
-                <Stepper value={qty} max={Math.max(1, Math.min(room || 10, 10))} onChange={(n) => setQty(Math.max(1, n))} label={t.qty} decLabel={t.dec} incLabel={t.inc} />
+                <Stepper value={qty} max={Math.max(minQ, Math.min(room || 10, 10, x?.limits?.max ?? 10))} onChange={(n) => setQty(Math.max(minQ, n))} label={t.qty} decLabel={t.dec} incLabel={t.inc} />
                 <Button size="lg" className="h-12 flex-1" onClick={add} disabled={!canOrder || (!!variant && room <= 0)}>
-                  <ShoppingBag className="size-5" aria-hidden="true" />{t.add}
+                  <ShoppingBag className="size-5" aria-hidden="true" />{x?.preorder ? tx('اطلب مسبقًا', 'Pre-order') : t.add}
                 </Button>
               </>
             )}
@@ -196,7 +216,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </Alert>
           )}
 
-          {!allOut && !p.digital && cities.length > 0 && <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
+          {!allOut && !p.digital && (!x || x.ships) && cities.length > 0 && <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
             <h2 id="sf-eta-h" className="flex items-center gap-2 text-sm font-semibold"><Truck className="size-4 text-muted" aria-hidden="true" />{t.delivery}
               {est && <InfoHint>{t.basis(String(est.handling), est.transit[0] === est.transit[1] ? String(est.transit[0]) : `${est.transit[0]}–${est.transit[1]}`)}</InfoHint>}
             </h2>
@@ -212,6 +232,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
           </section>}
 
           <div className="divide-y divide-border border-y border-border">
+            {x && <ProductDetails x={x} size={size} />}
             <details className="group py-1" open>
               <summary className="flex h-12 cursor-pointer list-none items-center justify-between text-sm font-semibold [&::-webkit-details-marker]:hidden">{t.details}<ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
               <ul className="space-y-2 pb-4 text-sm text-muted">{p.details.map((d) => <li key={d.en} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{l(d)}</li>)}</ul>

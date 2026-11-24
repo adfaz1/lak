@@ -6,11 +6,13 @@ import { navigate, replace } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
 import { LOCATIONS, LOC_IDS, type Channel, type LocId } from '../../merchant/domain';
-import { colorText, parseMoney, rebuildVariants, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
+import { colorText, parseMoney, rebuildVariants, shipsWeighed, skusOf, takenSkus, variantText, type DraftError, type Product, type ProductDraft, type ProductType } from '../../merchant/catalog';
+import { PRODUCT_TYPES, emptySpecDraft, riyadhToday, traits, validateSpec, type SpecError, type ValueError } from '../../merchant/catalog-extras';
+import { CustomerSees, DetailsCard, TypeChooser, TypeSection, TypeSwitch, attrErrors, specErrorText, useTypeInfo } from './types';
 import { available, levelOf } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { categoriesStore, draftsStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
-import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
+import { catalogXStore, categoriesStore, draftsStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
+import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
@@ -29,7 +31,7 @@ type SaveState = 'clean' | 'dirty' | 'saving' | 'failed' | 'saved';
 let lastSaved: { id: string; version: number; at: string } | null = null;
 const draftKey = (id: string) => `dash:${id}`;
 
-export default function Editor({ id, focus }: { id: string; focus?: string | null }) {
+export default function Editor({ id, focus, type }: { id: string; focus?: string | null; type?: string | null }) {
   const tx = useTx();
   const state = useDashState();
   const products = productsStore.use();
@@ -50,10 +52,13 @@ export default function Editor({ id, focus }: { id: string; focus?: string | nul
       </EmptyState></Card>
     </div>
   );
-  return <Form id={id} product={product} focus={focus ?? null} />;
+  // A new product starts with its type. Until one is chosen nothing exists, not even a draft (unlike creating a draft on choice).
+  const newType = PRODUCT_TYPES.includes(type as ProductType) ? (type as ProductType) : null;
+  if (isNew && !newType && !draftsStore.get()[draftKey('new')]) return <TypeChooser />;
+  return <Form id={id} product={product} focus={focus ?? null} newType={newType} />;
 }
 
-function Form({ id, product, focus }: { id: string; product: Product | undefined; focus: string | null }) {
+function Form({ id, product, focus, newType }: { id: string; product: Product | undefined; focus: string | null; newType: ProductType | null }) {
   const tx = useTx();
   const { lang } = useLang();
   const names = useNames();
@@ -66,8 +71,10 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
   const isNew = !product;
   const key = draftKey(id);
 
-  const base = useMemo(() => toEditDraft(product), [product?.id, product?.version]); // eslint-disable-line react-hooks/exhaustive-deps
-  const stored = draftsStore.get()[key] as unknown as EditDraft | undefined;
+  const base = useMemo(() => { const b = toEditDraft(product); return !product && newType ? { ...b, type: newType, ...(newType === 'food' ? { category: { ar: 'أغذية', en: 'Food' } } : {}) } : b; }, [product?.id, product?.version, newType]); // eslint-disable-line react-hooks/exhaustive-deps
+  const storedRaw = draftsStore.get()[key] as unknown as EditDraft | undefined;
+  // A kept new-product draft of another type is not reused when a different type was chosen from the chooser.
+  const stored = storedRaw && !(id === 'new' && newType && storedRaw.type !== newType && !storedRaw.copyOf) ? storedRaw : undefined;
   const [draft, setDraft] = useState<EditDraft>(() => (stored ? { ...base, ...stored } : base));
   const justSaved = lastSaved?.id === id ? lastSaved : null;
   const [state, setState] = useState<SaveState>(() => (stored ? 'dirty' : justSaved ? 'saved' : 'clean'));
@@ -85,7 +92,15 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
   const known = useMemo(() => new Set(levels.map((l) => l.sku)), [levels]);
   const cats = categoriesStore.use();
   const catOpts = categoryOptions(cats);
-  const errors = useMemo(() => validateEdit(draft, takenSkus(products, product?.id), known), [draft, products, product?.id, known]);
+  const cx = catalogXStore.use();
+  const typeInfo = useTypeInfo();
+  const errors = useMemo<Record<string, DraftError | SpecError | ValueError>>(() => {
+    const base = validateEdit(draft, takenSkus(products, product?.id), known);
+    // Types without colour/size options must not fail on leftover variants.
+    if (!traits(draft.type).warehouse && draft.type !== 'digital') for (const k of Object.keys(base)) if (k.startsWith('v.') || k === 'colors' || k === 'sizes') delete base[k];
+    const skus = new Set(products.flatMap(skusOf).map((s) => s.toUpperCase()));
+    return { ...base, ...validateSpec(draft.type, draft.spec ?? emptySpecDraft(), { today: riyadhToday(), skus, ownSkus: [draft.sku, ...draft.variants.map((v) => v.sku)] }), ...attrErrors(draft, cx.fields) };
+  }, [draft, products, product?.id, known, cx.fields]);
   const errorKeys = orderErrors(Object.keys(errors));
   const dirty = state === 'dirty' || state === 'failed' || state === 'saving';
   useLeaveGuard(dirty && canEdit, setLeaveTo);
@@ -133,13 +148,13 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
     }, 900);
   };
 
-  const errText = (e?: DraftError) => e && ({
+  const errText = (e?: DraftError | SpecError | ValueError) => e && (({
     required: tx('مطلوب', 'Required'), money: tx('مبلغ أكبر من صفر، مثل 290 أو 290.50', 'An amount above zero, e.g. 290 or 290.50'),
     compareAt: tx('يجب أن يكون أعلى من السعر', 'Must be higher than the price'), skuTaken: tx('مستخدم لمنتج آخر', 'Used by another product'),
     skuFormat: tx('3–32 حرفًا لاتينيًا أو رقمًا أو شرطة', '3–32 Latin letters, digits or hyphens'), weight: tx('بالغرام، من 1 إلى 30000', 'Grams, 1–30000'),
     slug: tx('حروف لاتينية صغيرة وأرقام وشرطات', 'Lowercase letters, digits and hyphens'), alt: tx('صف الصورة لمن لا يراها', 'Describe the image for people who can’t see it'),
     duplicate: tx('قيمة مكررة', 'Duplicate value'), stock: tx('عدد صحيح 0 أو أكثر', 'A whole number, 0 or more'), skuRepeated: tx('مكرر في المتغيرات', 'Repeated in variants'),
-  })[e];
+  } as Record<string, string>)[e] ?? specErrorText(e as SpecError, tx));
   const fe = (k: string) => (showErr ? errText(errors[k]) : undefined);
   const fieldLabel = (k: string): string => {
     const [a, b, c, d] = k.split('.');
@@ -147,6 +162,8 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
     const map: Record<string, string> = { nameAr: tx('الاسم بالعربية', 'Arabic name'), nameEn: tx('الاسم بالإنجليزية', 'English name'), price: tx('السعر', 'Price'), compareAt: tx('السعر قبل الخصم', 'Compare-at price'), cost: tx('التكلفة', 'Cost'), sku: 'SKU', weight: tx('الوزن', 'Weight'), slug: tx('الرابط', 'URL handle'), colors: tx('الألوان', 'Colours'), sizes: tx('المقاسات', 'Sizes') };
     if (a === 'media') return tx(`النص البديل للصورة ${Number(b) + 1}`, `Alt text, image ${Number(b) + 1}`);
     if (a === 'stock') return tx(`الكمية · ${loc(b)}`, `Quantity · ${loc(b)}`);
+    if (a === 'spec') return `${typeInfo(draft.type).name} · ${({ file: tx('الملف', 'File'), limit: tx('التنزيلات', 'Downloads'), expiry: tx('صلاحية الرابط', 'Link lifetime'), codes: tx('الأكواد', 'Codes'), minutes: tx('المدة', 'Length'), slots: tx('المواعيد', 'Slots'), slot: tx(`الموعد ${Number(c) + 1}`, `Slot ${Number(c) + 1}`), bundle: tx('المكوّنات', 'Components'), prep: tx('وقت التحضير', 'Prep time'), shelf: tx('الصلاحية', 'Shelf life') } as Record<string, string>)[b] ?? b}`;
+    if (a === 'attr') return cx.fields.find((f) => f.id === k.slice(5))?.label[lang] ?? k;
     if (a === 'v') { const v = draft.variants[Number(b)]; const n = v ? variantText(v.color, v.size)[lang] : b; return `${n} · ${c === 'stock' ? `${tx('الكمية', 'Qty')} ${loc(d)}` : c === 'price' ? tx('السعر', 'Price') : 'SKU'}`; }
     return map[a] ?? k;
   };
@@ -193,12 +210,13 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
       <fieldset disabled={!canEdit} className="min-w-0">
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
           <div className="min-w-0 space-y-6">
-            <Basics draft={draft} set={set} fe={fe} />
+            <Basics draft={draft} set={set} fe={fe} typeSwitch={<TypeSwitch draft={draft} set={set} isNew={isNew} savedType={product?.type ?? null} known={known} />} />
+            <TypeSection draft={draft} set={set} fe={fe} />
             <MediaSection draft={draft} set={set} fe={fe} get={() => draftRef.current} />
             <Pricing draft={draft} set={set} fe={fe} />
             <InventorySection draft={draft} set={set} fe={fe} known={known} />
-            <Variants draft={draft} set={set} fe={fe} known={known} get={() => draftRef.current} />
-            {draft.type === 'physical' && (
+            {(traits(draft.type).warehouse || draft.type === 'digital') && <Variants draft={draft} set={set} fe={fe} known={known} get={() => draftRef.current} />}
+            {shipsWeighed(draft.type) && (
               <Card aria-labelledby="pe-h-ship">
                 <CardHeader id="pe-h-ship" title={tx('الشحن', 'Shipping')} />
                 <div className="px-5 pb-5"><Field id={fieldId('weight')} label={tx('الوزن (غرام)', 'Weight (grams)')} error={fe('weight')} className="max-w-xs">{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={draft.weight} onChange={(e) => set({ weight: e.target.value })} />}</Field></div>
@@ -220,8 +238,10 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
                 <TagsField tags={draft.tags ?? []} onChange={(t) => set({ tags: t })} />
               </div>
             </Card>
+            <DetailsCard draft={draft} set={set} fe={fe} />
             <QualityCard draft={draft} />
             <PreviewCard draft={draft} />
+            <CustomerSees draft={draft} />
             <Card aria-labelledby="pe-h-ch">
               <CardHeader id="pe-h-ch" title={tx('القنوات', 'Channels')} hint={tx('سوق لك يراجع أهلية كل منتج قبل ظهوره.', 'LAK marketplace reviews each product’s eligibility before it appears.')} />
               <ul className="space-y-3 px-5 pb-5">
@@ -253,13 +273,11 @@ function Form({ id, product, focus }: { id: string; product: Product | undefined
 
 type SecProps = { draft: EditDraft; set: (p: Partial<EditDraft>) => void; fe: (k: string) => string | undefined };
 
-function Basics({ draft, set, fe }: SecProps) {
+function Basics({ draft, set, fe, typeSwitch }: SecProps & { typeSwitch: ReactNode }) {
   const tx = useTx();
   return (
     <Card aria-labelledby="pe-h-basics">
-      <CardHeader id="pe-h-basics" title={tx('الأساسيات', 'Basics')} action={
-        <Segmented label={tx('نوع المنتج', 'Product type')} value={draft.type} onChange={(v) => set({ type: v })}
-          options={[{ value: 'physical', label: tx('ملموس', 'Physical') }, { value: 'digital', label: tx('رقمي', 'Digital') }]} />} />
+      <CardHeader id="pe-h-basics" title={tx('الأساسيات', 'Basics')} action={typeSwitch} />
       <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
         <Field id={fieldId('nameAr')} label={tx('الاسم بالعربية', 'Name in Arabic')} error={fe('nameAr')}>{(p) => <Input {...p} dir="rtl" lang="ar" value={draft.nameAr} onChange={(e) => set({ nameAr: e.target.value })} />}</Field>
         <Field id={fieldId('nameEn')} label={tx('الاسم بالإنجليزية', 'Name in English')} error={fe('nameEn')}>{(p) => <Input {...p} dir="ltr" lang="en" value={draft.nameEn} onChange={(e) => set({ nameEn: e.target.value })} />}</Field>
@@ -422,14 +440,19 @@ function InventorySection({ draft, set, fe, known }: SecProps & { known: Set<str
   const { lang } = useLang();
   const levels = levelsStore.use();
   const sku = draft.sku.trim();
-  const physical = draft.type === 'physical';
+  const physical = traits(draft.type).warehouse;
+  const typeInfo = useTypeInfo();
   return (
     <Card aria-labelledby="pe-h-inv">
       <CardHeader id="pe-h-inv" title={tx('المخزون', 'Inventory')} hint={tx('الكمية الأولية تُدخل للـSKU الجديد فقط؛ تغيير الموجود يتم من المخزون مع سبب ويُسجَّل.', 'Initial quantity is entered for new SKUs only; changing existing stock happens in Inventory, with a reason, and is logged.')} />
       <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
         <Field id={fieldId('sku')} label="SKU" error={fe('sku')} hint={draft.variants.length ? tx('أساس SKU المتغيرات', 'Base for variant SKUs') : undefined}>{(p) => <Input {...p} dir="ltr" value={draft.sku} onChange={(e) => set({ sku: e.target.value.toUpperCase() })} />}</Field>
         <Field id={fieldId('barcode')} label={tx('الباركود', 'Barcode')} optional>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={draft.barcode} onChange={(e) => set({ barcode: e.target.value })} />}</Field>
-        {!physical ? <p className="text-sm text-muted sm:col-span-2">{tx('منتج رقمي: لا مخزون ولا وزن.', 'Digital product: no stock and no weight.')}</p>
+        {!physical ? <p className="text-sm text-muted sm:col-span-2">{({
+          digital: tx('منتج رقمي: لا مخزون ولا وزن.', 'Digital product: no stock and no weight.'), code: tx('الكمية = عدد الأكواد غير المباعة في قسم الأكواد.', 'Quantity = unsold codes, in the codes section.'),
+          service: tx('خدمة: بلا مخزون ولا وزن.', 'Service: no stock and no weight.'), booking: tx('الكمية = المقاعد المتاحة في المواعيد القادمة.', 'Quantity = open places in upcoming slots.'),
+          bundle: tx('الكمية تُحسب من المكوّنات؛ يُحجز كل مكوّن عند البيع.', 'Quantity comes from the components; each is held when it sells.'),
+        } as Record<string, string>)[draft.type] ?? typeInfo(draft.type).name}</p>
           : draft.variants.length ? <p className="text-sm text-muted sm:col-span-2">{tx('المخزون لكل متغير في جدول المتغيرات.', 'Stock is per variant, in the variants table.')}</p>
             : known.has(sku) ? (
               <div className="sm:col-span-2">

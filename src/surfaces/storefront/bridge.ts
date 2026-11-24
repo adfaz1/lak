@@ -11,6 +11,7 @@ import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type
 import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
 import type { BankDetails, Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
+import { hiddenOnline, openSlots, riyadhToday, slotKey, slotLeft, stockFor, storeX, traits, type CatalogX, type OrderExtras } from '../merchant/catalog-extras';
 import { quote, setupOf, warehouseFor, zoneForCity, type CartIn } from '../dashboard/settings/shipping-model';
 import type { Location } from '../merchant/domain';
 import type { ShippingSetup } from '../merchant/workspace';
@@ -32,16 +33,27 @@ export function sellable(levels: Level[], sku: string): number {
 /**
  * The storefront catalogue: active merchant products with the online channel on. Variant ids are `<product>~<SKU>`,
  * so cart lines survive edits to names and prices. Digital products have no stock limit.
+ * With the catalogue extras (`x`): stock follows the product type (codes left, booking places, bundle components),
+ * a booking's open slots are its options (`<product>~<SKU>~<slot>`), a live pre-order campaign sells up to its cap,
+ * and a restriction can hide a product from the online store.
  */
-export function toStoreProducts(products: MProduct[], levels: Level[]): Product[] {
-  const live = products.filter((p) => p.status === 'active' && p.channels.online);
+export function toStoreProducts(products: MProduct[], levels: Level[], x?: CatalogX, today = riyadhToday()): Product[] {
+  const live = products.filter((p) => p.status === 'active' && p.channels.online && !(x && hiddenOnline(p, x)));
   return live.map((p, i) => {
     const digital = p.type === 'digital';
-    const stock = (sku: string) => (digital ? Number.POSITIVE_INFINITY : sellable(levels, sku));
-    const variants: Variant[] = p.variants.length
+    const px = x ? storeX(p, x, today, products) : undefined;
+    const typed = stockFor(p, levels, today);
+    const preLeft = px?.preorder ? (px.preorder.left ?? 999) : null;
+    const stock = (sku: string) => (preLeft !== null ? preLeft : digital || typed === null ? Number.POSITIVE_INFINITY : traits(p.type).warehouse ? sellable(levels, sku) : typed);
+    const slots = p.type === 'booking' ? openSlots(p.spec?.slots, today) : [];
+    const variants: Variant[] = p.type === 'booking'
+      ? slots.map((sl) => ({ id: `${p.id}~${p.sku}~${sl.id}`, sku: p.sku, size: slotKey(sl), price: p.price, stock: slotLeft(sl) }))
+      : p.variants.length && traits(p.type).warehouse
       ? p.variants.map((v) => ({ id: `${p.id}~${v.sku}`, sku: v.sku, color: v.color || undefined, size: v.size || undefined, price: v.price, stock: stock(v.sku) }))
       : [{ id: `${p.id}~${p.sku}`, sku: p.sku, price: p.price, stock: stock(p.sku) }];
+    if (!variants.length) variants.push({ id: `${p.id}~${p.sku}`, sku: p.sku, price: p.price, stock: 0 });
     const colors = [...new Set(variants.flatMap((v) => (v.color ? [v.color] : [])))];
+    // A booking with no open slot keeps one sold-out option (no size to choose).
     const sizes = [...new Set(variants.flatMap((v) => (v.size ? [v.size] : [])))];
     const low = Math.min(...variants.map((v) => v.price));
     const cat = catSlug(p.category);
@@ -52,7 +64,8 @@ export function toStoreProducts(products: MProduct[], levels: Level[]): Product[
       id: p.id, cat, kind: cat, catName: p.category, name: p.name, blurb: p.desc, details,
       compareAt: p.compareAt !== null && p.compareAt > low ? p.compareAt : undefined,
       rank: i + 1, added: live.length - i, colors, sizes, variants,
-      weight: p.weight ?? undefined, returnable: !digital, digital,
+      weight: p.weight ?? undefined, returnable: !digital && (!px || traits(p.type).returnable), digital,
+      ...(px ? { x: px } : {}),
     };
   });
 }
@@ -170,17 +183,23 @@ export function freeDeliveryOffer(zones: Zone[]): { from: number; zone: L } | un
  */
 export function shipOptions(
   cfg: Pick<StoreConfig, 'zones' | 'shipping'>, city: CityId | undefined,
-  lines: { productId: string; cat: string; qty: number; amount: number; weight?: number }[],
+  lines: { productId: string; cat: string; qty: number; amount: number; weight?: number; ships?: boolean; perishable?: boolean }[],
   o: { now: number; goods?: number; cod?: boolean; locations?: Location[] },
 ): ShipMethod[] {
   const c = cityById(city);
   if (!c) return [];
+  // Nothing to deliver (downloads, codes, services, bookings): one free "no delivery" option.
+  if (lines.length && lines.every((l) => l.ships === false)) {
+    return [{ id: 'none', name: { ar: 'لا يحتاج توصيلًا', en: 'No delivery needed' }, cost: 0, freeFrom: null, zones: [c.zone], transit: { [c.zone]: [0, 0] }, handling: 0, codOk: false, note: { ar: 'يصلك بالبريد أو في موعدك', en: 'By email or at your appointment' } }];
+  }
+  // Perishable food travels only chilled, same day, or is picked up.
+  const perishable = lines.some((l) => l.perishable);
   const cart: CartIn = {
     goods: o.goods ?? lines.reduce((s, l) => s + l.amount, 0), weightG: cartWeight(lines),
     cats: [...new Set(lines.map((l) => l.cat))], productIds: [...new Set(lines.map((l) => l.productId))],
   };
   const q = quote(setupOf(cfg.shipping), cfg.zones, { country: 'SA', city: c.id }, cart, { now: o.now, cod: o.cod, locations: o.locations });
-  return q.offers.map((x) => {
+  return q.offers.filter((x) => !perishable || x.cat === 'cold' || x.cat === 'sameday' || x.cat === 'pickup').map((x) => {
     const loc = x.cat === 'pickup' ? o.locations?.find((l) => l.id === setupOf(cfg.shipping).methods.find((m) => m.id === x.id)?.pickupLoc) : undefined;
     const note: L = x.today === true ? { ar: 'يصل اليوم إذا طلبت الآن', en: 'Arrives today if you order now' }
       : x.today === false ? { ar: 'انتهى وقت طلبات اليوم؛ يصل غدًا', en: 'Past today’s cut-off; arrives tomorrow' }
@@ -320,7 +339,7 @@ export interface Book { orders: MOrder[]; levels: Level[]; customers: Customer[]
  * challenge creates nothing. The merchant order is created once (same reference), its payment follows the shopper's;
  * when it becomes paid (or COD is confirmed) stock is reserved, the coupon use is recorded, and the log says so.
  */
-export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number; gift?: { message?: string }; prefer?: LocId }): Book {
+export function syncOrder(book: Book, before: Order | undefined, after: Order, ctx: { products: Product[]; now: number; gift?: { message?: string }; prefer?: LocId; extras?: OrderExtras }): Book {
   const existing = book.orders.find((o) => o.ref === after.ref);
   if (!existing && (after.pay.state === 'awaiting' || after.pay.state === 'challenge')) return book;
   const wasPaid = !!before && isSettled(before.pay.state);
@@ -345,18 +364,33 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
       if (!line.sku) continue;
       const p = ctx.products.find((x) => x.id === line.productId);
       if (p?.digital) continue;
-      const r = reserve(levels, line.sku, line.qty, ctx.prefer);
-      levels = r.levels;
-      picks[line.sku] = r.picks;
+      // Not delivered, or ships later from incoming stock (pre-order): nothing is held now. A bundle holds its parts.
+      if (p?.x && (!p.x.ships || p.x.preorder)) continue;
+      for (const part of p?.x?.bundle ?? [{ sku: line.sku, qty: 1 }]) {
+        const r = reserve(levels, part.sku, line.qty * part.qty, ctx.prefer);
+        levels = r.levels;
+        picks[part.sku] = r.picks;
+      }
     }
     coupons = useCoupon(coupons, after.coupon);
   }
 
-  const items = after.lines.map((line, i) => {
+  // A bundle line is followed by its components at no price, so each part is held, picked and shipped by its own SKU.
+  const expanded = after.lines.flatMap((line) => {
     const p = ctx.products.find((x) => x.id === line.productId);
-    const pk = line.sku ? picks[line.sku] : undefined;
+    const parts = p?.x?.bundle ?? [];
+    return [{ line, p, part: false as const, variant: undefined as L | undefined }, ...parts.map((b) => ({
+      line: { ...line, sku: b.sku, qty: line.qty * b.qty, unit: 0, name: b.name ?? undefined }, p: undefined, part: true as const,
+      variant: { ar: `ضمن «${p!.name.ar}»`, en: `Part of “${p!.name.en}”` },
+    }))];
+  });
+  const slotOf = (vid: string) => vid.split('~')[2];
+  const items = expanded.map(({ line, p, part, variant }, i) => {
+    const pk = line.sku && (part || !p?.x?.bundle) ? picks[line.sku] : undefined;
     const prev = existing?.items[i];
+    const slot = p?.x?.type === 'booking' ? ctx.products.find((x) => x.id === p.id)?.variants.find((v) => v.id === line.vid)?.size ?? slotOf(line.vid) : undefined;
     return {
+      ...(variant ? { variant } : slot ? { variant: { ar: slot, en: slot } } : {}),
       name: p?.name ?? line.name ?? prev?.name ?? { ar: line.sku ?? '', en: line.sku ?? '' }, qty: line.qty, unit: line.unit, sku: line.sku ?? '',
       // Stock per warehouse is only listed when the line was split, so the dashboard offers per-location fulfilment.
       ...(pk && Object.keys(pk).length > 1 ? { stock: pk } : prev?.stock ? { stock: prev.stock } : {}),
@@ -379,6 +413,9 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
     contact: { phone: after.contact.phone ? `+966 ${after.contact.phone}` : existing?.contact?.phone, email: after.contact.email ?? existing?.contact?.email },
     ...(after.address ? { address: { name: after.address.name, line: [districtL(after.address.city, after.address.district).ar, after.address.street, after.address.building].filter(Boolean).join('، '), city: cityL, notes: after.address.notes?.trim() || undefined } } : {}),
     ...(ctx.gift || existing?.gift ? { gift: ctx.gift ?? existing?.gift } : {}),
+    ...(ctx.extras || existing?.extras ? { extras: ctx.extras ?? existing?.extras } : {}),
+    // Pre-orders are flagged with a tag, so the orders list can filter them and staff see them at a glance.
+    ...(!existing && ctx.extras?.preorder ? { tags: ['طلب مسبق'] } : {}),
   };
   const orders = existing ? book.orders.map((o) => (o === existing ? order : o)) : [order, ...book.orders];
   return { orders, levels, customers, coupons };

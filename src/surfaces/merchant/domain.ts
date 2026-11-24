@@ -171,6 +171,8 @@ export interface Order {
    * the notify choice at the time it was set, so renaming or archiving a sub-status never rewrites history.
    */
   sub?: { id: string; parent: string; name: L; notify: boolean; at: number; by: string };
+  /** What the checkout added (catalogue depth, catalog-extras.ts): answers, pre-order, codes, bookings, bundles. */
+  extras?: import('./catalog-extras').OrderExtras;
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {

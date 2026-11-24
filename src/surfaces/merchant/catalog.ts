@@ -3,7 +3,10 @@
 import type { Channel, L } from './domain';
 
 export type ProductStatus = 'active' | 'draft' | 'archived';
-export type ProductType = 'physical' | 'digital';
+/** physical and digital are the original two; the rest (Phase C) live in catalog-extras.ts (TRAITS, ProductSpec). */
+export type ProductType = 'physical' | 'digital' | 'food' | 'code' | 'service' | 'booking' | 'bundle';
+/** Types the merchant types a weight for and keeps in warehouses (physical goods and food). */
+export const shipsWeighed = (t: ProductType | undefined) => t === 'physical' || t === 'food';
 export interface Media {
   id: string; label: L; alt: string;
   /** A local preview (object URL) for an image the merchant picked from their device in this session. */
@@ -37,6 +40,13 @@ export interface Product {
   tags?: string[];
   /** VAT applies unless this is false (e.g. a zero-rated item). Absent on older products = taxable. */
   taxable?: boolean;
+  /* Catalogue depth (Phase C, catalog-extras.ts). All optional: older products have none. */
+  /** Type-specific data: download file, code pool, service length, booking slots, bundle components, food prep. */
+  spec?: import('./catalog-extras').ProductSpec;
+  /** Brand id (catalog-extras Brand). */
+  brand?: string;
+  /** Values of product custom fields, by field id (choices stored by their English label). */
+  attrs?: Record<string, string>;
 }
 
 const CH_ALL: Record<Channel, boolean> = { online: true, market: true, app: true };
@@ -98,8 +108,59 @@ export function productFixtures(): Product[] {
       cost: 9000, category: cat('هدايا', 'Gifts'), weight: 1400,
       desc: { ar: 'علبة هدية فيها نصف كيلو تمر سكري وقهوة عربية مطحونة 250 غرامًا وبطاقة إهداء.', en: 'Gift box with half a kilo of Sukkari dates, 250 g ground Arabic coffee and a gift card.' },
     }),
+  ].map((p) => ({ ...p, ...FX_EXTRA[p.id] }));
+}
+
+/**
+ * Added 2026-11-24 (Phase C, catalogue depth): one demo product of each new type. Kept apart from productFixtures()
+ * so screens and tests built on the original 18 are unchanged; the session store starts with both (stores.ts).
+ */
+export function typeFixtures(): Product[] {
+  return [
+    prod('p19', 'جلسة تركيب عطر خاص', 'Private perfume-blending session', 'SES-BLD-01', 25000, {
+      type: 'booking', weight: null, category: cat('عطور', 'Fragrance'), cost: 8000,
+      desc: { ar: 'جلسة مع خبير العطور في معرض الرياض تخرج منها بعطرك الخاص 30 مل.', en: 'A session with our perfumer at the Riyadh showroom; you leave with your own 30 ml blend.' },
+      spec: { minutes: 90, where: 'store', slots: [[2, '17:00', 4, 1], [2, '19:30', 4, 0], [5, '17:00', 4, 4], [9, '19:30', 6, 2]].map(([d, time, c, b]) => ({ id: `s-${d}-${String(time).replace(':', '')}`, date: dayFrom(Number(d)), time: String(time), cap: Number(c), booked: Number(b) })) },
+    }),
+    prod('p20', 'عضوية نادي العود لشهر (رمز تفعيل)', 'Oud club one-month membership (code)', 'CLB-OUD-1M', 4900, {
+      type: 'code', weight: null, category: cat('هدايا', 'Gifts'),
+      desc: { ar: 'رمز يُرسل بالبريد بعد الدفع، يفعّل عضوية شهر بعينات شهرية وخصم 10٪.', en: 'A code emailed after payment; activates one month of monthly samples and 10% off.' },
+      spec: { codes: ['OUD-7Q2K-91', 'OUD-3M8P-44', 'OUD-5T1Z-02', 'OUD-8W6R-77', 'OUD-1H4N-35'].map((code) => ({ code })) },
+    }),
+    prod('p21', 'تعديل مقاس العباية', 'Abaya alteration', 'SRV-ALT-01', 6000, {
+      type: 'service', weight: null, category: cat('أزياء', 'Fashion'),
+      desc: { ar: 'تقصير أو تضييق عباية اشتريتها منا، في المعرض خلال يومين.', en: 'Shortening or taking in an abaya bought from us, at the showroom within two days.' },
+      spec: { minutes: 45, appointment: true, where: 'store' },
+    }),
+    prod('p22', 'طقم الضيافة الكامل', 'Complete hospitality set', 'BND-HOS-01', 34000, {
+      type: 'bundle', weight: null, category: cat('منزل', 'Home'), compareAt: null,
+      desc: { ar: 'الدلّة والفناجين مع طقم فناجين خزف إضافي وبخور معمول، بسعر أقل من شرائها منفصلة.', en: 'The dallah and cups with an extra porcelain cup set and mamoul bakhoor, for less than buying them apart.' },
+      spec: { bundle: [{ sku: 'COF-SET-01', qty: 1 }, { sku: 'CUP-POR-06', qty: 1 }, { sku: 'BKH-MAM-01', qty: 1 }] },
+    }),
+    prod('p23', 'معمول تمر طازج (24 قطعة)', 'Fresh date maamoul (24 pieces)', 'FOD-MAM-24', 8500, {
+      type: 'food', weight: 900, category: cat('أغذية', 'Food'), cost: 3500,
+      desc: { ar: 'معمول بالتمر يُخبز يوم الطلب، يُحفظ مبرّدًا ويُستهلك خلال 3 أيام.', en: 'Date maamoul baked on the day you order; keep chilled and eat within 3 days.' },
+      spec: { prepMinutes: 180, perishable: true, shelfDays: 3 },
+    }),
   ];
 }
+
+/** A Riyadh calendar date `n` days from today (fixture booking slots stay in the future). */
+const dayFrom = (n: number) => new Date(Date.now() + 3 * 3_600_000 + n * 86_400_000).toISOString().slice(0, 10);
+/** Brands and custom-field values on the demo products (catalog-extras fixtures). */
+const FX_EXTRA: Record<string, Partial<Product>> = {
+  p1: { brand: 'b-nuwa', attrs: { 'f-material': 'Crepe', 'f-origin': 'السعودية' } },
+  p2: { brand: 'b-nuwa', attrs: { 'f-material': 'Silk', 'f-origin': 'الهند' } },
+  p3: { brand: 'b-oud', attrs: { 'f-concentration': 'Eau de parfum' } },
+  p4: { brand: 'b-leather', attrs: { 'f-material': 'Genuine leather', 'f-origin': 'تركيا' } },
+  p5: { brand: 'b-leather', attrs: { 'f-material': 'Genuine leather' } },
+  p7: { brand: 'b-nuwa', attrs: { 'f-material': 'Cotton' } },
+  p10: { spec: { file: { name: 'gift-card-100.pdf', size: 184_320, limit: 3, expiryDays: 30 } } },
+  p13: { brand: 'b-oud', attrs: { 'f-concentration': 'Extrait', 'f-origin': 'السعودية' } },
+  p14: { brand: 'b-oud' },
+  p15: { brand: 'b-nuwa', attrs: { 'f-material': 'Linen' } },
+  p17: { brand: 'b-leather', attrs: { 'f-material': 'Genuine leather' } },
+};
 
 /** Colour names are stored as the merchant typed them; common ones get an Arabic label for display. */
 const COLOR_AR: Record<string, string> = {
@@ -222,7 +283,7 @@ export function validateDraft(d: ProductDraft, takenSkus: Set<string>): Record<s
   if (!d.sku.trim()) e.sku = 'required';
   else if (!skuOk(d.sku)) e.sku = 'skuFormat';
   else if (takenSkus.has(d.sku.toUpperCase())) e.sku = 'skuTaken';
-  if (d.type === 'physical') {
+  if (shipsWeighed(d.type)) {
     const w = parseIntStrict(d.weight);
     if (w === null || w <= 0 || w > 30000) e.weight = 'weight';
   }
@@ -257,7 +318,7 @@ export function fromDraft(d: ProductDraft, id: string, version: number, media: M
   return {
     id, name: { ar: d.nameAr.trim(), en: d.nameEn.trim() }, desc: { ar: d.descAr, en: d.descEn }, status: d.status, type: d.type,
     price: parseMoney(d.price) ?? 0, compareAt: d.compareAt.trim() ? parseMoney(d.compareAt) : null, cost: d.cost.trim() ? parseMoney(d.cost) : null,
-    sku: d.sku.trim(), barcode: d.barcode.trim(), weight: d.type === 'physical' ? parseIntStrict(d.weight) : null, media,
+    sku: d.sku.trim(), barcode: d.barcode.trim(), weight: shipsWeighed(d.type) ? parseIntStrict(d.weight) : null, media,
     colors: d.colors.map((c) => c.trim()).filter(Boolean), sizes: d.sizes.map((s) => s.trim()).filter(Boolean),
     variants: d.variants.map((v) => ({ color: v.color, size: v.size, sku: v.sku.trim(), price: parseMoney(v.price) ?? 0 })),
     seo: { title: d.seoTitle, desc: d.seoDesc, slug: d.slug }, channels: { ...d.channels }, category: { ar: 'عام', en: 'General' }, version,

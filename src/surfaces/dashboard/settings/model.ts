@@ -13,7 +13,7 @@ import {
 /* ---------- Categories and search ---------- */
 
 /** Settings pages of the new dashboard. `checkout` extends the merchant categories (blueprint pp.15–16). */
-export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout' | 'account' | 'verification' | 'order-statuses';
+export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout' | 'account' | 'verification' | 'order-statuses' | 'invoice' | 'exports';
 export interface Category { id: CatId; title: L; desc: L; keys: string }
 
 export const CATEGORIES: Category[] = [
@@ -28,6 +28,8 @@ export const CATEGORIES: Category[] = [
   { id: 'notifications', title: { ar: 'الإشعارات', en: 'Notifications' }, desc: { ar: 'تنبيهاتك ورسائل العملاء لكل حالة طلب', en: 'Your alerts and customer messages per order state' }, keys: 'alerts email sms whatsapp customer template tracking تنبيه إشعار بريد رسائل واتساب عميل قالب تتبع' },
   { id: 'account', title: { ar: 'حسابي', en: 'My account' }, desc: { ar: 'ملفك والأمان والأجهزة وتنبيهاتك', en: 'Your profile, security, devices and alerts' }, keys: 'profile account password 2fa two-factor sessions devices security ملف حساب كلمة مرور تحقق خطوتين جلسات أجهزة أمان' },
   { id: 'order-statuses', title: { ar: 'حالات الطلب', en: 'Order statuses' }, desc: { ar: 'حالات فرعية تحت كل حالة طلب', en: 'Sub-statuses under each order state' }, keys: 'order status sub-status custom statuses workflow stage processing حالات الطلب حالة فرعية تخصيص الحالات مرحلة تجهيز' },
+  { id: 'invoice', title: { ar: 'الفاتورة', en: 'Invoice' }, desc: { ar: 'شكل الفاتورة الضريبية ومحتواها ومتى تُرسل', en: 'Tax invoice look, content and when it is sent' }, keys: 'invoice tax zatca vat logo stamp signature template customise فاتورة ضريبية زاتكا هيئة شعار ختم توقيع تخصيص الفواتير' },
+  { id: 'exports', title: { ar: 'قوالب التصدير', en: 'Export templates' }, desc: { ar: 'أعمدة وأسماء وجدولة لتصدير الطلبات والمنتجات والعملاء', en: 'Columns, names and schedules for order, product and customer exports' }, keys: 'export template csv excel columns schedule log download تصدير قالب قوالب أعمدة جدولة سجل التصدير تنزيل' },
   { id: 'language', title: { ar: 'اللغة والمنطقة', en: 'Language & region' }, desc: { ar: 'لغة اللوحة ولغات المتجر والتوقيت', en: 'Admin language, store languages, time zone' }, keys: 'language currency timezone units لغة عملة توقيت وحدة' },
 ];
 
@@ -55,6 +57,10 @@ export function canOpen(role: Role, cat: CatId): boolean {
   if (cat === 'verification') return canSeeSettings(role, 'billing');
   // Sub-statuses are an operations setting: whoever fulfils orders can define them.
   if (cat === 'order-statuses') return can(role, 'order.fulfil');
+  // Exports: anyone who can see orders, products or customers; each template is limited to the sections the role sees.
+  if (cat === 'exports') return canSee(role, 'orders') || canSee(role, 'products') || canSee(role, 'customers');
+  // The invoice is a store setting (seller details, legal fields).
+  if (cat === 'invoice') return canSeeSettings(role, 'store');
   return canSeeSettings(role, cat === 'checkout' ? 'store' : cat);
 }
 /** The roles that can open a category, to tell a refused member whom to ask. */

@@ -3,6 +3,7 @@
 // as a tab. Opening it just opens that address, so a view is never a stale copy of the products.
 import type { Category, Product } from '../../merchant/catalog';
 import type { Level } from '../../merchant/inventory';
+import { traits } from '../../merchant/catalog-extras';
 import { hiddenReason, isLow, listPhoto, priceRange, stockOf } from './model';
 import { isUncategorised, productQuality } from './quality';
 
@@ -32,7 +33,7 @@ export function quickMatch(p: Product, f: QuickFilter, c: QuickCtx): boolean {
     case 'noImage': return !listPhoto(p);
     case 'taxable': return p.taxable !== false;
     case 'noTax': return p.taxable === false;
-    case 'shipping': return p.type === 'physical';
+    case 'shipping': return traits(p.type).ships;
     case 'needsWork': return productQuality(p, c.cats).level !== 'good';
   }
 }

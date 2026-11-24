@@ -5,7 +5,7 @@ import { Card, EmptyState, LinkButton, useTx } from '../../../ds/ui';
 import { PageHeader, Tabs } from '../../../ds/kit';
 import { sectionHref } from '../pages';
 
-export type StoreTab = 'theme' | 'pages' | 'menus' | 'seo';
+export type StoreTab = 'theme' | 'pages' | 'landing' | 'blog' | 'menus' | 'redirects' | 'seo';
 export const storeHref = (tab?: StoreTab | string, q?: Record<string, string | undefined>) => link(`/dashboard/storefront${tab && tab !== 'theme' ? `/${tab}` : ''}`, q);
 
 export function StoreTabs({ current }: { current: StoreTab }) {
@@ -14,9 +14,13 @@ export function StoreTabs({ current }: { current: StoreTab }) {
     <Tabs label={tx('أقسام المتجر الإلكتروني', 'Online store sections')} items={[
       { href: storeHref('theme'), label: tx('الصفحة الرئيسية', 'Homepage'), current: current === 'theme' },
       { href: storeHref('pages'), label: tx('الصفحات', 'Pages'), current: current === 'pages' },
+      { href: storeHref('landing'), label: tx('صفحات الهبوط', 'Landing pages'), current: current === 'landing' },
+      { href: storeHref('blog'), label: tx('المدونة', 'Blog'), current: current === 'blog' },
       { href: storeHref('menus'), label: tx('القوائم', 'Menus'), current: current === 'menus' },
+      { href: storeHref('redirects'), label: tx('روابط مخصصة', 'Custom URLs'), current: current === 'redirects' },
       { href: storeHref('seo'), label: tx('محركات البحث', 'SEO'), current: current === 'seo' },
       { href: sectionHref('settings', 'domains'), label: tx('النطاق', 'Domain'), current: false },
+      { href: sectionHref('calendar'), label: tx('تقويم التسويق', 'Marketing calendar'), current: false },
     ]} />
   );
 }

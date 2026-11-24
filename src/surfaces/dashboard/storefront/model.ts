@@ -57,22 +57,38 @@ export const previewSections = (draft: Section[]) => draft.filter((s) => s.visib
 export type StatusKey = 'published' | 'accepting' | 'maintenance';
 /** What a shopper experiences, derived from the three switches (maintenance overrides the rest). */
 export type ShopperView = 'hidden' | 'maintenance' | 'browseOnly' | 'open';
-export function shopperView(s: StoreStatus): ShopperView {
+export function shopperView(s: StoreStatus, now = Date.now()): ShopperView {
   if (!s.published) return 'hidden';
-  if (s.maintenance) return 'maintenance';
+  if (maintenanceOn(s, now)) return 'maintenance';
   if (!s.accepting) return 'browseOnly';
   return 'open';
+}
+
+/** Maintenance is on until switched off, or until its scheduled end passes. */
+export const maintenanceOn = (s: StoreStatus, now = Date.now()) => s.maintenance && !(s.until && now >= s.until);
+/** Maintenance was scheduled to end and that time has passed (the switch still reads on until someone turns it off). */
+export const maintenanceExpired = (s: StoreStatus, now = Date.now()) => s.maintenance && !!s.until && now >= s.until;
+export type UntilIssue = 'format' | 'past' | 'far' | null;
+/** A scheduled end must be in the future and within 30 days. */
+export function untilIssue(ms: number | null, now: number): UntilIssue {
+  if (ms === null) return null;
+  if (Number.isNaN(ms)) return 'format';
+  if (ms <= now) return 'past';
+  if (ms - now > 30 * 86_400_000) return 'far';
+  return null;
 }
 
 export const MAINT_MAX = 160;
 export const maintenanceError = (m: string): 'empty' | 'long' | null => (!m.trim() ? 'empty' : m.length > MAINT_MAX ? 'long' : null);
 
 /** Flip one switch only; turning maintenance on requires a message. Returns null when the change is not allowed. */
-export function toggleStatus(s: StoreStatus, key: StatusKey, message?: string): StoreStatus | null {
-  if (key === 'maintenance' && !s.maintenance) {
+export function toggleStatus(s: StoreStatus, key: StatusKey, message?: string, until?: number | null, now = Date.now()): StoreStatus | null {
+  if (key === 'maintenance' && !maintenanceOn(s, now)) {
     const m = message ?? s.message;
     if (maintenanceError(m)) return null;
-    return { ...s, maintenance: true, message: m.trim() };
+    if (until !== undefined && untilIssue(until, now)) return null;
+    return { ...s, maintenance: true, message: m.trim(), until: until ?? undefined };
   }
+  if (key === 'maintenance') return { ...s, maintenance: false, until: undefined };
   return { ...s, [key]: !s[key] };
 }

@@ -28,6 +28,12 @@ import { OrderPage, TrackLookup, TrackPage } from './pages/Order';
 import AccountPage from './pages/Account';
 import ReturnsPage from './pages/Returns';
 import PolicyPage, { POLICY_IDS } from './pages/Policy';
+import LandingRoute from './pages/Landing';
+import { BlogList, BlogPostPage } from './pages/Blog';
+import { blogStore, redirectsStore } from '../dashboard/storefront/state';
+import { servedPosts } from '../dashboard/storefront/blog-model';
+import { useRCtx } from '../dashboard/storefront/redirect-ctx';
+import { servedPath, trace } from '../dashboard/storefront/redirects-model';
 import '../../ds/lak.css';
 
 function readPref(key: string, fallback: string) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
@@ -77,8 +83,10 @@ export default function Storefront({ route }: { route: Route }) {
       case 'track': return b ? <TrackPage key={b} reference={b} route={route} /> : <TrackLookup route={route} />;
       case 'account': return <AccountPage route={route} />;
       case 'returns': return <ReturnsPage key={b} reference={b ?? ''} route={route} />;
-      case 'page': return POLICY_IDS.includes(b as never) ? <PolicyPage id={b as never} /> : servedPage(content.pages, b) ? <ContentPage page={servedPage(content.pages, b)!} /> : <NotFound />;
-      default: return <NotFound />;
+      case 'page': return POLICY_IDS.includes(b as never) ? <PolicyPage id={b as never} /> : servedPage(content.pages, b) ? <ContentPage page={servedPage(content.pages, b)!} /> : <NotFound route={route} />;
+      case 'lp': return b ? <LandingRoute key={b} slug={b} route={route} /> : <NotFound route={route} />;
+      case 'blog': return b ? <BlogPostPage key={b} slug={b} /> : <BlogList route={route} />;
+      default: return <NotFound route={route} />;
     }
   })();
 
@@ -100,7 +108,7 @@ export default function Storefront({ route }: { route: Route }) {
   const closed = (view === 'hidden' || view === 'maintenance') && !review && !['page', 'track', 'order'].includes(a ?? '');
 
   let body: ReactNode = page;
-  if (closed) body = <Closed view={view} message={status.message} />;
+  if (closed) body = <Closed view={view} message={status.message} until={status.until} />;
   else if (state === 'loading') body = <PageSkeleton kind={a} />;
   else if (state === 'error') body = (
     <div className={cn(WRAP, 'py-16')}>
@@ -129,8 +137,28 @@ export default function Storefront({ route }: { route: Route }) {
   );
 }
 
-function NotFound() {
-  const { t } = useS();
+/** Unknown address: follow the merchant's custom URLs (Online store → Custom URLs) before showing "not found". */
+function NotFound({ route }: { route: Route }) {
+  const { t, lang } = useS();
+  const ctx = useRCtx();
+  const list = redirectsStore.use();
+  const path = `/${route.path.join('/')}`;
+  const tr = servedPath(path, ctx) ? null : trace(path, list, ctx);
+  const target = tr && tr.matched && !tr.loop && !tr.tooLong && tr.final && (tr.served || tr.external) ? tr.final : null;
+  useEffect(() => {
+    if (!tr?.matched || !target) return;
+    const froms = new Set(tr.hops.map((h) => h.from));
+    redirectsStore.set((l) => l.map((r) => (r.on && froms.has(r.from) ? { ...r, hits: r.hits + 1 } : r)));
+    if (!tr.external) replace(to(target, Object.fromEntries(route.query)));
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (target && tr?.external) return (
+    <div className={cn(WRAP, 'flex flex-col items-center py-24 text-center')}>
+      <h1 className={H1}>{lang === 'ar' ? 'هذه الصفحة انتقلت' : 'This page has moved'}</h1>
+      <p className="mt-2 text-muted">{lang === 'ar' ? 'تتابع خارج المتجر إلى:' : 'It continues outside the store at:'} <bdi dir="ltr">{new URL(target).host}</bdi></p>
+      <LinkButton href={target} rel="noopener" size="lg" className="mt-6">{lang === 'ar' ? 'تابع' : 'Continue'}</LinkButton>
+    </div>
+  );
+  if (target) return <PageSkeleton kind={undefined} />;
   return (
     <div className={cn(WRAP, 'flex flex-col items-center py-24 text-center')}>
       <h1 className={H1}>{t.notFoundPage}</h1>
@@ -139,14 +167,15 @@ function NotFound() {
   );
 }
 
-function Closed({ view, message }: { view: ShopperView; message: string }) {
-  const { t, l } = useS();
+function Closed({ view, message, until }: { view: ShopperView; message: string; until?: number | null }) {
+  const { t, l, lang } = useS();
   const cfg = useConfig();
   return (
     <div className={cn(WRAP, 'flex flex-col items-center py-24 text-center')}>
       <span className="grid size-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-700 dark:text-brand-300">{view === 'maintenance' ? <Wrench className="size-6" aria-hidden="true" /> : <StoreIcon className="size-6" aria-hidden="true" />}</span>
       <h1 className={cn(H1, 'mt-5')}>{view === 'maintenance' ? t.maintT : t.hiddenT}</h1>
       <p className="mt-2 max-w-md text-muted">{view === 'maintenance' && message ? message : t.closedB(l(cfg.name))}</p>
+      {view === 'maintenance' && until && <p className="mt-2 text-sm font-semibold">{lang === 'ar' ? 'نعود ' : 'Back '}{new Date(until).toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { timeZone: 'Asia/Riyadh', weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })}</p>}
       <LinkButton href={to('/track')} variant="secondary" className="mt-6">{t.trackTitle}</LinkButton>
     </div>
   );
@@ -283,6 +312,14 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
   );
 }
 
+/** "Blog" in the footer once the merchant has a live article and keeps the link on (Online store → Blog → Settings). */
+function BlogLink({ cls }: { cls: string }) {
+  const { lang } = useS();
+  const blog = blogStore.use();
+  if (!blog.settings.inMenu || !servedPosts(blog, Date.now()).length) return null;
+  return <li><a href={to('/blog')} className={cls}>{lang === 'ar' ? 'المدونة' : 'Blog'}</a></li>;
+}
+
 const SOCIAL_NAME: Record<string, string> = { instagram: 'Instagram', x: 'X', tiktok: 'TikTok', snapchat: 'Snapchat', facebook: 'Facebook', linkedin: 'LinkedIn', youtube: 'YouTube' };
 
 function Footer() {
@@ -317,6 +354,7 @@ function Footer() {
             {(content.footer.length ? content.footer : [{ id: 'track', label: { ar: t.track, en: t.track }, path: '/track', url: null }, { id: 'acc', label: { ar: t.account, en: t.account }, path: '/account', url: null }]).map((x) => (
               <li key={x.id}><a href={x.url ?? to(x.path!)} {...(x.url ? { target: '_blank', rel: 'noopener' } : {})} className={a}>{l(x.label)}</a></li>
             ))}
+            <BlogLink cls={a} />
             <li className="text-xs leading-relaxed text-muted">{t.careHours}</li>
           </ul>
         </nav>
