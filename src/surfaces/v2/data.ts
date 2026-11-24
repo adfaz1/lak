@@ -24,9 +24,10 @@ const SKU_TO_PRODUCT: [prefix: string, id: string][] = [
 export function productIdForSku(sku: string): string | undefined {
   return SKU_TO_PRODUCT.find(([p]) => sku.startsWith(p))?.[1];
 }
-/** Licensed product photo (see public/products/credits.json). */
+/** Products with a licensed photo (see public/products/credits.json). p7 has none yet: it shows a neutral placeholder. */
+const HAS_PHOTO = new Set(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p8', 'p9', 'p10', 'p11', 'p12']);
 export const productImage = (id: string | undefined, thumb = true): string | undefined =>
-  id ? `/products/${thumb ? 'thumb/' : ''}${id}.jpg` : undefined;
+  id && HAS_PHOTO.has(id) ? `/products/${thumb ? 'thumb/' : ''}${id}.jpg` : undefined;
 export const itemImage = (i: Item) => productImage(productIdForSku(i.sku));
 
 /* ---------- Order presentation ---------- */

@@ -208,7 +208,7 @@ export interface LibraryPhoto { src: string; label: L }
 export function photoLibrary(productId: string | undefined, inUse: Set<string>): LibraryPhoto[] {
   const own = productId === 'p1' ? ['p1', 'p1-2', 'p1-3'] : productId === 'p3' ? ['p3', 'p3-2'] : productId ? [productId] : [];
   const rest = Array.from({ length: 12 }, (_, i) => `p${i + 1}`).filter((x) => !own.includes(x));
-  return [...own, ...rest].map((n) => ({ src: `/products/${n}.jpg`, label: { ar: `صورة ${n}`, en: `Photo ${n}` } })).filter((p) => !inUse.has(p.src));
+  return [...own, ...rest].filter((n) => n !== 'p7').map((n) => ({ src: `/products/${n}.jpg`, label: { ar: `صورة ${n}`, en: `Photo ${n}` } })).filter((p) => !inUse.has(p.src));
 }
 export const photoMedia = (src: string, n: number): Media => ({ id: `${PHOTO}${src}#${Date.now().toString(36)}${n}`, label: { ar: 'صورة', en: 'Photo' }, alt: '' });
 

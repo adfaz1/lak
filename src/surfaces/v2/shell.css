@@ -175,3 +175,4 @@
 .lk-b-top { color: var(--lk-text); }
 .lk-b-bar .sh-search { color: var(--lk-text-3); }
 .home-dot-s { min-width: 10px; }
+.sh-foot { margin-top: 24px; padding-top: 16px; border-top: 1px solid #eceef4; } .sh-foot a { color: var(--lk-text-2); }

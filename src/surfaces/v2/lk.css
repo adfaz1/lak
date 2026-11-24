@@ -188,7 +188,7 @@
 .lk-count.hot { background: var(--lk-indigo); color: #fff; }
 
 /* Product thumbnails */
-.lk-thumb { flex: none; width: 40px; height: 40px; border-radius: var(--lk-r); background: var(--lk-sunken) center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(20, 25, 56, 0.06); overflow: hidden; }
+.lk-thumb { display: inline-block; vertical-align: middle; flex: none; width: 40px; height: 40px; border-radius: var(--lk-r); background: var(--lk-sunken) center / cover no-repeat; box-shadow: inset 0 0 0 1px rgba(20, 25, 56, 0.06); overflow: hidden; }
 .lk-thumb.lg { width: 56px; height: 56px; }
 .lk-thumb.xl { width: 72px; height: 72px; border-radius: var(--lk-r-lg); }
 .lk-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }

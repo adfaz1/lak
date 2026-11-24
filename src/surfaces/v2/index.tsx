@@ -154,5 +154,14 @@ function ReviewBar() {
 
 /** Shared page frame for the three screens. */
 export function Page({ children, label }: { children: ReactNode; label?: string }) {
-  return <div className="lk-page" aria-label={label}>{children}</div>;
+  const tx = useTx();
+  return (
+    <div className="lk-page" aria-label={label}>
+      {children}
+      <footer className="sh-foot lk-micro lk-3">
+        {tx('بيانات تجريبية. صور المنتجات من ويكيميديا كومنز بتراخيص حرة.', 'Demo data. Product photos from Wikimedia Commons under free licences.')}{' '}
+        <a href="/products/credits.html" target="_blank" rel="noopener">{tx('حقوق الصور', 'Image credits')}</a>
+      </footer>
+    </div>
+  );
 }
