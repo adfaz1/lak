@@ -1,58 +1,33 @@
-/* Demo merchant for App Maker. Every name, product and price here is a test example. */
-import type { L } from '../../core/lang';
+/* Demo merchant for App Maker: the same demo store as the merchant dashboard (fashion and home goods).
+   Every name and text here is a test example. Product data is not kept here: the dashboard preview reads
+   the store catalogue (merchant/catalog.ts) so the app shows the store's own products and licensed photos. */
 import type { Accounts, AppConfig, Listing, Release } from './domain';
 
-export const MERCHANT: { name: L; domain: string } = {
-  name: { ar: 'محمصة نخلة', en: 'Nakhla Roasters' },
-  domain: 'nakhla.lak.sa',
-};
-
-export interface CatalogItem { id: string; name: L; price: number; tone: string; cat: L; desc: L }
-
-/** The merchant's catalogue as the preview shows it (synced from the store in the real product). */
-export const CATALOG: CatalogItem[] = [
-  { id: 'c1', name: { ar: 'إثيوبيا يرغاتشيفي', en: 'Ethiopia Yirgacheffe' }, price: 6900, tone: '#c9a27a', cat: { ar: 'تقطير', en: 'Filter' },
-    desc: { ar: 'تحميص فاتح بنكهة الياسمين والليمون. 250 غرامًا.', en: 'Light roast with jasmine and lemon notes. 250 g.' } },
-  { id: 'c2', name: { ar: 'خلطة الإسبريسو', en: 'House espresso blend' }, price: 5800, tone: '#6f4a31', cat: { ar: 'إسبريسو', en: 'Espresso' },
-    desc: { ar: 'تحميص متوسط داكن للحليب والإسبريسو. 250 غرامًا.', en: 'Medium-dark roast for milk drinks and espresso. 250 g.' } },
-  { id: 'c3', name: { ar: 'كولومبيا هويلا', en: 'Colombia Huila' }, price: 6400, tone: '#a8714a', cat: { ar: 'تقطير', en: 'Filter' },
-    desc: { ar: 'نكهة الكراميل والتفاح الأحمر. 250 غرامًا.', en: 'Caramel and red apple notes. 250 g.' } },
-  { id: 'c4', name: { ar: 'قمع تقطير V60', en: 'V60 dripper' }, price: 8900, tone: '#d8d2c8', cat: { ar: 'أدوات', en: 'Tools' },
-    desc: { ar: 'قمع سيراميك مقاس 02.', en: 'Ceramic dripper, size 02.' } },
-  { id: 'c5', name: { ar: 'صندوق الهدايا', en: 'Gift box' }, price: 19900, tone: '#7c8b6f', cat: { ar: 'هدايا', en: 'Gifts' },
-    desc: { ar: 'ثلاثة أنواع من البن مع بطاقة إهداء.', en: 'Three coffees with a gift card.' } },
-  { id: 'c6', name: { ar: 'السعودي الخولاني', en: 'Saudi Khawlani' }, price: 9500, tone: '#8a5a3c', cat: { ar: 'إسبريسو', en: 'Espresso' },
-    desc: { ar: 'بن جازان بتحميص متوسط. 250 غرامًا.', en: 'Jazan-grown coffee, medium roast. 250 g.' } },
-];
-
-export const CATEGORIES: L[] = [
-  { ar: 'إسبريسو', en: 'Espresso' }, { ar: 'تقطير', en: 'Filter' }, { ar: 'أدوات', en: 'Tools' }, { ar: 'هدايا', en: 'Gifts' },
-];
-
 /** Generated icon tiles. `fg`/`bg` are merchant colours; `mark` picks the glyph drawn by the tile renderer. */
-export interface IconTile { id: string; bg: string; fg: string; mark: 'letter' | 'bean' | 'palm' | 'cup' | 'ring' | 'letterOutline' }
+export interface IconTile { id: string; bg: string; fg: string; mark: 'letter' | 'letterOutline' | 'ring' | 'arch' | 'stripe' | 'dot' }
 export const ICONS: IconTile[] = [
-  { id: 'i1', bg: '#5a3826', fg: '#f3e6d4', mark: 'letter' },
-  { id: 'i2', bg: '#f3e6d4', fg: '#5a3826', mark: 'bean' },
-  { id: 'i3', bg: '#2f4a3a', fg: '#f3e6d4', mark: 'palm' },
-  { id: 'i4', bg: '#c68b59', fg: '#fffaf3', mark: 'cup' },
-  { id: 'i5', bg: '#1f1a17', fg: '#d9a66c', mark: 'ring' },
-  { id: 'i6', bg: '#fffaf3', fg: '#8a5a3c', mark: 'letterOutline' },
+  { id: 'i1', bg: '#1e1b18', fg: '#f6efe4', mark: 'letter' },
+  { id: 'i2', bg: '#f6efe4', fg: '#84603d', mark: 'arch' },
+  { id: 'i3', bg: '#84603d', fg: '#fffdf9', mark: 'letterOutline' },
+  { id: 'i4', bg: '#2f4a3a', fg: '#f6efe4', mark: 'stripe' },
+  { id: 'i5', bg: '#1e1b18', fg: '#d9b98c', mark: 'ring' },
+  { id: 'i6', bg: '#fffdf9', fg: '#1e1b18', mark: 'dot' },
 ];
 
-export const SPLASHES = ['#5a3826', '#f3e6d4', '#2f4a3a', '#1f1a17', '#c68b59'];
-export const ACCENTS = ['#8a5a3c', '#2f4a3a', '#b5562b', '#1f1a17'];
+/** Colour presets taken from the store theme (storefront palette), not from LAK's brand. */
+export const SPLASHES = ['#1e1b18', '#f6efe4', '#84603d', '#2f4a3a', '#fffdf9'];
+export const ACCENTS = ['#84603d', '#1e1b18', '#2f4a3a', '#9a2f1d', '#3f5a8a'];
 
 const liveConfig: AppConfig = {
-  name: { ar: 'نخلة', en: 'Nakhla' },
+  name: { ar: 'متجر ديمو', en: 'Demo Store' },
   iconId: 'i1',
-  splash: '#5a3826',
-  accent: '#8a5a3c',
+  splash: '#1e1b18',
+  accent: '#84603d',
   productLayout: 'grid',
   sections: [
-    { id: 's1', type: 'hero', title: { ar: 'محصول الموسم وصل', en: 'This season’s harvest is in' } },
-    { id: 's2', type: 'categories', title: { ar: 'تسوق حسب النوع', en: 'Shop by type' } },
-    { id: 's3', type: 'featured', title: { ar: 'مختارات المحمصة', en: 'Roaster’s picks' } },
+    { id: 's1', type: 'hero', title: { ar: 'تشكيلة الشتاء وصلت', en: 'The winter edit is here' } },
+    { id: 's2', type: 'categories', title: { ar: 'تسوّق حسب الفئة', en: 'Shop by category' } },
+    { id: 's3', type: 'featured', title: { ar: 'مختاراتنا', en: 'Our picks' } },
   ],
   features: { push: true, wishlist: true, loyalty: false, reviews: true, accountDeletion: false },
 };
@@ -63,22 +38,22 @@ export function initialDraft(): AppConfig {
     ...liveConfig,
     sections: [
       ...liveConfig.sections,
-      { id: 's4', type: 'banner', title: { ar: 'شحن مجاني فوق 200 ر.س', en: 'Free shipping over SAR 200' } },
+      { id: 's4', type: 'banner', title: { ar: 'عرض نهاية الأسبوع', en: 'Weekend offer' } },
     ],
   };
 }
 
 export function initialListing(): Listing {
   return {
-    subtitle: { ar: 'بن مختص محمص في الرياض', en: 'Specialty coffee from Riyadh' },
+    subtitle: { ar: 'عبايات وعطور ومستلزمات المنزل', en: 'Abayas, fragrance and home' },
     description: {
-      ar: 'تطبيق محمصة نخلة: اطلب البن المختص والأدوات، وتابع طلبك، واحفظ مفضلتك. التحميص أسبوعي والتوصيل داخل المملكة.',
-      en: 'The Nakhla Roasters app: order specialty coffee and brewing tools, track your order and keep a wishlist. Roasted weekly, delivered across Saudi Arabia.',
+      ar: 'تطبيق متجر ديمو: تسوّق العبايات والشالات والعطور ومستلزمات المنزل، واحفظ مفضلتك، وتابع طلباتك من مكان واحد.',
+      en: 'The Demo Store app: shop abayas, stoles, fragrance and home goods, keep a wishlist and follow your orders in one place.',
     },
-    keywords: 'coffee, specialty, قهوة, بن, V60',
+    keywords: 'abaya, fragrance, عباية, عطور, شال',
     category: 'shopping',
-    supportUrl: 'https://nakhla.lak.sa/help',
-    privacyUrl: 'https://nakhla.lak.sa/privacy',
+    supportUrl: 'https://demo-store.lak.sa/help',
+    privacyUrl: 'https://demo-store.lak.sa/privacy',
     reviewNotes: '',
     screenshots: 3,
   };
