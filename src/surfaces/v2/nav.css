@@ -33,3 +33,17 @@
 .nav-quick-i { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--lk-line); text-decoration: none; transition: border-color 120ms, box-shadow 120ms, transform 120ms; }
 .nav-quick-i:hover { border-color: var(--lk-indigo-100); box-shadow: 0 6px 16px -10px rgba(61, 75, 196, 0.5); transform: translateY(-1px); }
 @media (prefers-reduced-motion: reduce) { .nav-quick-i:hover { transform: none; } }
+
+/* v3: modern, text-first */
+.nav-flat { display: flex; flex-direction: column; gap: 2px; }
+.nav-flat-l { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-radius: 10px; color: var(--lk-text-2); font-size: 14.5px; font-weight: 500; text-decoration: none; transition: background 120ms, color 120ms; }
+.nav-flat-l:hover { color: var(--lk-text); background: rgba(20, 25, 56, 0.04); }
+.nav-flat-l[aria-current] { color: var(--lk-ink); font-weight: 600; background: #fff; box-shadow: 0 1px 2px rgba(20, 25, 56, 0.06), 0 0 0 1px rgba(20, 25, 56, 0.05); }
+.nav-flat-n { min-width: 22px; height: 22px; padding: 0 7px; display: inline-grid; place-items: center; border-radius: 99px; background: var(--lk-grad); color: #fff; font-size: 12px; font-weight: 600; }
+.nav-flat-later { color: var(--lk-text-3); font-size: 12px; }
+.nav-mega-g { font-size: 13px; color: var(--lk-text-3); font-family: var(--lk-font); font-weight: 600; letter-spacing: 0.01em; margin-bottom: 4px; padding: 0 10px; }
+.nav-quick { display: flex; flex-direction: column; gap: 10px; }
+.nav-quick-h { display: flex; align-items: center; justify-content: space-between; }
+.nav-quick-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; grid-template-columns: none; }
+.nav-quick-i { display: inline-flex; align-items: center; min-height: 40px; padding: 0 16px; border-radius: 99px; border: 1px solid var(--lk-line); background: #fff; color: var(--lk-text); font-size: 13.5px; font-weight: 500; white-space: nowrap; }
+.nav-quick-i:hover { border-color: #c9cdf3; box-shadow: none; transform: none; color: var(--lk-indigo-600); }

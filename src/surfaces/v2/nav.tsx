@@ -92,12 +92,12 @@ export function AllMenu({ onClose }: { onClose: () => void }) {
           </div>
           <button type="button" className="lk-btn icon ghost" aria-label={tx('إغلاق', 'Close')} onClick={onClose}><Icon name="close" /></button>
         </div>
-        <p className="lk-micro lk-3 nav-mega-tip"><Icon name="spark" size="xs" /> {tx('ثبّت أي قسم بالنجمة ليظهر في «وصول سريع» على الرئيسية.', 'Pin any section with the star to show it in Quick access on Home.')}</p>
+        <p className="lk-micro lk-3 nav-mega-tip">{tx('ثبّت أي قسم بالنجمة ليظهر في «وصول سريع» على الرئيسية.', 'Pin any section with the star to show it in Quick access on Home.')}</p>
         {groups.length === 0 ? <p className="lk-2" style={{ padding: '24px 4px' }}>{tx('لا قسم بهذا الاسم.', 'No section by that name.')}</p> : (
           <div className="nav-mega-grid">
             {groups.map((g) => (
               <section key={g.id} aria-labelledby={`mg-${g.id}`}>
-                <h3 id={`mg-${g.id}`} className="nav-mega-g"><span className={`lk-ic sm ${g.tint}`}><Icon name={g.icon} size="sm" /></span>{g.label[lang]}</h3>
+                <h3 id={`mg-${g.id}`} className="nav-mega-g">{g.label[lang]}</h3>
                 <ul>
                   {g.items.map((i) => {
                     const pinned = pins.includes(i.id);
@@ -124,34 +124,34 @@ export function AllMenu({ onClose }: { onClose: () => void }) {
   );
 }
 
-/** Side navigation for direction A: every group, collapsible, with the current section open. */
-export function SideGroups({ current }: { current: string }) {
+/** Side navigation for direction A: a short, flat, text-only list of top-level places. Everything else is one keystroke away in All sections. */
+export const TOP: { id: string; label: L; href: string; match: string[] }[] = [
+  { id: 'home', label: { ar: 'الرئيسية', en: 'Home' }, href: vhref(''), match: ['home'] },
+  { id: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, href: vhref('orders'), match: ['orders', 'late', 'returns', 'payfail'] },
+  { id: 'products', label: { ar: 'المنتجات', en: 'Products' }, href: vhref('products/p1'), match: ['product-edit'] },
+  { id: 'customers', label: { ar: 'العملاء', en: 'Customers' }, href: link('/merchant/customers'), match: [] },
+  { id: 'marketing', label: { ar: 'التسويق', en: 'Marketing' }, href: link('/merchant/marketing'), match: [] },
+  { id: 'money', label: { ar: 'المالية', en: 'Money' }, href: link('/merchant/finance'), match: [] },
+  { id: 'store', label: { ar: 'المتجر', en: 'Online store' }, href: link('/merchant/storefront'), match: [] },
+];
+export function SideGroups({ current, counts }: { current: string; counts?: Record<string, number> }) {
   const { lang } = useLang();
   const tx = useTx();
-  const owner = GROUPS.find((g) => g.items.some((i) => i.id === current))?.id;
-  const [open, setOpen] = useState<string[]>(owner ? [owner] : ['orders']);
   return (
-    <div className="nav-side">
-      {GROUPS.map((g) => {
-        const isOpen = open.includes(g.id);
+    <ul className="nav-flat">
+      {TOP.map((t) => {
+        const on = t.match.includes(current);
+        const later = !t.href.startsWith('#/v2');
         return (
-          <div key={g.id} className="nav-side-g">
-            <button type="button" className="nav-side-h" aria-expanded={isOpen} onClick={() => setOpen((o) => (isOpen ? o.filter((x) => x !== g.id) : [...o, g.id]))}>
-              <Icon name={g.icon} /><span className="lk-grow">{g.label[lang]}</span><Icon name="chevronDown" size="sm" />
-            </button>
-            {isOpen && (
-              <ul>
-                {g.items.map((i) => (
-                  <li key={i.id}><a className="nav-side-l" href={i.href} aria-current={current === i.id ? 'page' : undefined}>
-                    <span className="lk-grow">{i.label[lang]}</span>{!i.redesigned && <span className="nav-old" title={tx('لم يُعَد تصميمه بعد', 'Not redesigned yet')}>{tx('الحالي', 'current')}</span>}
-                  </a></li>
-                ))}
-              </ul>
-            )}
-          </div>
+          <li key={t.id}>
+            <a className="nav-flat-l" href={t.href} aria-current={on ? 'page' : undefined} title={later ? tx('لم يُعَد تصميمه بعد: يفتح الإصدار الحالي', 'Not redesigned yet: opens the current version') : undefined}>
+              <span className="lk-grow">{t.label[lang]}</span>
+              {counts?.[t.id] ? <span className="nav-flat-n">{counts[t.id]}</span> : later ? <span className="nav-flat-later" aria-hidden="true">↗</span> : null}
+            </a>
+          </li>
         );
       })}
-    </div>
+    </ul>
   );
 }
 
@@ -163,18 +163,14 @@ export function QuickAccess() {
   const [all, setAll] = useState(false);
   const items = pins.map((id) => ({ dest: ALL.find((x) => x.id === id), group: GROUPS.find((g) => g.items.some((i) => i.id === id)) })).filter((x) => x.dest && x.group);
   return (
-    <section className="lk-card nav-quick" aria-labelledby="qa-h">
-      <div className="lk-card-h flat">
-        <span className="lk-ic sm purple"><Icon name="spark" size="sm" /></span>
-        <h2 id="qa-h" className="lk-h2 lk-grow">{tx('وصول سريع', 'Quick access')}</h2>
+    <section className="nav-quick" aria-labelledby="qa-h">
+      <div className="nav-quick-h">
+        <h2 id="qa-h" className="lk-eyebrow">{tx('وصول سريع', 'Quick access')}</h2>
         <button type="button" className="lk-btn sm ghost" onClick={() => setAll(true)}>{tx('تخصيص', 'Customise')}</button>
       </div>
       <div className="nav-quick-row">
         {items.length === 0 ? <p className="lk-small lk-2">{tx('لم تثبّت أي قسم بعد.', 'Nothing pinned yet.')}</p> : items.map(({ dest, group }) => (
-          <a key={dest!.id} className="nav-quick-i" href={dest!.href}>
-            <span className={`lk-ic sm ${group!.tint}`}><Icon name={group!.icon} size="sm" /></span>
-            <span className="lk-small lk-strong">{dest!.label[lang]}</span>
-          </a>
+          <a key={dest!.id} className="nav-quick-i" href={dest!.href} title={group!.label[lang]}>{dest!.label[lang]}</a>
         ))}
       </div>
       {all && <AllMenu onClose={() => setAll(false)} />}

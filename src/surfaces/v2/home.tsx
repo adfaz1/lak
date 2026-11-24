@@ -77,8 +77,8 @@ export default function Home() {
         <p className="lk-2">{state === 'live' && tasks.length ? tx(`${tasks.length} أمور تحتاجك اليوم، مرتبة حسب أثرها على المال والوقت.`, `${tasks.length} things need you today, ranked by money and time impact.`) : tx('ملخص متجرك اليوم.', 'Your store today.')}</p>
       </div>
       <div className="lk-row lk-wrap">
-        <a className="lk-btn" href={vhref(`products/${products[0].id}`)}><Icon name="plus" size="sm" />{tx('منتج جديد', 'New product')}</a>
-        <a className="lk-btn brand lg" href={vhref('orders', { view: 'needs' })}><Icon name="box" size="sm" />{tx('جهّز الطلبات', 'Fulfil orders')}</a>
+        <a className="lk-btn lg ghost" href={vhref(`products/${products[0].id}`)}>{tx('منتج جديد', 'New product')}</a>
+        <a className="lk-btn brand lg" href={vhref('orders', { view: 'needs' })}>{tx('جهّز الطلبات', 'Fulfil orders')}</a>
       </div>
     </div>
   );
@@ -96,7 +96,7 @@ export default function Home() {
 
   const queue = (
     <section className="lk-card home-queue" aria-labelledby="q-h">
-      <div className="lk-card-h"><h2 id="q-h" className="lk-h2 lk-grow">{tx('يحتاجك الآن', 'Needs you now')}</h2><span className="lk-micro lk-3">{tx('مرتّبة حسب أثر المال والوقت', 'Ranked by money and time impact')}</span></div>
+      <div className="home-sec-h"><h2 id="q-h" className="lk-h2 lk-grow">{tx('يحتاجك الآن', 'Needs you now')}</h2><span className="lk-micro lk-3">{tx('مرتّبة حسب أثر المال والوقت', 'Ranked by money and time impact')}</span></div>
       {shownTasks.length === 0 ? (
         <EmptyState icon="check" title={tx('لا شيء ينتظرك', 'Nothing is waiting for you')} action={<a className="lk-btn" href={vhref('orders')}>{tx('كل الطلبات', 'All orders')}</a>}>
           {tx('كل الطلبات المدفوعة مجهّزة، ولا مدفوعات متعثرة ولا مخزون منخفض. سنضيف هنا كل ما يحتاج قرارك.', 'Every paid order is fulfilled, no failed payments, no low stock. Anything that needs your decision will appear here.')}
@@ -105,7 +105,7 @@ export default function Home() {
         <ol className="home-tasks">
           {shownTasks.map((t, n) => (
             <li key={t.id} className={`home-task${n === 0 ? ' first' : ''}`}>
-              <span className={`home-task-ic ${t.tone}`}><Icon name={t.icon} /></span>
+              <span className={`home-dot-s ${t.tone}`} aria-hidden="true" />
               <div className="lk-grow lk-col lk-gap-4">
                 <div className="lk-row lk-wrap" style={{ gap: '4px 10px' }}>
                   <h3 className="lk-h3">{t.title}</h3>
@@ -115,7 +115,7 @@ export default function Home() {
                 <p className="lk-small lk-2">{t.why}</p>
               </div>
               {t.preview && t.preview.length > 0 && <span className="lk-only-desktop"><ThumbStack items={t.preview} /></span>}
-              <a className={`lk-btn${n === 0 ? ' primary' : ''}`} href={t.href}>{t.cta}<Icon name="chevron" size="sm" /></a>
+              <a className={`lk-btn${n === 0 ? ' primary' : ''}`} href={t.href}>{t.cta}</a>
             </li>
           ))}
         </ol>
@@ -124,20 +124,15 @@ export default function Home() {
   );
 
   const kpiCards = (
-    <section className={`home-tiles ${dir}`} aria-label={tx('مؤشرات', 'Key figures')}>
-      {kpis.map((k) => (
-        <div key={k.label} className={`home-tile t-${k.tint}`}>
-          <div className="lk-row lk-between" style={{ alignItems: 'flex-start' }}>
-            <span className="lk-small home-tile-l">{k.label}</span>
-            <span className={`lk-ic sm ${k.tint}`}><Icon name={k.icon} size="sm" /></span>
-          </div>
-          <strong className="home-tile-v">{state === 'empty' ? <span className="lk-3">—</span> : k.value}</strong>
-          <div className="lk-row lk-between" style={{ alignItems: 'flex-end' }}>
-            <span className="lk-micro home-tile-n lk-row lk-wrap" style={{ gap: 6 }}>
-              {state !== 'empty' && k.delta !== null && <Delta v={k.delta} />}{state === 'empty' ? tx('لا بيانات بعد', 'No data yet') : k.note}
-            </span>
-            {k.spark && state !== 'empty' && <Spark values={k.spark} />}
-          </div>
+    <section className={`home-strip ${dir}`} aria-label={tx('مؤشرات', 'Key figures')}>
+      {kpis.map((k, n) => (
+        <div key={k.label} className={`home-m${n === 0 ? ' hero' : ''}`}>
+          <span className="lk-small lk-2">{k.label}</span>
+          <strong className="home-m-v">{state === 'empty' ? <span className="lk-3">—</span> : k.value}</strong>
+          <span className="lk-micro lk-3 lk-row lk-wrap" style={{ gap: 6 }}>
+            {state !== 'empty' && k.delta !== null && <Delta v={k.delta} />}{state === 'empty' ? tx('لا بيانات بعد', 'No data yet') : k.note}
+          </span>
+          {k.spark && state !== 'empty' && <Spark values={k.spark} />}
         </div>
       ))}
     </section>
@@ -150,7 +145,7 @@ export default function Home() {
   const lowList = state === 'empty' ? [] : low.slice(0, 4);
   const stock = (
     <section className="lk-card" aria-labelledby="st-h">
-      <div className="lk-card-h"><h2 id="st-h" className="lk-h2 lk-grow">{tx('مخزون يقترب من النفاد', 'Stock running low')}</h2><a className="lk-btn sm ghost" href={link('/merchant/inventory')}>{tx('الكل', 'All')}</a></div>
+      <div className="home-sec-h"><h2 id="st-h" className="lk-h2 lk-grow">{tx('مخزون يقترب من النفاد', 'Stock running low')}</h2><a className="lk-btn sm ghost" href={link('/merchant/inventory')}>{tx('الكل', 'All')}</a></div>
       {lowList.length === 0 ? <p className="lk-card-b lk-small lk-2">{tx('لا أصناف عند حد إعادة الطلب.', 'No SKUs at their reorder point.')}</p> : (
         <ul className="home-stock">
           {lowList.map((l) => {
@@ -175,8 +170,8 @@ export default function Home() {
       {head}
       {kpiCards}
       <div className="home-a">
-        <div className="lk-col lk-gap-16">{queue}{chart}</div>
-        <aside className="lk-col lk-gap-16">{goal}{activity}{stock}</aside>
+        <div className="lk-col lk-gap-24">{queue}{chart}</div>
+        <aside className="lk-col lk-gap-24">{goal}{activity}{stock}</aside>
       </div>
       {quick}
     </Page>
@@ -207,7 +202,7 @@ function SalesChart({ days }: { days: { date: string; net: number; orders: numbe
   const h = hover === null ? null : days[hover];
   return (
     <section className="lk-card" aria-labelledby="ch-h">
-      <div className="lk-card-h">
+      <div className="home-sec-h">
         <div className="lk-col lk-grow"><h2 id="ch-h" className="lk-h2">{tx('صافي المبيعات · آخر 14 يومًا مكتملًا', 'Net sales · last 14 complete days')}</h2>
           <span className="lk-micro lk-3">{tx('بعد الخصومات والاستردادات، شامل الضريبة. اليوم غير مكتمل فلا يُحتسب.', 'After discounts and refunds, VAT included. Today is incomplete and excluded.')}</span></div>
         <div className="lk-seg" role="group" aria-label={tx('طريقة العرض', 'View')}>
@@ -246,7 +241,7 @@ function Activity({ orders }: { orders: Order[] }) {
   };
   return (
     <section className="lk-card" aria-labelledby="ac-h">
-      <div className="lk-card-h"><h2 id="ac-h" className="lk-h2 lk-grow">{tx('آخر النشاط', 'Recent activity')}</h2></div>
+      <div className="home-sec-h"><h2 id="ac-h" className="lk-h2 lk-grow">{tx('آخر النشاط', 'Recent activity')}</h2></div>
       {orders.length === 0 ? <p className="lk-card-b lk-small lk-2">{tx('لا نشاط بعد.', 'No activity yet.')}</p> : (
         <ul className="home-activity">
           {orders.map((o) => (
@@ -322,7 +317,7 @@ function Goal({ net }: { net: number }) {
   const r = 52, c = 2 * Math.PI * r;
   return (
     <section className="lk-card home-goal" aria-labelledby="goal-h">
-      <div className="lk-card-h flat"><span className="lk-ic sm green"><Icon name="spark" size="sm" /></span><h2 id="goal-h" className="lk-h2 lk-grow">{tx('هدف نوفمبر', 'November goal')}</h2><span className="lk-sim">{tx('هدف تجريبي', 'Demo target')}</span></div>
+      <div className="home-sec-h"><h2 id="goal-h" className="lk-h2 lk-grow">{tx('هدف نوفمبر', 'November goal')}</h2><span className="lk-sim">{tx('هدف تجريبي', 'Demo target')}</span></div>
       <div className="home-goal-b">
         <svg viewBox="0 0 128 128" className="home-ring" role="img" aria-label={tx(`تحقق ${pct}% من الهدف`, `${pct}% of target reached`)}>
           <defs><linearGradient id="lkRing" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor="#7b5cf0" /><stop offset="100%" stopColor="#0ab2ec" /></linearGradient></defs>

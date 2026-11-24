@@ -7,7 +7,7 @@ import { link, type Route } from '../../core/router';
 import { useLang } from '../../core/lang';
 import { ordersStore, settingsStore } from '../merchant/stores';
 import { VIEWS } from '../merchant/domain';
-import { Icon, useTx, type IconName } from './ui';
+import { Icon, useTx } from './ui';
 import { reviewStore, vhref, type DemoState } from './data';
 import Home from './home';
 import Orders from './orders';
@@ -44,57 +44,51 @@ export default function V2({ route }: { route: Route }) {
   const needs = orders.filter(VIEWS.needs).length;
   const view = route.query.get('view');
   const current = section === 'orders' ? (view === 'late' || view === 'returns' || view === 'payfail' ? view : 'orders') : section === 'products' ? 'product-edit' : section;
-  const primary: { id: Section; label: string; icon: IconName; href: string; count?: number }[] = [
-    { id: 'home', label: tx('الرئيسية', 'Home'), icon: 'home', href: vhref('') },
-    { id: 'orders', label: tx('الطلبات', 'Orders'), icon: 'orders', href: vhref('orders'), count: needs },
-    { id: 'products', label: tx('المنتجات', 'Products'), icon: 'products', href: vhref('products/p1') },
+  const primary: { id: Section; label: string; href: string; count?: number }[] = [
+    { id: 'home', label: tx('الرئيسية', 'Home'), href: vhref('') },
+    { id: 'orders', label: tx('الطلبات', 'Orders'), href: vhref('orders'), count: needs },
+    { id: 'products', label: tx('المنتجات', 'Products'), href: vhref('products/p1') },
   ];
   const body = section === 'orders' ? <Orders route={route} /> : section === 'products' ? <ProductEdit route={route} /> : section === 'compare' ? <Compare /> : <Home />;
   const store = settings.store.name;
   const allBtn = (cls: string) => (
     <button type="button" className={cls} onClick={() => setAll(true)} aria-haspopup="dialog" aria-keyshortcuts="/">
-      <Icon name="menu" size="sm" /><span>{tx('كل الأقسام', 'All sections')}</span><span className="lk-kbd lk-only-desktop">/</span>
+      <span>{tx('كل الأقسام', 'All sections')}</span><span className="lk-kbd lk-only-desktop">/</span>
     </button>
   );
-  const storeCard = (
-    <div className="sh-store">
-      <span className="sh-store-logo" aria-hidden="true">{store.slice(0, 1)}</span>
-      <div className="lk-col lk-grow" style={{ minWidth: 0 }}>
-        <span className="lk-strong lk-truncate">{store}</span>
-        <span className="sh-live"><span className="dot" />{tx('المتجر يستقبل الطلبات', 'Store is taking orders')}</span>
-      </div>
-      <a className="lk-btn icon sm soft" href={link('/store')} aria-label={tx('زيارة المتجر', 'Visit store')} title={tx('زيارة المتجر', 'Visit store')}><Icon name="external" size="sm" /></a>
-    </div>
+  const searchField = (
+    <a className="sh-search" href={vhref('orders', { focus: 'search' })}>
+      <Icon name="search" size="sm" /><span className="lk-grow">{tx('ابحث عن طلب أو عميل', 'Search orders or customers')}</span>
+    </a>
   );
-  const tools = (
-    <>
-      <button type="button" className="lk-btn icon ghost" aria-label={tx('الإشعارات (لا جديد)', 'Notifications (none new)')} title={tx('لا إشعارات جديدة', 'No new notifications')}><Icon name="bell" /></button>
-      <a className="lk-btn icon ghost" href={link('/merchant/settings')} aria-label={tx('الإعدادات (الإصدار الحالي)', 'Settings (current version)')}><Icon name="settings" /></a>
-      <span className="sh-user" title={tx('سارة · المالكة', 'Sara · Owner')}><span className="lk-avatar">س</span><span className="lk-only-desktop lk-col"><span className="lk-small lk-strong">{tx('سارة', 'Sara')}</span><span className="lk-micro lk-3">{tx('المالكة', 'Owner')}</span></span></span>
-    </>
-  );
+  const user = <span className="sh-user" title={tx('سارة · المالكة', 'Sara · Owner')}><span className="lk-avatar">س</span></span>;
 
   return (
     <div className="lk lk-app" data-dir={review.dir}>
+      <div className="sh-glow" aria-hidden="true" />
       {review.dir === 'a' ? (
         <div className="lk-a">
           <nav className={`lk-a-nav${menu ? ' open' : ''}`} aria-label={tx('تنقل لوحة التاجر', 'Merchant navigation')}>
-            <div className="lk-row lk-between" style={{ padding: '2px 6px 0' }}>
+            <div className="lk-row lk-between">
               <a className="lk-mark" href={vhref('')}><img src="/lak-mark.png" alt="LAK | لك" /></a>
               <button type="button" className="lk-btn icon sm ghost lk-a-menu" aria-label={tx('إغلاق القائمة', 'Close menu')} onClick={() => setMenu(false)}><Icon name="close" size="sm" /></button>
             </div>
-            {storeCard}
-            <a className="sh-home" href={vhref('')} aria-current={section === 'home' ? 'page' : undefined}><Icon name="home" /><span className="lk-grow">{tx('الرئيسية', 'Home')}</span></a>
-            <SideGroups current={current} />
+            <div className="sh-store">
+              <span className="lk-strong lk-truncate">{store}</span>
+              <span className="sh-live"><span className="dot" />{tx('يستقبل الطلبات', 'Taking orders')}</span>
+              <a className="sh-visit" href={link('/store')}>{tx('زيارة المتجر', 'Visit store')} ↗</a>
+            </div>
+            <SideGroups current={current} counts={{ orders: needs }} />
+            <div className="lk-grow" />
+            {allBtn('sh-all')}
           </nav>
-          {menu && <div className="lk-scrim" style={{ zIndex: 44, background: 'rgba(20,25,56,.35)' }} onClick={() => setMenu(false)} aria-hidden="true" />}
+          {menu && <div className="lk-scrim" style={{ zIndex: 44, background: 'rgba(20,25,56,.3)' }} onClick={() => setMenu(false)} aria-hidden="true" />}
           <div style={{ minWidth: 0 }}>
             <header className="lk-a-top">
               <button type="button" className="lk-btn icon ghost lk-a-menu" aria-label={tx('فتح القائمة', 'Open menu')} aria-expanded={menu} onClick={() => setMenu(true)}><Icon name="menu" /></button>
-              <a className="lk-search" href={vhref('orders', { focus: 'search' })}><Icon name="search" size="sm" /><span className="lk-grow lk-small">{tx('ابحث عن طلب أو عميل', 'Search orders or customers')}</span></a>
-              {allBtn('lk-btn soft sh-all')}
+              {searchField}
               <span className="lk-grow" />
-              {tools}
+              {user}
             </header>
             <main>{body}</main>
           </div>
@@ -104,25 +98,23 @@ export default function V2({ route }: { route: Route }) {
           <header className="lk-b-top">
             <div className="lk-b-bar">
               <a className="lk-mark" href={vhref('')}><img src="/lak-mark.png" alt="LAK | لك" /></a>
-              {allBtn('sh-b-all')}
               <nav className="lk-b-nav" aria-label={tx('تنقل لوحة التاجر', 'Merchant navigation')}>
                 {primary.map((n) => (
-                  <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}><Icon name={n.icon} size="sm" />{n.label}{n.count ? <span className="lk-count">{n.count}</span> : null}</a>
+                  <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}>{n.label}{n.count ? <span className="nav-flat-n">{n.count}</span> : null}</a>
                 ))}
-                <a href={link('/merchant/marketing')}><Icon name="marketing" size="sm" />{tx('التسويق', 'Marketing')}</a>
-                <a href={link('/merchant/finance')}><Icon name="finance" size="sm" />{tx('المالية', 'Money')}</a>
+                {allBtn('sh-b-all')}
               </nav>
-              <span className="spacer lk-grow" />
-              <a className="lk-btn icon ghost" href={vhref('orders', { focus: 'search' })} aria-label={tx('بحث', 'Search')}><Icon name="search" /></a>
-              {tools}
+              <span className="lk-grow lk-b-only-mobile" />
+              {searchField}
+              {user}
             </div>
           </header>
           <main className="lk-b-main">{body}</main>
           <nav className="lk-b-tabs" aria-label={tx('تنقل سريع', 'Quick navigation')}>
             {primary.map((n) => (
-              <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}><Icon name={n.icon} />{n.label}{n.count ? <span className="lk-count">{n.count}</span> : null}</a>
+              <a key={n.id} href={n.href} aria-current={section === n.id ? 'page' : undefined}>{n.label}{n.count ? <span className="nav-flat-n">{n.count}</span> : null}</a>
             ))}
-            <button type="button" onClick={() => setAll(true)}><Icon name="menu" />{tx('الكل', 'All')}</button>
+            <button type="button" onClick={() => setAll(true)}>{tx('الكل', 'All')}</button>
           </nav>
         </>
       )}
