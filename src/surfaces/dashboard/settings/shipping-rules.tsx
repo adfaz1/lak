@@ -92,11 +92,11 @@ export default function RulesTab() {
         )}
       </Section>
 
-      {edit && <RuleDrawer key={edit.id} r={edit.r} id={edit.id} setup={setup} onClose={() => setEdit(null)} onSave={(rule) => setPending({
+      {edit && <RuleDrawer key={edit.id} r={edit.r} id={edit.id} setup={setup} onClose={() => setEdit(null)} onSave={(rule, clearDraft) => setPending({
         next: { ...setup, rules: edit.r ? setup.rules.map((x) => (x.id === rule.id ? rule : x)) : [...setup.rules, rule] }, target: rule.id,
         title: edit.r ? tx(`حفظ «${rule.name.ar}»`, `Save “${rule.name.en}”`) : tx(`إضافة «${rule.name.ar}»`, `Add “${rule.name.en}”`),
         what: edit.r ? { ar: `عدّل قاعدة الشحن «${rule.name.ar}»`, en: `Edited shipping rule “${rule.name.en}”` } : { ar: `أضاف قاعدة الشحن «${rule.name.ar}»`, en: `Added shipping rule “${rule.name.en}”` },
-        onDone: () => setEdit(null),
+        onDone: () => { clearDraft(); setEdit(null); },
       })} />}
 
       {pending && (
@@ -115,7 +115,7 @@ export default function RulesTab() {
   );
 }
 
-function RuleDrawer({ r, id, setup, onClose, onSave }: { r: ShipRule | null; id: string; setup: ShippingSetup; onClose: () => void; onSave: (r: ShipRule) => void }) {
+function RuleDrawer({ r, id, setup, onClose, onSave }: { r: ShipRule | null; id: string; setup: ShippingSetup; onClose: () => void; onSave: (r: ShipRule, clearDraft: () => void) => void }) {
   const tx = useTx();
   const { lang } = useLang();
   const cats = useCategories();
@@ -131,7 +131,7 @@ function RuleDrawer({ r, id, setup, onClose, onSave }: { r: ShipRule | null; id:
   const kg = tx('رقم أكبر من صفر', 'A number above zero');
   return (
     <Drawer title={r ? tx('تعديل القاعدة', 'Edit rule') : tx('قاعدة جديدة', 'New rule')} onClose={close}
-      footer={<><Button className="flex-1" onClick={() => { setTried(true); if (res.ok) { clear(); onSave(res.rule); } }}>{tx('راجع الأثر ثم احفظ', 'Review impact, then save')}</Button><Button variant="secondary" onClick={close}>{tx('إلغاء', 'Cancel')}</Button></>}>
+      footer={<><Button className="flex-1" onClick={() => { setTried(true); if (res.ok) onSave(res.rule, clear); }}>{tx('راجع الأثر ثم احفظ', 'Review impact, then save')}</Button><Button variant="secondary" onClick={close}>{tx('إلغاء', 'Cancel')}</Button></>}>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label={tx('الاسم بالعربية', 'Name in Arabic')} error={e.name ? tx('اكتب اسمًا', 'Enter a name') : null}>{(p) => <Input {...p} dir="rtl" value={d.nameAr} onChange={(ev) => set({ nameAr: ev.target.value })} />}</Field>
         <Field label={tx('الاسم بالإنجليزية', 'Name in English')} optional>{(p) => <Input {...p} dir="ltr" value={d.nameEn} onChange={(ev) => set({ nameEn: ev.target.value })} />}</Field>

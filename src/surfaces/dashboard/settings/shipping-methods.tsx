@@ -108,12 +108,12 @@ export default function MethodsTab() {
         </ul>
       </Section>
 
-      {edit && <MethodDrawer key={edit.m.id} m={edit.m} isNew={edit.isNew} setup={setup} onClose={() => setEdit(null)} onSave={(m) => {
+      {edit && <MethodDrawer key={edit.m.id} m={edit.m} isNew={edit.isNew} setup={setup} onClose={() => setEdit(null)} onSave={(m, clearDraft) => {
         const next = { ...setup, methods: edit.isNew ? [...setup.methods, m] : setup.methods.map((x) => (x.id === m.id ? m : x)) };
         setPending({
           next, title: edit.isNew ? tx(`إضافة ${m.name.ar}`, `Add ${m.name.en}`) : tx(`حفظ ${m.name.ar}`, `Save ${m.name.en}`),
           what: edit.isNew ? { ar: `أضاف طريقة الشحن «${m.name.ar}»`, en: `Added shipping method “${m.name.en}”` } : { ar: `عدّل طريقة الشحن «${m.name.ar}»`, en: `Edited shipping method “${m.name.en}”` },
-          target: m.id, confirm: tx('احفظ وطبّق على المتجر', 'Save and apply to the store'), onDone: () => setEdit(null),
+          target: m.id, confirm: tx('احفظ وطبّق على المتجر', 'Save and apply to the store'), onDone: () => { clearDraft(); setEdit(null); },
         });
       }} />}
 
@@ -152,7 +152,7 @@ export default function MethodsTab() {
   );
 }
 
-function MethodDrawer({ m, isNew, setup, onClose, onSave }: { m: ShipMethodCfg; isNew: boolean; setup: ShippingSetup; onClose: () => void; onSave: (m: ShipMethodCfg) => void }) {
+function MethodDrawer({ m, isNew, setup, onClose, onSave }: { m: ShipMethodCfg; isNew: boolean; setup: ShippingSetup; onClose: () => void; onSave: (m: ShipMethodCfg, clearDraft: () => void) => void }) {
   const tx = useTx();
   const { lang } = useLang();
   const cats = useCategories();
@@ -171,7 +171,7 @@ function MethodDrawer({ m, isNew, setup, onClose, onSave }: { m: ShipMethodCfg; 
   const close = () => { clear(); onClose(); };
   return (
     <Drawer title={isNew ? tx('طريقة شحن جديدة', 'New shipping method') : tx('تعديل طريقة الشحن', 'Edit shipping method')} onClose={close}
-      footer={<><Button className="flex-1" onClick={() => { setTried(true); if (r.ok) { clear(); onSave(r.method); } }}>{tx('راجع الأثر ثم احفظ', 'Review impact, then save')}</Button><Button variant="secondary" onClick={close}>{tx('إلغاء', 'Cancel')}</Button></>}>
+      footer={<><Button className="flex-1" onClick={() => { setTried(true); if (r.ok) onSave(r.method, clear); }}>{tx('راجع الأثر ثم احفظ', 'Review impact, then save')}</Button><Button variant="secondary" onClick={close}>{tx('إلغاء', 'Cancel')}</Button></>}>
       {isNew && <Field label={tx('الفئة', 'Category')}>{(p) => <Select {...p} value={d.cat} onChange={(ev) => set({ cat: ev.target.value as ShipCat, zonePrice: false })}>
         {SHIP_CATS.filter((c) => c !== 'pickup' || !setup.methods.some((x) => x.cat === 'pickup')).map((c) => <option key={c} value={c}>{CAT_LABEL[c][lang]}</option>)}
       </Select>}</Field>}
