@@ -1,3 +1,6 @@
+/* Legacy prototype styles, in the lowest cascade layer so the LAK design system (src/ds) always wins. */
+@layer legacy, theme, base, components, utilities;
+@layer legacy {
 /* Tokens. Brand values are sampled from the supplied logo image (a JPEG, not a brand guide),
    so they are provisional: replace them with the approved brand tokens when those exist. */
 :root {
@@ -227,3 +230,5 @@ select.input { padding-inline-end: 28px; }
 /* Shown when a merchant leaves the redesign for a not-yet-redesigned section. */
 .legacy-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 4px 16px; padding: 10px 16px; background: #141938; color: #fff; font-size: 14px; }
 .legacy-bar a { color: #9fe3f7; font-weight: 600; }
+
+}

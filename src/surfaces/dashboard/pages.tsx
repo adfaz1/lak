@@ -21,7 +21,7 @@ export const SECTIONS: Record<string, Page> = {
   help: lazy(() => import('./help')),
 };
 /** Sections rebuilt on the LAK design system and linked from navigation. */
-export const BUILT = new Set<string>([]);
+export const BUILT = new Set<string>(['orders']);
 
 /** Link to a merchant section: the rebuilt page when it exists, otherwise the previous workspace (labelled there). */
 export function sectionHref(key: string, path = '', query?: Record<string, string | undefined>): string {
