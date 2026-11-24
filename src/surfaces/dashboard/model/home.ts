@@ -91,3 +91,69 @@ export function channelsToday(orders: Order[]): ChannelShare[] {
     return { channel: c, orders: n, share: today.length ? Math.round((n * 100) / today.length) : 0 };
   });
 }
+
+/* ---------- Per-role workspace: what this viewer pins on the home ---------- */
+
+export type FigureId = Metric['id'] | 'toFulfil' | 'available';
+export const FIGURE_IDS: FigureId[] = ['net', 'orders', 'aov', 'conversion', 'toFulfil', 'available'];
+/** Figures from the finance ledger need the finance page; the fulfilment count needs orders. */
+export const figureAllowed = (role: Role, id: FigureId) =>
+  id === 'available' ? canSee(role, 'finance') : id === 'toFulfil' ? canSee(role, 'orders') : true;
+
+export type CardId = 'work' | 'today' | 'assistant' | 'sales' | 'top' | 'recent' | 'stock';
+export const CARD_IDS: CardId[] = ['work', 'today', 'assistant', 'sales', 'top', 'recent', 'stock'];
+/** Columns a card takes on the 3-column desktop grid (phones stack everything). */
+export const CARD_SPAN: Record<CardId, 1 | 2 | 3> = { work: 2, today: 1, assistant: 3, sales: 2, top: 1, recent: 2, stock: 1 };
+/** Cards that show data a role cannot open elsewhere are not offered to it. */
+export const cardAllowed = (role: Role, id: CardId) =>
+  id === 'recent' ? canSee(role, 'orders') : id === 'stock' ? canSee(role, 'inventory') : true;
+
+export interface Workspace { figures: FigureId[]; cards: CardId[]; shortcuts: string[]; views: string[] }
+export const MAX_SHORTCUTS = 6;
+export const MAX_VIEWS = 4;
+
+/** Sensible starting point per role (owner request: fulfilment → queue and stock; finance → money; marketing → growth). */
+export const DEFAULT_WS: Record<Role, Workspace> = {
+  owner: { figures: ['net', 'orders', 'aov', 'conversion'], cards: ['work', 'today', 'assistant', 'sales', 'top', 'recent', 'stock'], shortcuts: ['product-new', 'coupons', 'payouts', 'apps'], views: ['orders-late', 'inventory-low'] },
+  fulfilment: { figures: ['toFulfil', 'orders'], cards: ['work', 'stock', 'recent', 'today'], shortcuts: ['orders-needs', 'inventory-transfers', 'inventory'], views: ['orders-late', 'inventory-low'] },
+  finance: { figures: ['net', 'available', 'aov', 'orders'], cards: ['work', 'today', 'assistant', 'sales'], shortcuts: ['payouts', 'transactions', 'billing'], views: ['orders-payfail'] },
+  marketing: { figures: ['net', 'conversion', 'aov', 'orders'], cards: ['assistant', 'sales', 'top', 'work', 'today'], shortcuts: ['coupons', 'carts', 'campaigns', 'automations'], views: ['automation-runs'] },
+};
+
+const uniq = <T,>(xs: T[]) => [...new Set(xs)];
+/**
+ * Clean a stored workspace against what this role may use now (stored data can be stale or hand-edited):
+ * unknown or forbidden entries are dropped, limits applied; anything unreadable falls back to the role default.
+ * `toolOk` says whether a tool id exists and is usable by the role; views must be tools with a filter.
+ */
+export function sanitizeWs(raw: unknown, role: Role, toolOk: (id: string, view: boolean) => boolean): Workspace {
+  const d = DEFAULT_WS[role];
+  if (!raw || typeof raw !== 'object') return d;
+  const r = raw as Partial<Record<keyof Workspace, unknown>>;
+  const strs = (v: unknown): string[] | null => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null);
+  const figures = strs(r.figures)?.filter((x): x is FigureId => (FIGURE_IDS as string[]).includes(x) && figureAllowed(role, x as FigureId));
+  const cards = strs(r.cards)?.filter((x): x is CardId => (CARD_IDS as string[]).includes(x) && cardAllowed(role, x as CardId));
+  const shortcuts = strs(r.shortcuts)?.filter((x) => toolOk(x, false));
+  const views = strs(r.views)?.filter((x) => toolOk(x, true));
+  return {
+    figures: uniq(figures ?? d.figures),
+    cards: uniq(cards ?? d.cards),
+    shortcuts: uniq(shortcuts ?? d.shortcuts).slice(0, MAX_SHORTCUTS),
+    views: uniq(views ?? d.views).slice(0, MAX_VIEWS),
+  };
+}
+
+/** Move an entry one place earlier (-1) or later (+1); out of range leaves the list as it is. */
+export function moveIn<T>(list: T[], id: T, dir: -1 | 1): T[] {
+  const i = list.indexOf(id), j = i + dir;
+  if (i < 0 || j < 0 || j >= list.length) return list;
+  const next = [...list];
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}
+/** Add or remove an entry, keeping the order; additions go last and respect a limit. */
+export function toggleIn<T>(list: T[], id: T, max = Infinity): T[] {
+  if (list.includes(id)) return list.filter((x) => x !== id);
+  return list.length >= max ? list : [...list, id];
+}
+export const sameWs = (a: Workspace, b: Workspace) => JSON.stringify(a) === JSON.stringify(b);

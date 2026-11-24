@@ -1,20 +1,33 @@
 // Merchant home — the quality reference for the whole platform.
 // View only: every number comes from model/home.ts.
-import { useMemo, useState, type ReactNode } from 'react';
-import { AlarmClock, CreditCard, PackageCheck, RotateCcw, Boxes, ArrowLeft, ShoppingBag, Wallet, Receipt, MousePointerClick, PackageOpen, CheckCircle2 } from 'lucide-react';
+import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Boxes, ShoppingBag, Wallet, Receipt, MousePointerClick, PackageOpen, CheckCircle2, PackageCheck, Landmark, SlidersHorizontal, Filter, ArrowUpRight } from 'lucide-react';
 import { useLang } from '../../core/lang';
 import { link } from '../../core/router';
 import { formatMoney } from '../../core/format';
-import { ordersStore, levelsStore, productsStore, testStore } from '../merchant/stores';
+import { ordersStore, levelsStore, productsStore, testStore, financeStore } from '../merchant/stores';
+import { can } from '../merchant/perms';
+import { moneyCards } from '../merchant/finance';
 import { total, type Order } from '../merchant/domain';
 import { history } from './analytics/model';
-import { Card, CardHeader, Money, Delta, Badge, ProductImage, Avatar, Ref, Skeleton, EmptyState, ErrorState, Segmented, LinkButton, InfoHint, cn, useTx, toneDot, type Tone } from '../../ds/ui';
+import { Card, CardHeader, Money, Delta, Badge, Button, ProductImage, Avatar, Ref, Skeleton, EmptyState, ErrorState, Segmented, LinkButton, InfoHint, cn, useTx, toneDot, type Tone } from '../../ds/ui';
 import { AreaChart } from '../../ds/charts';
-import { channelsToday, headline, salesToday, stockAlerts, tasks, tasksFor, topProducts, type PeriodDays, type Task, type TaskId } from './model/home';
+import { CARD_SPAN, channelsToday, headline, salesToday, stockAlerts, topProducts, type CardId, type FigureId, type PeriodDays } from './model/home';
+import { toolById, type Tool } from './model/tools';
+import { split } from './work/model';
+import { WorkRow } from './work/parts';
+import { queueStore, useWho, useWork, useWorkspace } from './work/state';
+import { Customise } from './work/customise';
+import { AssistantCard } from './assistant/card';
+import { dhref } from './shell';
 import { productPhoto, skuPhoto } from './model/media';
 import { useDashState, setDashState } from './review';
 import { sectionHref } from './pages';
 
+/** Desktop columns for the headline row, so any number of chosen figures fills one line. */
+const FIG_COLS: Record<number, string> = { 1: 'xl:grid-cols-2', 2: 'xl:grid-cols-2', 3: 'xl:grid-cols-3', 4: 'xl:grid-cols-4', 5: 'lg:grid-cols-3 xl:grid-cols-5', 6: 'lg:grid-cols-3 xl:grid-cols-6' };
+/** Latin spelling of the demo team's names for the English greeting. */
+const EN_NAME: Record<string, string> = { 'سارة': 'Sara', 'فيصل': 'Faisal', 'هدى': 'Huda' };
 const ordersLink = (view?: string) => sectionHref('orders', '', { view });
 
 export default function Home() {
@@ -32,8 +45,18 @@ export default function Home() {
   const list = empty ? [] : orders;
   const lv = empty ? [] : levels;
   const role = testStore.use().role;
-  const work = tasksFor(role, tasks(list, lv));
+  const fin = financeStore.use();
+  const who = useWho();
+  const ws = useWorkspace(role);
+  const [customising, setCustomising] = useState(false);
+  const { mine } = useWork(empty);
+  const qs = queueStore.use();
+  const [now] = useState(() => Date.now());
+  // The work centre's queue for this role, minus what was snoozed or marked done; the home shows the top five.
+  const open = split(qs, mine, now).open;
+  const work = open.slice(0, 5);
   const figures = headline(empty ? [] : series, period);
+  const toFulfil = open.filter((x) => x.kind === 'fulfil' || x.kind === 'late').reduce((n, x) => n + x.orders, 0);
   const top = topProducts(list);
   const alerts = stockAlerts(lv);
   const recent = list.slice(0, 6);
@@ -46,15 +69,18 @@ export default function Home() {
   const header = (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-[28px]">{tx('صباح الخير، سارة', 'Good morning, Sara')}</h1>
+        <h1 className="text-2xl font-bold tracking-tight text-fg sm:text-[28px]">{EN_NAME[who] ? tx(`صباح الخير، ${who}`, `Good morning, ${EN_NAME[who]}`) : tx('صباح الخير', 'Good morning')}</h1>
         <p className="mt-1 text-sm text-muted">
-          {state === 'live' && work.length ? tx(`${work.length} أمور تحتاجك اليوم`, `${work.length} things need you today`) : tx('ملخص متجرك', 'Your store at a glance')}
+          {state === 'live' && open.length ? tx(`${open.length} أمور تحتاجك اليوم`, `${open.length} things need you today`) : tx('ملخص متجرك', 'Your store at a glance')}
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Segmented label={tx('الفترة', 'Period')} value={String(period) as '7' | '30'} onChange={(v) => setPeriod(Number(v) as PeriodDays)}
           options={[{ value: '7', label: tx('7 أيام', '7 days') }, { value: '30', label: tx('30 يومًا', '30 days') }]} />
-        <LinkButton href={ordersLink('needs')} className="bg-brand-gradient hover:opacity-95">{tx('جهّز الطلبات', 'Fulfil orders')}</LinkButton>
+        <Button variant="secondary" onClick={() => setCustomising(true)}><SlidersHorizontal className="size-4" aria-hidden="true" />{tx('خصّص', 'Customise')}</Button>
+        {can(role, 'order.fulfil')
+          ? <LinkButton href={ordersLink('needs')} className="bg-brand-gradient hover:opacity-95">{tx('جهّز الطلبات', 'Fulfil orders')}</LinkButton>
+          : <LinkButton href={dhref('work')} className="bg-brand-gradient hover:opacity-95">{tx('مركز العمل', 'Work centre')}</LinkButton>}
       </div>
     </div>
   );
@@ -68,58 +94,41 @@ export default function Home() {
     </div>
   );
 
-  const FIG: Record<string, { label: string; hint: string; icon: ReactNode; tint: string }> = {
+  const FIG: Record<FigureId, { label: string; hint: string; icon: ReactNode; tint: string }> = {
     net: { label: tx('صافي المبيعات', 'Net sales'), hint: tx('بعد الخصومات والاستردادات، شامل الضريبة. الأيام المكتملة فقط.', 'After discounts and refunds, VAT included. Complete days only.'), icon: <Wallet className="size-5" />, tint: 'from-brand-500/15 text-brand-600 dark:text-brand-300' },
     orders: { label: tx('الطلبات', 'Orders'), hint: tx('كل الطلبات المنشأة في الفترة بأي حالة دفع.', 'Every order created in the period, any payment state.'), icon: <ShoppingBag className="size-5" />, tint: 'from-sky-500/15 text-sky-600 dark:text-sky-300' },
     aov: { label: tx('متوسط قيمة الطلب', 'Average order value'), hint: tx('صافي المبيعات ÷ عدد الطلبات.', 'Net sales ÷ number of orders.'), icon: <Receipt className="size-5" />, tint: 'from-violet-500/15 text-violet-600 dark:text-violet-300' },
     conversion: { label: tx('معدل التحويل', 'Conversion rate'), hint: tx('الطلبات ÷ الزيارات، محسوب فقط على الأيام التي تتوفر فيها بيانات زيارات.', 'Orders ÷ visits, on days with visit data only.'), icon: <MousePointerClick className="size-5" />, tint: 'from-emerald-500/15 text-emerald-600 dark:text-emerald-300' },
+    toFulfil: { label: tx('بانتظار التجهيز', 'To fulfil'), hint: tx('طلبات مدفوعة لم تُجهّز بعد، منها المتأخرة. الآن، لا مقارنة.', 'Paid orders not yet fulfilled, late ones included. Right now, no comparison.'), icon: <PackageCheck className="size-5" />, tint: 'from-brand-500/15 text-brand-600 dark:text-brand-300' },
+    available: { label: tx('الرصيد المتاح', 'Available balance'), hint: tx('ما سوّاه مزوّد الدفع ولم يُحوَّل بعد: المبيعات − الرسوم − الاستردادات ± التسويات. يُحوَّل في التحويل القادم.', 'Settled by the provider, not yet paid out: sales − fees − refunds ± adjustments. Goes out in the next payout.'), icon: <Landmark className="size-5" />, tint: 'from-emerald-500/15 text-emerald-600 dark:text-emerald-300' },
   };
 
-  return (
-    <div className="space-y-6">
-      {header}
-
-      <section aria-label={tx('أرقام الفترة', 'Period figures')} className="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
-        {figures.map((f) => {
-          const d = FIG[f.id];
-          const val = f.value === null ? '—' : f.unit === 'money' ? <Money v={f.value} /> : f.unit === 'percent' ? `${f.value}%` : f.value.toLocaleString('en-US');
-          return (
-            <div key={f.id} className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-2">
-                <p className="flex items-center gap-1 text-[13px] font-medium text-muted">{d.label}<InfoHint>{d.hint}</InfoHint></p>
-                <span className={cn('hidden size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-b to-transparent sm:grid', d.tint)} aria-hidden="true">{d.icon}</span>
-              </div>
-              <p className="mt-1 text-xl font-bold tracking-tight text-fg tabular-nums sm:text-2xl">{empty ? '—' : val}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-subtle">
-                {empty ? tx('لا بيانات بعد', 'No data yet') : <><Delta v={f.delta} /><span>{tx(`مقابل ${period} أيام سابقة`, `vs previous ${period} days`)}</span></>}
-              </div>
-            </div>
-          );
-        })}
-      </section>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2" aria-labelledby="h-work">
-          <CardHeader id="h-work" title={tx('يحتاجك الآن', 'Needs you now')} hint={tx('مرتبة حسب أثرها: المال غير المحصّل والتأخير أولًا، ثم التجهيز، ثم المخزون.', 'Ranked by impact: uncollected money and delays first, then fulfilment, then stock.')} />
+  const SPAN = { 1: '', 2: 'lg:col-span-2', 3: 'lg:col-span-3' } as const;
+  const CARDS: Record<CardId, ReactNode> = {
+    work: (
+        <Card className={SPAN[CARD_SPAN.work]} aria-labelledby="h-work">
+          <CardHeader id="h-work" title={tx('يحتاجك الآن', 'Needs you now')} hint={tx('مرتبة حسب أثرها: المال غير المحصّل والتأخير وأعطال الدفع أولًا، ثم التجهيز والمخزون، ثم الباقي. حسب دورك.', 'Ranked by impact: uncollected money, delays and payment breakages first, then fulfilment and stock, then the rest. For your role.')}
+            action={<a href={dhref('work')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{open.length > work.length ? tx(`الكل (${open.length})`, `All (${open.length})`) : tx('مركز العمل', 'Work centre')}</a>} />
           {work.length === 0 ? (
-            <EmptyState icon={<CheckCircle2 className="size-6" />} title={tx('لا شيء ينتظرك', 'Nothing is waiting for you')} action={<LinkButton variant="secondary" href={ordersLink()}>{tx('كل الطلبات', 'All orders')}</LinkButton>}>
-              {tx('كل الطلبات المدفوعة مجهّزة ولا مخزون منخفض.', 'Every paid order is fulfilled and no stock is low.')}
+            <EmptyState icon={<CheckCircle2 className="size-6" />} title={tx('لا شيء ينتظرك', 'Nothing is waiting for you')} action={<LinkButton variant="secondary" href={dhref('work')}>{tx('مركز العمل', 'Work centre')}</LinkButton>}>
+              {tx('لا شيء مفتوح لدورك: الطلبات والمخزون والمدفوعات والربط بخير، أو أجّلته.', 'Nothing open for your role: orders, stock, payments and integrations are fine, or you snoozed them.')}
             </EmptyState>
           ) : (
             <ul className="divide-y divide-border">
-              {work.map((t, i) => <TaskRow key={t.id} t={t} first={i === 0} ago={ago} />)}
+              {work.map((x, i) => <WorkRow key={x.id} x={x} primary={i === 0} />)}
             </ul>
           )}
         </Card>
-
-        <Card aria-labelledby="h-today">
+    ),
+    today: (
+        <Card className={SPAN[CARD_SPAN.today]} aria-labelledby="h-today">
           <CardHeader id="h-today" title={tx('اليوم', 'Today')} />
           <div className="px-5 pb-5">
             <p className="text-xs text-muted">{tx('مبيعات مدفوعة', 'Paid sales')}</p>
             <p className="mt-0.5 text-3xl font-bold tracking-tight text-fg tabular-nums">{empty ? '—' : <Money v={todaySales} />}</p>
             <dl className="mt-5 grid grid-cols-2 gap-3">
               <div className="rounded-xl bg-surface-2 p-3"><dt className="text-xs text-muted">{tx('طلبات اليوم', 'Orders today')}</dt><dd className="mt-1 text-lg font-bold tabular-nums">{empty ? 0 : todayOrders}</dd></div>
-              <div className="rounded-xl bg-surface-2 p-3"><dt className="text-xs text-muted">{tx('بانتظار التجهيز', 'To fulfil')}</dt><dd className="mt-1 text-lg font-bold tabular-nums">{(work.find((w) => w.id === 'fulfil')?.count ?? 0) + (work.find((w) => w.id === 'late')?.count ?? 0)}</dd></div>
+              <div className="rounded-xl bg-surface-2 p-3"><dt className="text-xs text-muted">{tx('بانتظار التجهيز', 'To fulfil')}</dt><dd className="mt-1 text-lg font-bold tabular-nums">{toFulfil}</dd></div>
             </dl>
             <div className="mt-5">
               <p className="mb-3 text-xs font-medium text-muted">{tx('طلبات اليوم حسب القناة', "Today's orders by channel")}</p>
@@ -137,18 +146,19 @@ export default function Home() {
             </a>
           </div>
         </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2" aria-labelledby="h-sales">
+    ),
+    assistant: <div className="lg:col-span-3"><AssistantCard period={period} empty={empty} /></div>,
+    sales: (
+        <Card className={SPAN[CARD_SPAN.sales]} aria-labelledby="h-sales">
           <CardHeader id="h-sales" title={tx(`صافي المبيعات · آخر ${period} أيام`, `Net sales · last ${period} days`)} hint={tx('بعد الخصومات والاستردادات، شامل الضريبة. اليوم الحالي غير مكتمل فلا يُحتسب.', 'After discounts and refunds, VAT included. Today is incomplete and excluded.')} />
           <div className="px-5 pb-5">
             {empty ? <EmptyState icon={<Wallet className="size-6" />} title={tx('لا مبيعات بعد', 'No sales yet')}>{tx('يظهر الرسم بعد أول طلب مدفوع.', 'The chart appears after your first paid order.')}</EmptyState>
               : <AreaChart rtl={lang === 'ar'} points={series.slice(-period).map((d) => ({ key: d.date, label: fmtDay(d.date), value: d.net }))} format={(v) => `${formatMoney(v)} ${tx('ر.س', 'SAR')}`} />}
           </div>
         </Card>
-
-        <Card aria-labelledby="h-top">
+    ),
+    top: (
+        <Card className={SPAN[CARD_SPAN.top]} aria-labelledby="h-top">
           <CardHeader id="h-top" title={tx('الأكثر مبيعًا', 'Best sellers')} action={<a href={sectionHref('products')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المنتجات', 'Products')}</a>} />
           {top.length === 0 ? <EmptyState icon={<PackageOpen className="size-6" />} title={tx('لا مبيعات بعد', 'No sales yet')} /> : (
             <ol className="space-y-1 px-3 pb-4">
@@ -166,10 +176,9 @@ export default function Home() {
             </ol>
           )}
         </Card>
-      </div>
-
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2" aria-labelledby="h-recent">
+    ),
+    recent: (
+        <Card className={SPAN[CARD_SPAN.recent]} aria-labelledby="h-recent">
           <CardHeader id="h-recent" title={tx('أحدث الطلبات', 'Latest orders')} action={<a href={ordersLink()} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('كل الطلبات', 'All orders')}</a>} />
           {recent.length === 0 ? <EmptyState icon={<ShoppingBag className="size-6" />} title={tx('لا طلبات بعد', 'No orders yet')}>{tx('شارك رابط متجرك لتصلك أول الطلبات.', 'Share your store link to get your first orders.')}</EmptyState> : (
             <ul className="divide-y divide-border">
@@ -177,8 +186,9 @@ export default function Home() {
             </ul>
           )}
         </Card>
-
-        <Card aria-labelledby="h-stock">
+    ),
+    stock: (
+        <Card className={SPAN[CARD_SPAN.stock]} aria-labelledby="h-stock">
           <CardHeader id="h-stock" title={tx('مخزون يقترب من النفاد', 'Running low')} hint={tx('المتاح = الموجود − المحجوز. يظهر الصنف حين يصل المتاح إلى حدّ إعادة الطلب في أي مستودع.', 'Available = on hand − reserved. A SKU appears when available reaches its reorder point in any warehouse.')}
             action={<a href={sectionHref('inventory')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المخزون', 'Inventory')}</a>} />
           {alerts.length === 0 ? <EmptyState icon={<Boxes className="size-6" />} title={tx('المخزون بخير', 'Stock is healthy')} /> : (
@@ -199,46 +209,60 @@ export default function Home() {
             </ul>
           )}
         </Card>
-      </div>
+    ),
+  };
+
+  return (
+    <div className="space-y-6">
+      {header}
+
+      {(ws.shortcuts.length > 0 || ws.views.length > 0) && <Shortcuts ids={ws.shortcuts} views={ws.views} />}
+
+      <section aria-label={tx('أرقام الفترة', 'Period figures')} className={cn('grid grid-cols-2 gap-3 sm:gap-4', FIG_COLS[Math.min(ws.figures.length, 6)])}>
+        {ws.figures.map((id) => {
+          const d = FIG[id];
+          const f = figures.find((x) => x.id === id);
+          const val = f ? (f.value === null ? '—' : f.unit === 'money' ? <Money v={f.value} /> : f.unit === 'percent' ? `${f.value}%` : f.value.toLocaleString('en-US'))
+            : id === 'toFulfil' ? toFulfil.toLocaleString('en-US') : <Money v={moneyCards(fin.txs, fin.payouts).available} />;
+          return (
+            <div key={id} className="rounded-2xl border border-border bg-surface p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-2">
+                <p className="flex items-center gap-1 text-[13px] font-medium text-muted">{d.label}<InfoHint>{d.hint}</InfoHint></p>
+                <span className={cn('hidden size-10 shrink-0 place-items-center rounded-xl bg-gradient-to-b to-transparent sm:grid', d.tint)} aria-hidden="true">{d.icon}</span>
+              </div>
+              <p className="mt-1 text-xl font-bold tracking-tight text-fg tabular-nums sm:text-2xl">{empty ? '—' : val}</p>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-subtle">
+                {empty ? tx('لا بيانات بعد', 'No data yet') : f ? <><Delta v={f.delta} /><span>{tx(`مقابل ${period} أيام سابقة`, `vs previous ${period} days`)}</span></> : <span>{tx('الآن', 'Right now')}</span>}
+              </div>
+            </div>
+          );
+        })}
+      </section>
+
+      {ws.cards.length === 0
+        ? <Card><EmptyState icon={<SlidersHorizontal className="size-6" />} title={tx('كل البطاقات مخفية', 'Every card is hidden')} action={<Button variant="secondary" onClick={() => setCustomising(true)}>{tx('خصّص', 'Customise')}</Button>}>{tx('أظهر ما تحتاجه من «خصّص».', 'Show what you need from “Customise”.')}</EmptyState></Card>
+        : <div className="grid grid-cols-1 gap-6 lg:grid-flow-row-dense lg:grid-cols-3">{ws.cards.map((id) => <Fragment key={id}>{CARDS[id]}</Fragment>)}</div>}
+
+      {customising && <Customise role={role} ws={ws} onClose={() => setCustomising(false)} />}
     </div>
   );
 }
 
-const TASK: Record<TaskId, { tone: Tone; icon: ReactNode; ar: string; en: string; ctaAr: string; ctaEn: string; view?: string; href?: string }> = {
-  late: { tone: 'red', icon: <AlarmClock className="size-5" />, ar: 'طلبات متأخرة عن التجهيز', en: 'Orders late to fulfil', ctaAr: 'جهّز الآن', ctaEn: 'Fulfil now', view: 'late' },
-  payfail: { tone: 'red', icon: <CreditCard className="size-5" />, ar: 'مدفوعات لم تكتمل', en: 'Payments not completed', ctaAr: 'راجع', ctaEn: 'Review', view: 'payfail' },
-  fulfil: { tone: 'brand', icon: <PackageCheck className="size-5" />, ar: 'طلبات جاهزة للتجهيز', en: 'Orders ready to fulfil', ctaAr: 'ابدأ التجهيز', ctaEn: 'Start', view: 'needs' },
-  refunds: { tone: 'amber', icon: <RotateCcw className="size-5" />, ar: 'استردادات بانتظار المزوّد', en: 'Refunds awaiting provider', ctaAr: 'تابع', ctaEn: 'Track', view: 'returns' },
-  stock: { tone: 'amber', icon: <Boxes className="size-5" />, ar: 'أصناف عند حد إعادة الطلب', en: 'SKUs at reorder point', ctaAr: 'المخزون', ctaEn: 'Inventory', href: 'inventory' },
-};
-const TINT: Record<Tone, string> = { red: 'bg-red-500/10 text-red-600 dark:text-red-400', brand: 'bg-brand-500/10 text-brand-600 dark:text-brand-300', amber: 'bg-amber-500/12 text-amber-700 dark:text-amber-300', green: '', sky: '', gray: '' };
-
-function TaskRow({ t, first, ago }: { t: Task; first: boolean; ago: (h: number) => string }) {
+/** The viewer's pinned shortcuts and saved views (from «خصّص»), each opening its tool in context. */
+function Shortcuts({ ids, views }: { ids: string[]; views: string[] }) {
   const tx = useTx();
   const { lang } = useLang();
-  const d = TASK[t.id];
-  const href = d.href ? sectionHref(d.href) : ordersLink(d.view);
-  const meta = [
-    t.id === 'stock' ? tx(`${t.count} صنف`, `${t.count} SKUs`) : tx(`${t.count} طلب`, `${t.count} orders`),
-    t.oldestHours !== null ? tx(`الأقدم ${ago(t.oldestHours)}`, `oldest ${ago(t.oldestHours)}`) : null,
-  ].filter(Boolean).join(' · ');
+  const pick = (xs: string[]) => xs.map(toolById).filter((t): t is Tool => !!t);
+  const chip = (t: Tool, icon: ReactNode) => (
+    <li key={t.id}><a href={dhref(t.path, t.query)} className="inline-flex h-9 items-center gap-1.5 rounded-full border border-border bg-surface px-3 text-[13px] font-medium text-fg transition-colors hover:border-brand-300">{icon}{t.label[lang]}</a></li>
+  );
   return (
-    <li className="flex flex-wrap items-center gap-x-4 gap-y-3 px-5 py-4">
-      <span className={cn('grid size-11 shrink-0 place-items-center rounded-xl', TINT[d.tone])} aria-hidden="true">{d.icon}</span>
-      <div className="min-w-0 flex-1 basis-40">
-        <p className="flex items-center gap-2 text-sm font-semibold text-fg"><span className={cn('size-1.5 shrink-0 rounded-full', toneDot[d.tone])} aria-hidden="true" />{lang === 'ar' ? d.ar : d.en}</p>
-        <p className="mt-0.5 text-xs text-muted">{meta}</p>
-      </div>
-      <div className="flex w-full items-center justify-end gap-4 ps-15 sm:w-auto sm:ps-0">
-        {t.value > 0 && <Money v={t.value} className="me-auto text-sm font-semibold text-fg sm:me-0" />}
-        <div className="hidden -space-x-2 md:flex rtl:space-x-reverse" aria-hidden="true">
-          {t.skus.slice(0, 3).map((s) => <ProductImage key={s} src={skuPhoto(s)} alt="" size={30} className="ring-2 ring-surface" />)}
-        </div>
-        <LinkButton href={href} variant={first ? 'primary' : 'secondary'} size="sm">
-          {lang === 'ar' ? d.ctaAr : d.ctaEn}<ArrowLeft className="size-3.5 ltr:rotate-180" aria-hidden="true" />
-        </LinkButton>
-      </div>
-    </li>
+    <nav aria-label={tx('اختصاراتك', 'Your shortcuts')}>
+      <ul className="flex flex-wrap gap-2">
+        {pick(ids).map((t) => chip(t, <ArrowUpRight className="size-3.5 text-subtle rtl:-scale-x-100" aria-hidden="true" />))}
+        {pick(views).map((t) => chip(t, <Filter className="size-3.5 text-brand-600 dark:text-brand-300" aria-hidden="true" />))}
+      </ul>
+    </nav>
   );
 }
 

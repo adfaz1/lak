@@ -25,7 +25,7 @@ describe('global search', () => {
   });
   it('finds products by Arabic name, English name and SKU', () => {
     expect(group('عباية', 'product')?.hits[0].id).toBe('p1');
-    expect(group('leather', 'product')?.hits.map((h) => h.id)).toEqual(['p4', 'p5']);
+    expect(group('leather', 'product')?.hits.map((h) => h.id)).toEqual(['p4', 'p5', 'p17']);
     expect(group('bag-lth', 'product')?.hits[0].id).toBe('p4');
   });
   it('finds customers by name and phone digits, and opens the profile', () => {

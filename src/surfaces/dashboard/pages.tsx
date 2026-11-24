@@ -22,9 +22,11 @@ export const SECTIONS: Record<string, Page> = {
   appmaker: lazy(() => import('./appmaker')),
   channel: lazy(() => import('./channel')),
   tools: lazy(() => import('./tools')),
+  work: lazy(() => import('./work')),
+  assistant: lazy(() => import('./assistant')),
 };
 /** Sections rebuilt on the LAK design system and linked from navigation. */
-export const BUILT = new Set<string>(['orders', 'products', 'inventory', 'customers', 'finance', 'analytics', 'marketing', 'automations', 'storefront', 'apps', 'settings', 'help', 'appmaker', 'channel', 'tools']);
+export const BUILT = new Set<string>(['orders', 'products', 'inventory', 'customers', 'finance', 'analytics', 'marketing', 'automations', 'storefront', 'apps', 'settings', 'help', 'appmaker', 'channel', 'tools', 'work', 'assistant']);
 
 /** Link to a merchant section: the rebuilt page when it exists, otherwise the previous workspace (labelled there). */
 export function sectionHref(key: string, path = '', query?: Record<string, string | undefined>): string {

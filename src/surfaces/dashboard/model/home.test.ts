@@ -5,6 +5,9 @@ import { productFixtures, skusOf } from '../../merchant/catalog';
 import { analyticsSeries } from '../../merchant/growth';
 import { channelsToday, headline, salesToday, stockAlerts, tasks, topProducts } from './home';
 import { productPhoto, skuPhoto } from './media';
+import { DEFAULT_WS, sanitizeWs, moveIn, toggleIn, figureAllowed, cardAllowed } from './home';
+import { TOOLS, canUseTool } from './tools';
+import { ROLES } from '../../merchant/perms';
 
 const orders = allOrders();
 const levels = initialLevels(productFixtures().flatMap(skusOf));
@@ -83,5 +86,36 @@ describe('role-aware work queue', () => {
     expect(tasksFor('marketing', all)).toEqual([]);
     expect(tasksFor('finance', all).some((t) => t.id === 'stock')).toBe(false);
     expect(tasksFor('fulfilment', all).map((t) => t.id)).toContain('stock');
+  });
+});
+
+describe('per-role workspace', () => {
+  const ok = (role: (typeof ROLES)[number]) => (id: string, view: boolean) => { const t = TOOLS.find((x) => x.id === id); return !!t && canUseTool(t, role) && (!view || !!t.query); };
+  it('defaults only use figures, cards and tools the role may open', () => {
+    for (const r of ROLES) {
+      const d = DEFAULT_WS[r];
+      expect(d.figures.every((f) => figureAllowed(r, f))).toBe(true);
+      expect(d.cards.every((c) => cardAllowed(r, c))).toBe(true);
+      expect(sanitizeWs(d, r, ok(r))).toEqual(d);
+    }
+  });
+  it('drops stale or forbidden entries and falls back on unreadable data', () => {
+    const ws = sanitizeWs({ figures: ['net', 'available', 'bogus'], cards: ['top', 'recent', 'stock'], shortcuts: ['payouts', 'orders'], views: ['orders-late'] }, 'marketing', ok('marketing'));
+    expect(ws.figures).toEqual(['net']);
+    expect(ws.cards).toEqual(['top']);
+    expect(ws.shortcuts).toEqual([]);
+    expect(ws.views).toEqual([]);
+    expect(sanitizeWs('garbage', 'owner', ok('owner'))).toEqual(DEFAULT_WS.owner);
+  });
+  it('hiding a card is per role', () => {
+    const owner = sanitizeWs({ ...DEFAULT_WS.owner, cards: DEFAULT_WS.owner.cards.filter((c) => c !== 'top') }, 'owner', ok('owner'));
+    expect(owner.cards.includes('top')).toBe(false);
+    expect(DEFAULT_WS.marketing.cards.includes('top')).toBe(true);
+  });
+  it('moves and toggles keep order and limits', () => {
+    expect(moveIn(['a', 'b', 'c'], 'c', -1)).toEqual(['a', 'c', 'b']);
+    expect(moveIn(['a', 'b'], 'a', -1)).toEqual(['a', 'b']);
+    expect(toggleIn(['a'], 'b', 1)).toEqual(['a']);
+    expect(toggleIn(['a', 'b'], 'a')).toEqual(['b']);
   });
 });

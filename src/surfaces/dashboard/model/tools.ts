@@ -37,6 +37,8 @@ const MONEY: Role[] = ['owner', 'finance'];
 const GROWTH: Role[] = ['owner', 'marketing'];
 
 export const TOOLS: Tool[] = [
+  t('work', 'operate', 'مركز العمل اليومي', 'Daily work centre', 'كل ما يحتاج إجراءً مرتبًا بأثره', 'Everything that needs action, ranked by impact', 'work queue tasks todo inbox مهام طابور عمل يحتاجك', 'work'),
+  t('assistant', 'operate', 'المساعد', 'Assistant', 'لماذا تغيّرت أرقامك، بالدليل واقتراح مسودة', 'Why your numbers changed, with evidence and a draft', 'assistant insights why explain مساعد لماذا تفسير رؤى', 'assistant'),
   t('orders', 'operate', 'كل الطلبات', 'All orders', 'البحث والتصفية والإجراءات الجماعية', 'Search, filter and bulk actions', 'orders طلبات طلب', 'orders'),
   t('orders-needs', 'operate', 'طلبات للتجهيز', 'Orders to fulfil', 'مدفوعة ولم تُجهّز بعد', 'Paid, not yet fulfilled', 'fulfil prepare pick pack تجهيز تغليف', 'orders', { view: 'needs' }),
   t('orders-late', 'operate', 'طلبات متأخرة', 'Late orders', 'مدفوعة منذ أكثر من 24 ساعة دون تجهيز', 'Paid more than 24 hours ago, not fulfilled', 'late delayed تأخر متأخر', 'orders', { view: 'late' }),
@@ -88,6 +90,7 @@ export function pageOf(path: string): Page | null {
   const head = path.split('/')[0];
   if (head === 'channel' || head === 'appmaker') return 'storefront';
   if (head === 'tools') return null;
+  if (head === 'work' || head === 'assistant') return 'home';
   return head as Page;
 }
 /** A tool is usable when the role can open its section and, if narrowed further, is listed. */
