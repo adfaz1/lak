@@ -148,7 +148,7 @@ export function searchReport(x: Inputs, r: Range, c: Range | null, q: Record<str
   const actionFor = (t: TermRow): Record<string, Cell> => {
     if (t.lastResults > 0) return {};
     if (redirects.some((d) => d.term === t.term) || matchesNow(t.term, x.products)) return {};
-    return { go: l('أنشئ منتجًا أو وجّه', 'Create product or redirect'), '_href:go': ana({ ...q, report: 'search', fix: t.term }) };
+    return { go: l('أنشئ أو وجّه', 'Add or redirect'), '_href:go': ana({ ...q, report: 'search', fix: t.term }) };
   };
   const top: Table = {
     id: 'search-top', title: l('الأكثر بحثًا', 'Most searched'), hint: l('مرتبة بعدد عمليات البحث في الفترة. «النتائج» = ما رآه المتسوق في آخر بحث.', 'Ranked by searches in the period. “Results” = what the shopper saw on the last search.'),
@@ -177,7 +177,7 @@ export function searchReport(x: Inputs, r: Range, c: Range | null, q: Record<str
       const red = redirects.find((d) => d.term === t.term);
       const n = matchesNow(t.term, x.products);
       const now = red ? l(`موجّه إلى ${red.target.name.ar}`, `Redirected to ${red.target.name.en}`) : n ? l(`يجد ${n} منتج الآن`, `Finds ${n} now`) : l('لا يجد شيئًا', 'Still nothing');
-      return { term: t.raw, count: t.count, last: t.lastDay, now, go: red ? l('عدّل التوجيه', 'Edit redirect') : n ? null : l('أنشئ منتجًا أو وجّه', 'Create product or redirect'), ...(red || !n ? { '_href:go': ana({ ...q, report: 'search', fix: t.term }) } : {}) };
+      return { term: t.raw, count: t.count, last: t.lastDay, now, go: red ? l('عدّل التوجيه', 'Edit redirect') : n ? null : l('أنشئ أو وجّه', 'Add or redirect'), ...(red || !n ? { '_href:go': ana({ ...q, report: 'search', fix: t.term }) } : {}) };
     }),
     empty: l('كل عمليات البحث في الفترة وجدت منتجات', 'Every search in this period found products'),
   };
