@@ -10,6 +10,7 @@ import { Badge, Button, Money, Ref, cn, useTx } from '../../../ds/ui';
 import { Alert, Drawer, Modal, Simulated, useToast } from '../../../ds/kit';
 import { MAX_ATTEMPTS, attemptsOf, retryBlock, retryRun, rootOf, runSteps } from './model';
 import { OutcomeIcon, R_TONE, ahref, useNames } from './names';
+import { RuleRunBody } from './rules';
 
 function StepIcon({ o }: { o: RunStep['outcome'] }) {
   const I = o === 'ok' ? CheckCircle2 : o === 'failed' ? XCircle : o === 'skipped' ? MinusCircle : CircleDashed;
@@ -39,6 +40,7 @@ export function RunDrawer({ run, runs, automation, canManage, onClose, onRetry }
           <span className="text-sm text-muted"><Ref>{run.id}</Ref> · {run.when[lang]}</span>
         </div>
         <p className="rounded-xl bg-surface-2 px-4 py-3 text-sm text-fg">{run.reason[lang]}</p>
+        {run.order ? <RuleRunBody run={run} /> : <>
         <dl className="grid grid-cols-2 gap-3 text-sm">
           <div className="rounded-xl border border-border px-3 py-2.5"><dt className="text-xs text-muted">{tx('الأتمتة', 'Automation')}</dt><dd className="mt-0.5 font-semibold"><a href={ahref(run.automation)} className="text-fg hover:text-brand-700">{automation?.name[lang] ?? run.automation}</a></dd></div>
           <div className="rounded-xl border border-border px-3 py-2.5"><dt className="text-xs text-muted">{tx('التكلفة', 'Cost')}</dt><dd className="mt-0.5 font-semibold"><Money v={run.cost ?? 0} /></dd></div>
@@ -58,6 +60,7 @@ export function RunDrawer({ run, runs, automation, canManage, onClose, onRetry }
             ))}
           </ol>
         </section>
+        </>}
         {chain.length > 1 && (
           <section aria-labelledby="h-att">
             <h3 id="h-att" className="mb-2 text-sm font-semibold text-fg">{tx('المحاولات', 'Attempts')}</h3>
@@ -66,7 +69,7 @@ export function RunDrawer({ run, runs, automation, canManage, onClose, onRetry }
             </ul>
           </section>
         )}
-        {run.outcome === 'failed' && run.retryable === false && <Alert tone="warn">{tx('هذا الفشل سيتكرر حتى يُعالج سببه (مثل تصحيح البريد في ملف العميل).', 'This failure will repeat until its cause is fixed (e.g. correct the email on the customer).')}</Alert>}
+        {run.outcome === 'failed' && run.retryable === false && <Alert tone="warn">{run.order ? tx('سيتكرر حتى يُعالج سببه: فعّل العضو أو عدّل القاعدة.', 'It will repeat until fixed: reactivate the member or edit the rule.') : tx('هذا الفشل سيتكرر حتى يُعالج سببه (مثل تصحيح البريد في ملف العميل).', 'This failure will repeat until its cause is fixed (e.g. correct the email on the customer).')}</Alert>}
         {blockText && <p className="text-xs text-muted">{blockText}</p>}
       </div>
     </Drawer>

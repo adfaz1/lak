@@ -18,7 +18,9 @@ export type OpKind =
   | 'tagAdded' | 'tagRemoved' | 'assigned' | 'stockReserved' | 'stockReleased' | 'stockShipped'
   | 'returnRequested' | 'returnApproved' | 'returnRejected' | 'returnReceived' | 'returnInspected' | 'returnRefunded'
   | 'exchangeReserved' | 'exchangeShipped' | 'exchangeCollect' | 'transferConfirmed'
-  | 'customerMessaged' | 'payDueExtended' | 'labelVoidedOnly';
+  | 'customerMessaged' | 'payDueExtended' | 'labelVoidedOnly'
+  /* Sub-statuses and operating rules (see the end of this file). */
+  | 'subStatusSet' | 'subStatusCleared' | 'memberNotified';
 
 export interface Activity {
   kind: OpKind; at: number; actor: string; role: string;
@@ -444,17 +446,23 @@ export const validVatNo = (s: string) => /^3\d{13}3$/.test(s.replace(/[٠-٩]/g,
 export type NoticeEvent =
   | 'placed' | 'paid' | 'payFailed' | 'ready' | 'shipped' | 'delivered' | 'cancelled' | 'refunded'
   | 'returnRequested' | 'returnApproved' | 'returnRejected' | 'returnReceived'
-  | 'payLink' | 'payReminder' | 'invoice';
+  | 'payLink' | 'payReminder' | 'invoice'
+  /** A custom sub-status the merchant marked «notify the customer» was set on the order. */
+  | 'subStatus'
+  /** A reply written by hand in the service inbox (dashboard/inbox). Never sent automatically; not in NOTICE_EVENTS. */
+  | 'caseReply';
 export const ORDER_NOTICES: NoticeEvent[] = ['placed', 'paid', 'payFailed', 'ready', 'shipped', 'delivered', 'cancelled', 'refunded'];
 export const RETURN_NOTICES: NoticeEvent[] = ['returnRequested', 'returnApproved', 'returnRejected', 'returnReceived'];
 export const MANUAL_NOTICES: NoticeEvent[] = ['payLink', 'payReminder', 'invoice'];
-export const NOTICE_EVENTS: NoticeEvent[] = [...ORDER_NOTICES, ...RETURN_NOTICES, ...MANUAL_NOTICES];
+/** Sub-status updates: one shared template; each sub-status decides whether it notifies. */
+export const SUB_NOTICES: NoticeEvent[] = ['subStatus'];
+export const NOTICE_EVENTS: NoticeEvent[] = [...ORDER_NOTICES, ...RETURN_NOTICES, ...MANUAL_NOTICES, ...SUB_NOTICES];
 export type NoticeChannel = 'email' | 'sms' | 'whatsapp';
 export const NOTICE_CHANNELS: NoticeChannel[] = ['email', 'sms', 'whatsapp'];
-export const NOTICE_VARS = ['customer', 'order', 'total', 'refund', 'tracking', 'payLink', 'deadline', 'returnRef', 'store'] as const;
+export const NOTICE_VARS = ['customer', 'order', 'total', 'refund', 'tracking', 'payLink', 'deadline', 'returnRef', 'store', 'status'] as const;
 export type NoticeVar = (typeof NOTICE_VARS)[number];
 /** Variables a template should carry for its message to make sense. */
-export const NOTICE_NEEDS: Partial<Record<NoticeEvent, NoticeVar[]>> = { shipped: ['tracking'], payFailed: ['payLink'], payLink: ['payLink'], payReminder: ['payLink', 'deadline'], refunded: ['refund'] };
+export const NOTICE_NEEDS: Partial<Record<NoticeEvent, NoticeVar[]>> = { shipped: ['tracking'], payFailed: ['payLink'], payLink: ['payLink'], payReminder: ['payLink', 'deadline'], refunded: ['refund'], subStatus: ['status'] };
 
 export interface NoticeTemplate { subject: L; body: L }
 export interface NoticeConfig {
@@ -483,13 +491,15 @@ export const DEFAULT_TEMPLATES: Record<NoticeEvent, NoticeTemplate> = {
   payLink: { subject: { ar: 'رابط دفع الطلب {order}', en: 'Payment link for {order}' }, body: { ar: '{customer}، رابط دفع طلبك {order} بقيمة {total}: {payLink} صالح حتى {deadline}.', en: '{customer}, here is the payment link for {order} ({total}): {payLink} Valid until {deadline}.' } },
   payReminder: { subject: { ar: 'مددنا مهلة دفع الطلب {order}', en: 'More time to pay for {order}' }, body: { ar: 'مددنا مهلة دفع الطلب {order} حتى {deadline}. ادفع من هنا: {payLink}', en: 'You now have until {deadline} to pay for {order}. Pay here: {payLink}' } },
   invoice: { subject: { ar: 'فاتورة الطلب {order}', en: 'Invoice for {order}' }, body: { ar: 'فاتورتك الضريبية للطلب {order} ({total}) مرفقة. شكرًا لتسوقك من {store}.', en: 'Your tax invoice for {order} ({total}) is attached. Thank you for shopping with {store}.' } },
+  subStatus: { subject: { ar: 'تحديث على طلبك {order}', en: 'Update on your order {order}' }, body: { ar: 'تحديث على طلبك {order}: {status}. {store}', en: 'Update on your order {order}: {status}. {store}' } },
+  caseReply: { subject: { ar: 'بخصوص طلبك {order}', en: 'About your order {order}' }, body: { ar: '{customer}', en: '{customer}' } },
 };
 export function noticeFixture(): NoticeConfig {
   return {
     channels: {
       placed: ch(true, true), paid: ch(true, false), payFailed: ch(true, true), ready: ch(false, false), shipped: ch(true, true, true), delivered: ch(false, true),
       cancelled: ch(true, true), refunded: ch(true, false), returnRequested: ch(true, false), returnApproved: ch(true, true), returnRejected: ch(true, false), returnReceived: ch(true, false),
-      payLink: ch(false, true, true), payReminder: ch(false, true), invoice: ch(true, false),
+      payLink: ch(false, true, true), payReminder: ch(false, true), invoice: ch(true, false), subStatus: ch(false, true), caseReply: ch(false, false),
     },
     templates: DEFAULT_TEMPLATES, defaultLang: 'ar', simFail: null,
   };
@@ -539,7 +549,7 @@ export function noticeVars(o: Order, ctx: NoticeCtx, lang: 'ar' | 'en', extra: N
     customer: lang === 'ar' ? o.customer.ar.split(' ')[0] : o.customer.en.split(' ')[0],
     order: `#${o.ref}`, total: money(total(o), lang), refund: money(lastRefund?.amount ?? refundableNow(o), lang),
     tracking: `${ctx.trackBase}${o.ref}${parcel?.tracking ? `?t=${parcel.tracking}` : ''}`, payLink: payLinkOf(o), deadline: fmt.format(payDeadline(o, ctx.now)),
-    returnRef: [...(o.returns ?? [])].reverse()[0]?.id ?? '', store: ctx.store, ...extra,
+    returnRef: [...(o.returns ?? [])].reverse()[0]?.id ?? '', store: ctx.store, status: o.sub?.name[lang] ?? '', ...extra,
   };
 }
 
@@ -577,6 +587,7 @@ export function noticeEvents(before: Order | undefined, after: Order): { event: 
     const e = stageEvent[r.stage];
     if (e && prev?.stage !== r.stage) out.push({ event: e, returnRef: r.id });
   }
+  if (after.sub && after.sub.notify && after.sub.id !== before.sub?.id && !after.cancelled) out.push({ event: 'subStatus' });
   return out;
 }
 
@@ -638,6 +649,7 @@ export function sendNotice(o: Order, event: NoticeEvent, cfg: NoticeConfig, ctx:
 export function resendMessage(o: Order, id: string, cfg: NoticeConfig, ctx: NoticeCtx, who: Actor): Order {
   const m = o.messages?.find((x) => x.id === id);
   if (!m || m.status === 'sent') return o;
+  if (m.event === 'caseReply') return caseMessage(o, { channel: m.channel, lang: m.lang, to: m.to, subject: m.subject, body: m.body, fail: cfg.simFail === m.channel, retryOf: m.id }, who, ctx.now);
   return sendNotice(o, m.event, cfg, ctx, who, { only: [m.channel], retryOf: m.id });
 }
 
@@ -689,4 +701,315 @@ export function voidLabels(o: Order, who: Actor, now: number): { order: Order; e
   let next: Order = { ...o, items, fulfilments, ship: anyLeft ? o.ship : 'none', ful: anyLeft ? 'partial' : 'none' };
   for (const ref of refs) next = act(next, 'labelVoidedOnly', who, now, { ref });
   return { order: next, effects, refs };
+}
+
+/* ---------- Custom sub-statuses (Phase B: operating rules) ---------- */
+// A sub-status refines the main state the order is in («بانتظار تأكيد المقاس» under «قيد التجهيز»). It never
+// replaces payment, fulfilment or shipment states, so reports and customer messages keep reading the real state.
+// When the order leaves that main state the sub-status is cleared and the log says so.
+
+/** The order's main operating state, derived from payment/fulfilment/shipment (never stored). */
+export type MainState = 'awaitingPay' | 'processing' | 'ready' | 'shipped' | 'delivered' | 'cancelled';
+/** Main states that can carry sub-statuses: the ones where the team still has work to do. */
+export const SUB_PARENTS = ['awaitingPay', 'processing', 'ready'] as const;
+export type SubParent = (typeof SUB_PARENTS)[number];
+export const SUB_TONES = ['brand', 'sky', 'amber', 'green', 'red', 'gray'] as const;
+export type SubTone = (typeof SUB_TONES)[number];
+export const SUB_MAX_PER_PARENT = 10;
+export const SUB_NAME_MAX = 32;
+
+export interface SubStatus {
+  id: string; parent: SubParent; name: L; tone: SubTone;
+  /** Setting it sends the shared «sub-status update» customer message (Settings → Notifications → Customer messages). */
+  notify: boolean;
+  /** Counted in reports and the orders view counts. Off = an internal working note only. */
+  inReports: boolean;
+  /** Archived: kept on orders that carry it, not offered for new orders. */
+  archived?: boolean;
+  by: string; at: number;
+}
+
+export function mainState(o: Order): MainState {
+  if (o.cancelled) return 'cancelled';
+  const pv = payView(o);
+  if (pv === 'bank_due' || pv === 'link' || pv === 'failed' || pv === 'verifying') return 'awaitingPay';
+  if (o.ship === 'delivered') return 'delivered';
+  if (o.ship === 'transit') return 'shipped';
+  if (o.ship === 'label' && o.ful === 'done') return 'ready';
+  return 'processing';
+}
+
+export function subStatusFixtures(): SubStatus[] {
+  const S = (id: string, parent: SubParent, ar: string, en: string, tone: SubTone, notify: boolean, inReports = true): SubStatus =>
+    ({ id, parent, name: { ar, en }, tone, notify, inReports, by: 'سارة', at: Date.parse('2026-11-01T09:00:00Z') });
+  return [
+    S('SS-1', 'processing', 'بانتظار تأكيد المقاس', 'Awaiting size confirmation', 'amber', true),
+    S('SS-2', 'processing', 'تغليف هدية', 'Gift wrapping', 'brand', false),
+    S('SS-3', 'awaitingPay', 'تواصلنا مع العميل', 'Customer contacted', 'sky', false, false),
+    S('SS-4', 'ready', 'بانتظار استلام المندوب', 'Awaiting courier pickup', 'gray', false),
+  ];
+}
+
+/** Sub-statuses the merchant can pick for an order now: same main state, not archived. */
+export const subChoices = (o: Order, subs: SubStatus[]) => { const m = mainState(o); return subs.filter((s) => s.parent === m && !s.archived); };
+
+export type SubError = 'nameAr' | 'nameEn' | 'long' | 'taken' | 'limit' | 'chars';
+/** Both names required, at most 32 characters, unique (either language) under the same main state, at most 10 per state. */
+export function validateSub(d: Pick<SubStatus, 'parent' | 'name'> & { id?: string }, list: SubStatus[]): Partial<Record<'ar' | 'en' | 'form', SubError>> {
+  const e: Partial<Record<'ar' | 'en' | 'form', SubError>> = {};
+  const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  const same = list.filter((s) => s.parent === d.parent && s.id !== d.id && !s.archived);
+  (['ar', 'en'] as const).forEach((l) => {
+    const v = d.name[l].trim();
+    if (!v) e[l] = l === 'ar' ? 'nameAr' : 'nameEn';
+    else if (v.length > SUB_NAME_MAX) e[l] = 'long';
+    else if (v.includes('|')) e[l] = 'chars';
+    else if (same.some((s) => norm(s.name.ar) === norm(v) || norm(s.name.en) === norm(v))) e[l] = 'taken';
+  });
+  if (!d.id && same.length >= SUB_MAX_PER_PARENT) e.form = 'limit';
+  return e;
+}
+export const nextSubId = (list: SubStatus[]) => `SS-${list.reduce((m, s) => Math.max(m, Number(s.id.replace(/\D/g, '')) || 0), 0) + 1}`;
+const subText = (n: L) => `${n.ar}|${n.en}`;
+/** Read the bilingual name a sub-status activity line recorded. */
+export const subTextOf = (text?: string): L => { const [ar = '', en = ''] = (text ?? '').split('|'); return { ar, en: en || ar }; };
+
+export type SubBlock = 'otherState' | 'archived' | 'same';
+/** Why a sub-status cannot be set on this order, or null. */
+export function subBlock(o: Order, s: SubStatus | null): SubBlock | null {
+  if (!s) return o.sub ? null : 'same';
+  if (s.archived) return 'archived';
+  if (mainState(o) !== s.parent) return 'otherState';
+  if (o.sub?.id === s.id) return 'same';
+  return null;
+}
+
+/**
+ * Set (or clear with null) the order's sub-status. Logged with who did it; a rule is the actor when a rule did it.
+ * The customer message, when the sub-status notifies, is recorded by the message layer on the same write (recordNotices).
+ */
+export function setSubStatus(o: Order, s: SubStatus | null, who: Actor, now: number): Order {
+  if (subBlock(o, s)) return o;
+  if (!s) return act({ ...o, sub: undefined }, 'subStatusCleared', who, now, { text: subText(o.sub!.name) });
+  return act({ ...o, sub: { id: s.id, parent: s.parent, name: s.name, notify: s.notify, at: now, by: who.name } }, 'subStatusSet', who, now, { text: subText(s.name) });
+}
+
+/** The sub-status to show: only while the order is still in the main state it belongs to. */
+export const liveSub = (o: Order) => (o.sub && mainState(o) === o.sub.parent ? o.sub : null);
+
+/** After any orders write: a sub-status whose main state has passed is cleared, with a system line in the log. */
+export function clearStaleSubs(orders: Order[], now: number): Order[] {
+  let changed = false;
+  const next = orders.map((o) => {
+    if (!o.sub || mainState(o) === o.sub.parent) return o;
+    changed = true;
+    return act({ ...o, sub: undefined }, 'subStatusCleared', SYSTEM, now, { text: subText(o.sub.name) });
+  });
+  return changed ? next : orders;
+}
+
+/** Orders carrying each sub-status now (archived included), for the statuses page and report counts. */
+export function subCounts(orders: Order[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const o of orders) { const s = liveSub(o); if (s) out[s.id] = (out[s.id] ?? 0) + 1; }
+  return out;
+}
+
+/* ---------- Operating rules: when an order is created/paid and matches → assign, tag, sub-status, notify ---------- */
+
+export type RuleTrigger = 'orderCreated' | 'orderPaid';
+export const RULE_TRIGGERS: RuleTrigger[] = ['orderCreated', 'orderPaid'];
+export type RuleField = 'city' | 'channel' | 'totalMin' | 'totalMax' | 'product' | 'payMethod';
+export const RULE_FIELDS: RuleField[] = ['city', 'channel', 'totalMin', 'totalMax', 'product', 'payMethod'];
+export const RULE_PAY_METHODS = ['card', 'applepay', 'bnpl', 'cod', 'bank', 'manual'] as const;
+export interface RuleCond { field: RuleField; value: string }
+export type RuleAction =
+  /** One member = always them; two or more = take turns (round-robin), skipping members who are not active. */
+  | { kind: 'assign'; members: string[] }
+  | { kind: 'tagAdd'; tag: string }
+  | { kind: 'tagRemove'; tag: string }
+  | { kind: 'subStatus'; id: string }
+  | { kind: 'notifyMember'; member: string };
+export type RuleActionKind = RuleAction['kind'];
+export const RULE_ACTIONS: RuleActionKind[] = ['assign', 'tagAdd', 'tagRemove', 'subStatus', 'notifyMember'];
+export const RULE_MAX_TAGS = 10;
+export type RuleStatus = 'active' | 'paused' | 'draft';
+export interface OpRule {
+  id: string; name: L; trigger: RuleTrigger; conds: RuleCond[]; actions: RuleAction[];
+  status: RuleStatus; version: number;
+  /** The saved version a test run was made on; activation needs testedVersion === version. */
+  testedVersion: number | null;
+  /** Round-robin cursor: index of the next member to try. */
+  rr: number;
+  by: string; at: number;
+}
+
+export function ruleFixtures(): OpRule[] {
+  return [
+    { id: 'RL-1', name: { ar: 'طلبات جدة إلى فيصل', en: 'Jeddah orders to Faisal' }, trigger: 'orderPaid', conds: [{ field: 'city', value: 'Jeddah' }], actions: [{ kind: 'assign', members: ['فيصل'] }, { kind: 'tagAdd', tag: 'جدة' }], status: 'active', version: 2, testedVersion: 2, rr: 0, by: 'سارة', at: Date.parse('2026-11-10T09:00:00Z') },
+    { id: 'RL-2', name: { ar: 'وسم الطلبات الكبيرة', en: 'Tag large orders' }, trigger: 'orderCreated', conds: [{ field: 'totalMin', value: '500' }], actions: [{ kind: 'tagAdd', tag: 'VIP' }, { kind: 'notifyMember', member: 'سارة' }], status: 'paused', version: 1, testedVersion: 1, rr: 0, by: 'سارة', at: Date.parse('2026-11-12T09:00:00Z') },
+  ];
+}
+
+export const payMethodOf = (o: Order): (typeof RULE_PAY_METHODS)[number] | undefined =>
+  (o.manual ? (o.manual.pay === 'cod' ? 'cod' : 'manual') : o.payment?.method);
+const toNum = (s: string) => Number(s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).trim());
+
+export interface RuleCtx {
+  members: { name: string; status: string }[];
+  subs: SubStatus[];
+  /** SKUs of a catalogue product (for the «contains product» condition). */
+  skusOf: (productId: string) => string[];
+}
+
+/** Does one condition hold for this order? City matches the city at the start of the address, either language. */
+export function condHolds(c: RuleCond, o: Order, ctx: Pick<RuleCtx, 'skusOf'>): boolean {
+  switch (c.field) {
+    case 'city': { const v = c.value.trim().toLowerCase(); return !!v && (o.city.en.toLowerCase().startsWith(v) || o.city.ar.startsWith(c.value.trim()) || (o.address?.city.en ?? '').toLowerCase() === v); }
+    case 'channel': return o.channel === c.value;
+    case 'totalMin': return total(o) >= toNum(c.value) * 100;
+    case 'totalMax': return total(o) <= toNum(c.value) * 100;
+    case 'product': { const skus = ctx.skusOf(c.value); return o.items.some((i) => skus.includes(i.sku)); }
+    case 'payMethod': return payMethodOf(o) === c.value;
+  }
+}
+
+export type RuleError = 'name' | 'conds' | 'actions' | 'tooManyTags';
+/** Problems that block saving: names, condition values (numbers ≥ 0, picks not empty), actions with their targets. */
+export function validateRule(r: OpRule): { errors: Partial<Record<RuleError, true>>; badConds: number[]; badActions: number[] } {
+  const errors: Partial<Record<RuleError, true>> = {};
+  const badConds: number[] = []; const badActions: number[] = [];
+  if (!r.name.ar.trim() || !r.name.en.trim()) errors.name = true;
+  r.conds.forEach((c, i) => {
+    const num = c.field === 'totalMin' || c.field === 'totalMax';
+    if (num ? !(/^[\d٠-٩]+$/.test(c.value.trim()) && toNum(c.value) >= 0) : !c.value.trim()) badConds.push(i);
+  });
+  if (badConds.length) errors.conds = true;
+  r.actions.forEach((a, i) => {
+    const bad = a.kind === 'assign' ? !a.members.length : a.kind === 'tagAdd' || a.kind === 'tagRemove' ? !normTag(a.tag) : a.kind === 'subStatus' ? !a.id : !a.member;
+    if (bad) badActions.push(i);
+  });
+  if (!r.actions.length || badActions.length) errors.actions = true;
+  if (r.actions.filter((a) => a.kind === 'tagAdd').length > RULE_MAX_TAGS) errors.tooManyTags = true;
+  return { errors, badConds, badActions };
+}
+export const ruleValid = (r: OpRule) => Object.keys(validateRule(r).errors).length === 0;
+
+export type ChangeStatus = 'done' | 'same' | 'skipped' | 'failed';
+export interface RuleChange { kind: RuleActionKind; status: ChangeStatus; text: L; why?: L }
+export interface RuleResult {
+  ref: string; outcome: 'succeeded' | 'failed' | 'skipped'; reason: L; changes: RuleChange[];
+  /** Whether a retry could succeed without fixing anything (false: a member is not active, or the order moved on). */
+  retryable?: boolean;
+  order: Order; rr: number;
+}
+const L2 = (ar: string, en: string): L => ({ ar, en });
+
+/**
+ * Run one rule on one order (pure). The rule is the actor of every change it makes, so the order log names it.
+ * Used for live runs, the test run (preview, discard the order) and retries.
+ */
+export function runRule(r: OpRule, o: Order, ctx: RuleCtx, now: number): RuleResult {
+  const failedCond = r.conds.find((c) => !condHolds(c, o, ctx));
+  if (failedCond) return { ref: o.ref, outcome: 'skipped', reason: L2('الطلب لا يطابق الشروط', 'The order does not match the conditions'), changes: [], order: o, rr: r.rr };
+  if (o.cancelled) return { ref: o.ref, outcome: 'skipped', reason: L2('الطلب ملغى', 'The order is cancelled'), changes: [], order: o, rr: r.rr };
+  const who: Actor = { name: r.id, role: 'rule' };
+  let x = o; let rr = r.rr;
+  const changes: RuleChange[] = [];
+  const active = (n: string) => ctx.members.some((m) => m.name === n && m.status === 'active');
+  for (const a of r.actions) {
+    if (a.kind === 'assign') {
+      let pick: string | undefined;
+      if (a.members.length === 1) pick = active(a.members[0]) ? a.members[0] : undefined;
+      else for (let k = 0; k < a.members.length; k++) { const i = (rr + k) % a.members.length; if (active(a.members[i])) { pick = a.members[i]; rr = i + 1; break; } }
+      if (!pick) { changes.push({ kind: 'assign', status: 'failed', text: L2(`إسناد إلى ${a.members.join('، ')}`, `Assign to ${a.members.join(', ')}`), why: L2('لا عضو نشط بين المختارين', 'None of the chosen members is active') }); continue; }
+      if (x.assignee === pick) { changes.push({ kind: 'assign', status: 'same', text: L2(`مسند أصلًا إلى ${pick}`, `Already assigned to ${pick}`) }); continue; }
+      const from = x.assignee;
+      x = assign(x, pick, who, now);
+      changes.push({ kind: 'assign', status: 'done', text: from ? L2(`المسؤول: ${from} ← ${pick}`, `Assignee: ${from} → ${pick}`) : L2(`أُسند إلى ${pick}`, `Assigned to ${pick}`) });
+    } else if (a.kind === 'tagAdd') {
+      const t = normTag(a.tag);
+      if ((x.tags ?? []).includes(t)) { changes.push({ kind: 'tagAdd', status: 'same', text: L2(`الوسم «${t}» موجود`, `Tag “${t}” already there`) }); continue; }
+      x = addTag(x, t, who, now);
+      changes.push({ kind: 'tagAdd', status: 'done', text: L2(`+ وسم «${t}»`, `+ tag “${t}”`) });
+    } else if (a.kind === 'tagRemove') {
+      const t = normTag(a.tag);
+      if (!(x.tags ?? []).includes(t)) { changes.push({ kind: 'tagRemove', status: 'same', text: L2(`لا وسم «${t}»`, `No tag “${t}”`) }); continue; }
+      x = removeTag(x, t, who, now);
+      changes.push({ kind: 'tagRemove', status: 'done', text: L2(`− وسم «${t}»`, `− tag “${t}”`) });
+    } else if (a.kind === 'subStatus') {
+      const s = ctx.subs.find((y) => y.id === a.id);
+      if (!s) { changes.push({ kind: 'subStatus', status: 'failed', text: L2('حالة فرعية محذوفة', 'Deleted sub-status'), why: L2('عدّل القاعدة واختر حالة موجودة', 'Edit the rule and pick an existing sub-status') }); continue; }
+      const b = subBlock(x, s);
+      if (b === 'same') { changes.push({ kind: 'subStatus', status: 'same', text: L2(`الحالة الفرعية «${s.name.ar}» مضبوطة`, `Sub-status “${s.name.en}” already set`) }); continue; }
+      if (b) { changes.push({ kind: 'subStatus', status: 'skipped', text: L2(`حالة «${s.name.ar}»`, `Sub-status “${s.name.en}”`), why: b === 'archived' ? L2('الحالة مؤرشفة', 'The sub-status is archived') : L2('الطلب ليس في الحالة الرئيسية التي تتبعها', 'The order is not in the main state it belongs to') }); continue; }
+      x = setSubStatus(x, s, who, now);
+      changes.push({ kind: 'subStatus', status: 'done', text: L2(`الحالة الفرعية ← «${s.name.ar}»${s.notify ? ' (يُبلَّغ العميل)' : ''}`, `Sub-status → “${s.name.en}”${s.notify ? ' (customer notified)' : ''}`) });
+    } else {
+      if (!active(a.member)) { changes.push({ kind: 'notifyMember', status: 'failed', text: L2(`تنبيه ${a.member}`, `Notify ${a.member}`), why: L2('العضو غير نشط في الفريق', 'The member is not active on the team') }); continue; }
+      x = act(x, 'memberNotified', who, now, { text: a.member });
+      changes.push({ kind: 'notifyMember', status: 'done', text: L2(`تنبيه داخلي لـ ${a.member}`, `In-app alert to ${a.member}`) });
+    }
+  }
+  const failed = changes.filter((c) => c.status === 'failed');
+  const done = changes.filter((c) => c.status === 'done');
+  if (failed.length) return { ref: o.ref, outcome: 'failed', reason: L2(`لم يُنفّذ: ${failed.map((c) => c.why!.ar).join('؛ ')}`, `Not done: ${failed.map((c) => c.why!.en).join('; ')}`), changes, retryable: false, order: x, rr };
+  if (!done.length) return { ref: o.ref, outcome: 'skipped', reason: L2('لا شيء يتغير: الطلب عليه ما تطلبه القاعدة', 'Nothing to change: the order already has what the rule sets'), changes, order: x, rr };
+  return { ref: o.ref, outcome: 'succeeded', reason: L2(`طُبّق ${done.length} تغيير`, `${done.length} change(s) applied`), changes, order: x, rr };
+}
+
+/** The events an orders write fires for rules: a new order (and paid, when it arrives paid), or an order that became paid. */
+export function ruleEvents(before: Order | undefined, after: Order): RuleTrigger[] {
+  if (after.cancelled) return [];
+  const paid = (o: Order) => payView(o) === 'paid' || payView(o) === 'cod_collected';
+  if (!before) return paid(after) ? ['orderCreated', 'orderPaid'] : ['orderCreated'];
+  return !paid(before) && paid(after) ? ['orderPaid'] : [];
+}
+
+/**
+ * After an orders write: clear sub-statuses whose main state has passed, then run every ACTIVE rule on the orders
+ * whose events match, in rule order. Returns the new orders (or `after` itself), the results to log as runs, and the
+ * round-robin cursors that moved. Paused and draft rules never run.
+ */
+export function applyRulesOnWrite(before: Order[], after: Order[], rules: OpRule[], ctx: RuleCtx, now: number): { orders: Order[]; results: (RuleResult & { rule: string; trigger: RuleTrigger })[]; rr: Record<string, number> } {
+  const results: (RuleResult & { rule: string; trigger: RuleTrigger })[] = [];
+  const rr: Record<string, number> = {};
+  if (before === after) return { orders: after, results, rr };
+  let orders = clearStaleSubs(after, now);
+  const live = rules.filter((r) => r.status === 'active');
+  if (!live.length) return { orders, results, rr };
+  const prev = new Map(before.map((o) => [o.ref, o]));
+  let changed = orders !== after;
+  orders = orders.map((o) => {
+    const b = prev.get(o.ref);
+    if (b === o) return o;
+    const evs = ruleEvents(b, o);
+    if (!evs.length) return o;
+    let x = o;
+    for (const r of live) {
+      if (!evs.includes(r.trigger)) continue;
+      const res = runRule({ ...r, rr: rr[r.id] ?? r.rr }, x, ctx, now);
+      if (res.outcome === 'skipped' && !res.changes.length) continue; // not matching: no run logged
+      if (res.rr !== (rr[r.id] ?? r.rr)) rr[r.id] = res.rr;
+      results.push({ ...res, rule: r.id, trigger: r.trigger });
+      if (res.order !== x) { x = res.order; changed = true; }
+    }
+    return x;
+  });
+  return { orders: changed ? orders : after, results, rr };
+}
+
+/* ---------- Service inbox replies (dashboard/inbox). Additive. ---------- */
+
+/**
+ * A reply the merchant wrote in the service inbox, recorded in the order's message log like any other customer
+ * message (simulated: nothing is sent). Skipped when the customer has no address on the channel.
+ */
+export function caseMessage(o: Order, m: { channel: NoticeChannel; lang: 'ar' | 'en'; to?: string; subject?: string; body: string; fail?: boolean; retryOf?: string; caseId?: string }, who: Actor, now: number): Order {
+  const status: MessageStatus = !m.to ? 'skipped' : m.fail ? 'failed' : 'sent';
+  const msg: CustomerMessage = {
+    id: `MSG-${o.ref}-${(o.messages ?? []).length + 1}`, event: 'caseReply', channel: m.channel, lang: m.lang, to: m.to, at: now, actor: who.name, role: who.role, status,
+    reason: !m.to ? (m.channel === 'email' ? 'noEmail' : 'noPhone') : undefined, subject: m.channel === 'email' ? m.subject : undefined, body: m.body, retryOf: m.retryOf,
+  };
+  return act(withMessages(o, [msg]), 'customerMessaged', who, now, { text: `caseReply:${status === 'sent' ? m.channel : '-'}`, ref: m.caseId });
 }

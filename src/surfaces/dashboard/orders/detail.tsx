@@ -25,6 +25,9 @@ import { CancelModal, DeclineCancelModal, OpenReturnModal, ShipModal, TransferMo
 import { printHref } from './print-link';
 import { rhref } from './returns-link';
 import { MessagesCard, useNoticeName } from './notices-ui';
+import { SubBadge, SubPicker } from './substatus-ui';
+import { rulesStore } from '../../merchant/stores';
+import { subTextOf } from '../../merchant/ops';
 
 type Dialog = 'fulfil' | 'refund' | 'contact' | 'cancel' | 'decline' | 'ship' | 'deliver' | 'return' | 'transfer' | null;
 
@@ -138,7 +141,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
         <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-2xl sm:grid-cols-4">
           {[
             [tx('الدفع', 'Payment'), <PayBadge o={o} />],
-            [tx('التجهيز', 'Fulfilment'), <FulBadge o={o} />],
+            [tx('التجهيز', 'Fulfilment'), <span className="flex flex-wrap gap-1.5"><FulBadge o={o} /><SubBadge o={o} /></span>],
             [tx('الشحن', 'Shipment'), <ShipBadge o={o} />],
             [tx('الإجمالي', 'Total'), <Money v={m.total} className="text-lg font-bold text-fg" />],
           ].map(([k, v], i) => <div key={i} className="space-y-1.5 bg-surface px-5 py-4"><dt className="text-xs text-muted">{k}</dt><dd>{v}</dd></div>)}
@@ -355,6 +358,7 @@ function Organise({ o, canEdit, who }: { o: Order; canEdit: boolean; who: { name
             {members.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}
           </select>
         </label>
+        <SubPicker o={o} canEdit={canEdit} />
         <div className="space-y-1.5">
           <p className="flex items-center gap-1.5 text-[13px] font-semibold text-fg"><Tag className="size-4 text-muted" aria-hidden="true" />{tx('الوسوم', 'Tags')}</p>
           <div className="flex flex-wrap gap-1.5">
@@ -496,13 +500,17 @@ function Timeline({ o }: { o: Order }) {
       case 'customerMessaged': return ['brand', <>{tx('أُرسلت رسالة للعميل: ', 'Message sent to the customer: ')}{noticeName(a.text?.split(':')[0] ?? '')}</>];
       case 'payDueExtended': return ['amber', tx(`مُددت مهلة الدفع ${a.text} يوم`, `Payment deadline extended by ${a.text} days`)];
       case 'labelVoidedOnly': return ['gray', <>{tx('أُلغي الملصق وعاد الطلب للتجهيز', 'Label voided; order back to fulfil')}{ref}</>];
+      case 'subStatusSet': return ['brand', <>{tx('الحالة الفرعية: ', 'Sub-status: ')}{subTextOf(a.text)[lang]}</>];
+      case 'subStatusCleared': return ['gray', a.role === 'system' ? <>{tx('انتهت الحالة الفرعية بتغيّر حالة الطلب: ', 'Sub-status ended as the order moved on: ')}{subTextOf(a.text)[lang]}</> : <>{tx('أُزيلت الحالة الفرعية ', 'Sub-status removed: ')}{subTextOf(a.text)[lang]}</>];
+      case 'memberNotified': return ['gray', <>{tx('تنبيه داخلي لـ ', 'In-app alert to ')}{a.text}</>];
     }
   };
   const noticeName = useNoticeName();
   const SIM = new Set(['customerMessaged', 'labelVoidedOnly', 'labelIssued', 'labelFailed', 'partialFulfilled', 'refundRequested', 'refundConfirmed', 'refundFailed', 'slipPrinted', 'labelVoided', 'returnApproved', 'exchangeShipped']);
   const list = entries(o, Date.now()).reverse();
   const shown = allRows ? list : list.slice(0, 12);
-  const actor = (x: Entry) => (x.actor === 'system' ? tx('النظام', 'System') : x.actor === 'customer' ? tx('العميل', 'Customer') : x.actor === 'you' ? tx('أنت', 'You') : x.actor);
+  const rules = rulesStore.use();
+  const actor = (x: Entry) => (x.role === 'rule' ? <a href={link(`/dashboard/automations/rules/${x.actor}`)} className="text-brand-700 hover:underline dark:text-brand-300">{tx(`قاعدة «${rules.find((r) => r.id === x.actor)?.name.ar ?? x.actor}»`, `Rule “${rules.find((r) => r.id === x.actor)?.name.en ?? x.actor}”`)}</a> : x.actor === 'system' ? tx('النظام', 'System') : x.actor === 'customer' ? tx('العميل', 'Customer') : x.actor === 'you' ? tx('أنت', 'You') : x.actor);
   return (
     <Card aria-labelledby="h-tl">
       <CardHeader id="h-tl" title={tx('السجل', 'Activity log')} action={<span className="flex items-center gap-1 text-xs text-muted">{tx('الأحدث أولًا', 'Newest first')}<InfoHint>{tx('لا يُحذف أي سطر؛ التراجع يُسجّل سطرًا جديدًا.', 'No line is ever deleted; an undo is recorded as a new line.')}</InfoHint></span>} />
@@ -517,7 +525,7 @@ function Timeline({ o }: { o: Order }) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm text-fg">{t}</p>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-xs text-muted">
-                  <span className="font-medium text-fg/80">{actor(x)}</span>{x.role && x.role !== 'system' && x.role !== 'customer' && <span>({roleLabel(x.role)})</span>}
+                  <span className="font-medium text-fg/80">{actor(x)}</span>{x.role && x.role !== 'system' && x.role !== 'customer' && x.role !== 'rule' && <span>({roleLabel(x.role)})</span>}
                   <span aria-hidden="true">·</span><When at={x.at} />{SIM.has(kind) && <Simulated />}
                 </p>
               </div>

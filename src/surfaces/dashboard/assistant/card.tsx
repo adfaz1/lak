@@ -31,7 +31,7 @@ export function AssistantCard({ period, empty }: { period: 7 | 30; empty: boolea
   } else if (q === 'stock') {
     line = a.stock.rows.length ? tx(`${a.stock.rows.length} أصناف تكفي أقل من 14 يومًا بمعدل بيعها.`, `${a.stock.rows.length} SKUs cover less than 14 days at their sales rate.`) : tx('لا صنف يقترب من النفاد.', 'No SKU is close to running out.');
     draft = a.stock.draft;
-  } else {
+  } else if (q === 'late') {
     line = a.late.count ? tx(`${a.late.count} طلبات مدفوعة متأخرة أكثر من 24 ساعة.`, `${a.late.count} paid orders are over 24 hours late.`) : tx('لا طلبات متأخرة.', 'No late orders.');
     draft = a.late.draft;
   }

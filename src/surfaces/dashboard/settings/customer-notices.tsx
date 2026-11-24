@@ -7,7 +7,7 @@ import { useLang } from '../../../core/lang';
 import { link, replace, useRoute } from '../../../core/router';
 import { logAction, noticeCtx, noticesStore, ordersStore, settingsStore } from '../../merchant/stores';
 import {
-  DEFAULT_TEMPLATES, MANUAL_NOTICES, NOTICE_CHANNELS, NOTICE_EVENTS, NOTICE_VARS, ORDER_NOTICES, RETURN_NOTICES, composeNotice, renderNotice, smsParts, templateIssues, noticeVars,
+  DEFAULT_TEMPLATES, MANUAL_NOTICES, NOTICE_CHANNELS, NOTICE_EVENTS, NOTICE_VARS, ORDER_NOTICES, RETURN_NOTICES, SUB_NOTICES, noticeFixture, composeNotice, renderNotice, smsParts, templateIssues, noticeVars,
   type NoticeChannel, type NoticeConfig, type NoticeEvent,
 } from '../../merchant/ops';
 import { Alert, Field, Input, Modal, SaveBar, Select, Simulated, Switch, inputClass, useToast } from '../../../ds/kit';
@@ -29,8 +29,11 @@ export default function CustomerNotices() {
   const name = useNoticeName();
   const chName = useChannelName();
   const saved = noticesStore.use();
-  const base = useMemo(() => ({ channels: saved.channels, templates: saved.templates, defaultLang: saved.defaultLang }), [saved]);
-  const [draft, setDraft, clearDraft] = useSessionDraft<Omit<NoticeConfig, 'simFail'>>('settings.customerNotices', base);
+  // Sessions saved before a state was added (e.g. sub-status updates) get its default channels and template.
+  const fill = (c: Omit<NoticeConfig, 'simFail'>) => ({ ...c, channels: { ...noticeFixture().channels, ...c.channels }, templates: { ...DEFAULT_TEMPLATES, ...c.templates } });
+  const base = useMemo(() => fill({ channels: saved.channels, templates: saved.templates, defaultLang: saved.defaultLang }), [saved]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [rawDraft, setDraft, clearDraft] = useSessionDraft<Omit<NoticeConfig, 'simFail'>>('settings.customerNotices', base);
+  const draft = fill(rawDraft);
   const { saving, error, save, clearError } = useSave();
   const dirty = !same(draft, base);
   const ev: NoticeEvent = isEvent(route.query.get('event')) ? (route.query.get('event') as NoticeEvent) : 'shipped';
@@ -75,7 +78,7 @@ export default function CustomerNotices() {
     payLink: tx('رابط الدفع', 'Payment link'), deadline: tx('مهلة الدفع', 'Payment deadline'), returnRef: tx('رقم المرتجع', 'Return number'), store: tx('اسم المتجر', 'Store name'),
   };
 
-  const groups: [string, NoticeEvent[]][] = [[tx('حالة الطلب', 'Order state'), ORDER_NOTICES], [tx('المرتجعات', 'Returns'), RETURN_NOTICES], [tx('ترسلها أنت من الطلبات', 'Sent by you from orders'), MANUAL_NOTICES]];
+  const groups: [string, NoticeEvent[]][] = [[tx('حالة الطلب', 'Order state'), ORDER_NOTICES], [tx('المرتجعات', 'Returns'), RETURN_NOTICES], [tx('ترسلها أنت من الطلبات', 'Sent by you from orders'), MANUAL_NOTICES], [tx('الحالات الفرعية', 'Sub-statuses'), SUB_NOTICES]];
   const onCount = NOTICE_EVENTS.filter((e) => NOTICE_CHANNELS.some((c) => draft.channels[e][c])).length;
 
   return (

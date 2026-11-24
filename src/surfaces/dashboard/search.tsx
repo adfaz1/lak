@@ -1,20 +1,30 @@
-// Global search dialog: one box for orders, products, customers, settings and tools.
+// Global search dialog: one box for commands («كوبون جديد 15%»، «refund 10479»), orders, products, customers,
+// settings (down to the setting itself) and tools.
 // Opens from the top bar, Ctrl/Cmd+K or "/". Results are grouped; arrows move, Enter opens, Esc closes.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, Clock, CornerDownLeft, Package, Search, ShoppingBag, SlidersHorizontal, User, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Clock, CornerDownLeft, Package, Search, Settings2, ShoppingBag, SlidersHorizontal, User, X, Zap } from 'lucide-react';
 import { useLang } from '../../core/lang';
 import { navigate } from '../../core/router';
-import { ordersStore, productsStore, testStore } from '../merchant/stores';
+import { locationsStore, ordersStore, productsStore, testStore } from '../merchant/stores';
 import { customerFixtures } from '../merchant/workspace';
 import { canSee, type Page } from '../merchant/perms';
 import { cn, useTx } from '../../ds/ui';
 import { globalSearch, seeAllPath, type Hit, type HitKind } from './model/search';
 import { dhref } from './shell';
 import { pushRecentSearch, recentSearches, pushRecentTool } from './prefs';
+import { logAction } from '../merchant/stores';
+import type { AuditArea } from '../merchant/audit';
 
 const CUSTOMERS = customerFixtures();
-const ICON: Record<HitKind, typeof Search> = { order: ShoppingBag, product: Package, customer: User, tool: SlidersHorizontal };
+const AREA: Record<string, AuditArea> = { orders: 'orders', products: 'products', inventory: 'inventory', marketing: 'marketing', customers: 'marketing', automations: 'marketing' };
+/** Examples shown before typing; results are still filtered by role. */
+const EXAMPLES: { ar: string; en: string }[] = [
+  { ar: 'كوبون جديد 15%', en: 'new coupon 15%' }, { ar: 'طلب يدوي', en: 'manual order' }, { ar: 'أضف منتج', en: 'add product' },
+  { ar: 'تحويل مخزون', en: 'transfer stock' }, { ar: 'استرداد 10479', en: 'refund 10479' }, { ar: 'الشراء كضيف', en: 'guest checkout' },
+];
+const ICON: Record<HitKind, typeof Search> = { command: Zap, order: ShoppingBag, product: Package, customer: User, tool: SlidersHorizontal, setting: Settings2 };
 const GROUP: Record<HitKind, { ar: string; en: string }> = {
+  command: { ar: 'أوامر', en: 'Commands' }, setting: { ar: 'داخل الإعدادات', en: 'Inside settings' },
   tool: { ar: 'الأدوات والإعدادات', en: 'Tools & settings' }, order: { ar: 'الطلبات', en: 'Orders' },
   product: { ar: 'المنتجات', en: 'Products' }, customer: { ar: 'العملاء', en: 'Customers' },
 };
@@ -38,7 +48,8 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     return () => back.current?.focus?.();
   }, [open]);
 
-  const result = useMemo(() => globalSearch(q, { orders, products, customers: CUSTOMERS, role, canSee: (s) => canSee(role, s as Page) }), [q, orders, products, role]);
+  const locations = locationsStore.use();
+  const result = useMemo(() => globalSearch(q, { orders, products, customers: CUSTOMERS, role, canSee: (s) => canSee(role, s as Page), locations }), [q, orders, products, role, locations]);
   const flat = result.groups.flatMap((g) => g.hits);
   useEffect(() => setActive(0), [q]);
 
@@ -46,6 +57,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const go = (h: Hit) => {
     if (q.trim()) pushRecentSearch(q.trim());
     if (h.kind === 'tool') pushRecentTool(h.id);
+    if (h.kind === 'command') logAction(AREA[h.path.split('/')[0]] ?? 'settings', { ar: `فتح من البحث: ${h.title.ar}`, en: `Opened from search: ${h.title.en}` }, { target: h.path });
     onClose();
     navigate(dhref(h.path, h.query));
   };
@@ -68,7 +80,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
           <Search className="size-5 shrink-0 text-subtle" aria-hidden="true" />
           <input ref={input} type="text" enterKeyHint="search" autoComplete="off" spellCheck={false} value={q} onChange={(e) => setQ(e.target.value)} role="combobox" aria-expanded={flat.length > 0} aria-controls="gs-results"
             aria-activedescendant={flat[active] ? `gs-${active}` : undefined} aria-label={tx('ابحث في الطلبات والمنتجات والعملاء والإعدادات', 'Search orders, products, customers and settings')}
-            placeholder={tx('رقم طلب، منتج، SKU، عميل، جوال، أو إعداد…', 'Order number, product, SKU, customer, phone or setting…')}
+            placeholder={tx('رقم طلب، منتج، عميل، إعداد، أو أمر مثل «كوبون جديد»', 'Order, product, customer, setting, or a command like “new coupon”')}
             className="h-14 min-w-0 flex-1 bg-transparent text-[15px] text-fg outline-none placeholder:text-subtle" />
           <button type="button" onClick={onClose} className="grid size-8 place-items-center rounded-lg text-muted hover:bg-surface-2" aria-label={tx('إغلاق', 'Close')}><X className="size-4" aria-hidden="true" /></button>
         </div>
@@ -83,7 +95,11 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                     {recents.map((r) => <button key={r} type="button" onClick={() => setQ(r)} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-muted hover:border-brand-300 hover:text-fg"><Clock className="size-3.5" aria-hidden="true" />{r}</button>)}
                   </div>
                 </>
-              ) : <p className="px-1 text-sm text-muted">{tx('اكتب رقم طلب أو اسم منتج أو عميل أو إعداد. الأرقام العربية تعمل أيضًا.', 'Type an order number, a product, a customer or a setting. Arabic digits work too.')}</p>}
+              ) : <p className="px-1 text-sm text-muted">{tx('اكتب رقم طلب أو اسم منتج أو عميل أو إعداد، أو أمرًا. الأرقام العربية تعمل أيضًا.', 'Type an order number, a product, a customer, a setting or a command. Arabic digits work too.')}</p>}
+              <p className="mb-2 mt-4 px-1 text-xs font-semibold text-subtle">{tx('جرّب أمرًا', 'Try a command')}</p>
+              <div className="flex flex-wrap gap-2">
+                {EXAMPLES.map((x) => <button key={x.en} type="button" onClick={() => setQ(x[lang])} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-border px-3 text-sm text-muted hover:border-brand-300 hover:text-fg"><Zap className="size-3.5" aria-hidden="true" />{x[lang]}</button>)}
+              </div>
             </div>
           )}
 
@@ -111,7 +127,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
                     <li key={`${h.kind}-${h.id}`} id={`gs-${i}`} role="option" aria-selected={i === active}>
                       <button type="button" onMouseEnter={() => setActive(i)} onClick={() => go(h)}
                         className={cn('flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-start', i === active ? 'bg-brand-500/10' : 'hover:bg-surface-2')}>
-                        <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted"><Icon className="size-4" aria-hidden="true" /></span>
+                        <span className={cn('grid size-9 shrink-0 place-items-center rounded-lg', h.kind === 'command' ? 'bg-brand-500/10 text-brand-600 dark:text-brand-300' : 'bg-surface-2 text-muted')}><Icon className="size-4" aria-hidden="true" /></span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-semibold text-fg">{h.title[lang]}</span>
                           <span className="block truncate text-xs text-muted">{h.sub[lang]}</span>

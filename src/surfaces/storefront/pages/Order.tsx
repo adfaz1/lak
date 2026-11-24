@@ -11,6 +11,7 @@ import { Breakdown, Crumbs, H1, H3, PANEL, ProductPhoto, SimNote, WRAP, district
 import { CUSTOMER, accountStore, cancelFromStore, cartStore, checkStatus, selfCancelOpen, updateOrder } from '../state';
 import { useCatalog, useConfig, useOrders } from '../data';
 import { simNow, useSim } from '../review';
+import { OrderHelp } from './Help';
 
 export const payTone = (s: PayState): Tone =>
   s === 'paid' || s === 'cod_collected' ? 'green' : s === 'declined' ? 'red' : s === 'verifying' || s === 'challenge' || s === 'awaiting' || s === 'transfer_due' ? 'amber' : 'sky';
@@ -328,6 +329,8 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
             {!ret.ok && ret.reason === 'window_closed' && ret.until && <p className="text-xs text-muted">{t.windowClosed(d(ret.until), String(cfg.returnDays))}</p>}
             {!ret.ok && ret.reason === 'nothing_returnable' && <p className="text-xs text-muted">{t.nothingReturnable}</p>}
           </section>
+
+          {isSettled(o.pay.state) && <OrderHelp orderRef={o.ref} phone={o.contact.phone} />}
 
           {o.pay.attempts.length > 0 && <section aria-labelledby="sf-att-h" className={cn(PANEL, 'p-5 sm:p-6')}>
             <h2 id="sf-att-h" className={cn(H3, 'mb-3')}>{t.attempts}</h2>

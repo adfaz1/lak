@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { allOrders } from '../../merchant/domain';
 import { productFixtures } from '../../merchant/catalog';
 import { customerFixtures } from '../../merchant/workspace';
-import { globalSearch, norm, seeAllPath, toolHits } from './search';
+import { globalSearch, norm, seeAllPath, toolHits, type SearchData } from './search';
 import { TOOLS } from './tools';
 
 const orders = allOrders();
@@ -71,5 +71,71 @@ describe('tool registry', () => {
     expect(ids).toContain('orders-needs');
     expect(ids).not.toContain('payouts');
     expect(ids).not.toContain('customers');
+  });
+});
+
+describe('commands', () => {
+  const cmd = (q: string, d: SearchData = data) => globalSearch(q, d).groups.find((g) => g.kind === 'command')?.hits ?? [];
+  const order = orders.find((o) => o.pay === 'paid')!;
+  it('opens a prefilled coupon draft from Arabic or English, with value and code', () => {
+    const [ar] = cmd('كوبون جديد ١٥٪');
+    expect(ar).toMatchObject({ id: 'cmd-coupon', path: 'marketing/coupons/new', query: { cp: '1', type: 'percent', value: '15' } });
+    const [en] = cmd('new coupon SUMMER20 50 SAR');
+    expect(en.query).toMatchObject({ code: 'SUMMER20', type: 'fixed', value: '50' });
+    expect(cmd('كوبون شحن مجاني')[0].query).toMatchObject({ type: 'freeShip' });
+    expect(cmd('new coupon')[0].query).toBeUndefined();
+  });
+  it('manual order, add product and transfer with SKU, quantity and destination', () => {
+    expect(cmd('طلب يدوي')[0]).toMatchObject({ id: 'cmd-manual-order', path: 'orders/new' });
+    expect(cmd('أضف منتج')[0]).toMatchObject({ id: 'cmd-product', path: 'products/new' });
+    expect(cmd('add product')[0].id).toBe('cmd-product');
+    const t = cmd('تحويل مخزون bag-lth-01 ٥ إلى جدة')[0];
+    expect(t).toMatchObject({ id: 'cmd-transfer', path: 'inventory/transfers/new', query: { sku: 'BAG-LTH-01', qty: '5', to: 'jed' } });
+    expect(cmd('transfer stock')[0].query).toBeUndefined();
+  });
+  it('refund, open and invoice an order by number; nothing for an unknown number', () => {
+    expect(cmd(`refund ${order.ref}`)[0]).toMatchObject({ id: `cmd-refund-${order.ref}`, path: `orders/${order.ref}`, query: { act: 'refund' } });
+    expect(cmd(`استرداد #${order.ref.replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[+d])}`)[0].id).toBe(`cmd-refund-${order.ref}`);
+    expect(cmd(`order ${order.ref}`)[0]).toMatchObject({ path: `orders/${order.ref}` });
+    expect(cmd(`فاتورة ${order.ref}`)[0]).toMatchObject({ path: 'orders/print', query: { doc: 'invoice', refs: order.ref } });
+    expect(cmd('refund 99999')).toEqual([]);
+    // Commands come first, then the order itself.
+    expect(globalSearch(`refund ${order.ref}`, data).groups.map((g) => g.kind).slice(0, 2)).toEqual(['command', 'order']);
+  });
+  it('is role-aware: no refund for fulfilment, no coupon or transfer for finance', () => {
+    const as = (role: 'fulfilment' | 'finance' | 'marketing') => ({ ...data, role });
+    expect(cmd(`refund ${order.ref}`, as('fulfilment'))).toEqual([]);
+    expect(cmd('كوبون جديد', as('finance'))).toEqual([]);
+    expect(cmd('كوبون جديد', as('marketing'))[0].id).toBe('cmd-coupon');
+    expect(cmd('تحويل مخزون', as('finance'))).toEqual([]);
+    expect(cmd('طلب يدوي', as('marketing'))).toEqual([]);
+  });
+  it('plain words are not commands', () => {
+    expect(cmd('عباية')).toEqual([]);
+    expect(cmd(order.ref)).toEqual([]);
+  });
+});
+
+describe('settings by their own labels', () => {
+  it('finds guest checkout and lands on that section', async () => {
+    const { settingHits } = await import('./search');
+    const h = settingHits('الشراء كضيف', 'owner')[0];
+    expect(h).toMatchObject({ kind: 'setting', id: 'checkout-guest', path: 'settings/checkout', query: { focus: 'ck-g' } });
+    expect(settingHits('guest checkout', 'owner')[0].id).toBe('checkout-guest');
+    expect(settingHits('الرقم الضريبي', 'owner').map((x) => x.id)).toContain('kyc-vat');
+    expect(settingHits('zzz-none', 'owner')).toEqual([]);
+    expect(settingHits('cutoff', 'owner')[0]).toMatchObject({ path: 'settings/shipping', query: { tab: 'zones', focus: 'zn-cut' } });
+  });
+  it('hides settings the role cannot open', async () => {
+    const { settingHits } = await import('./search');
+    expect(settingHits('الشراء كضيف', 'marketing')).toEqual([]);
+    expect(settingHits('الرقم الضريبي', 'fulfilment')).toEqual([]);
+    expect(settingHits('الرقم الضريبي', 'finance').length).toBeGreaterThan(0);
+  });
+  it('every setting field points at a real category', async () => {
+    const { SETTING_FIELDS } = await import('../settings/fields');
+    const { isCat } = await import('../settings/model');
+    for (const f of SETTING_FIELDS) expect(isCat(f.cat)).toBe(true);
+    expect(new Set(SETTING_FIELDS.map((f) => f.id)).size).toBe(SETTING_FIELDS.length);
   });
 });

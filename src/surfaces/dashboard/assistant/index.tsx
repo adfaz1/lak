@@ -2,19 +2,19 @@
 // store's own data with the numbers, what is behind them, the period, the source and when it was computed.
 // It proposes at most one action as a draft that opens the right tool prefilled; it never executes anything.
 import { useState } from 'react';
-import { ArrowLeft, Bot, FileText, History, Info, ShieldCheck, SearchX } from 'lucide-react';
+import { ArrowLeft, ArrowRightLeft, Bot, FileText, History, Info, PackagePlus, ShieldCheck, SearchX } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { navigate, replace, type Route } from '../../../core/router';
 import { Badge, Button, Card, CardHeader, Delta, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, PageHeader, Tabs } from '../../../ds/kit';
-import type { L } from '../../merchant/domain';
+import { LOCATIONS, type L } from '../../merchant/domain';
 import { productPhoto, skuPhoto, productIdForSku } from '../model/media';
 import { sectionHref } from '../pages';
 import { dhref } from '../shell';
 import { useDashState, setDashState } from '../review';
 import { assistantLogStore, useWho } from '../work/state';
 import { productsStore } from '../../merchant/stores';
-import { canDraft, logDraft, parseQuestion, type Draft, type Question, type SalesAnswer } from './model';
+import { canDraft, logDraft, parseQuestion, RISK_FACTOR, RISK_MIN_DAYS, RISK_MIN_ORDERS, RETURNS_MIN_SAMPLE, type Draft, type Question, type ReasonKey, type SalesAnswer } from './model';
 import { useAnswers, type Answers } from './data';
 import { DRAFT_TITLE, draftHref } from './text';
 
@@ -23,12 +23,18 @@ export const QUESTION_TEXT: Record<Question, { short: L; full: L }> = {
   stock: { short: { ar: 'المخزون', en: 'Stock' }, full: { ar: 'ما المنتجات التي قد تنفد قريبًا؟', en: 'Which products may run out soon?' } },
   late: { short: { ar: 'التأخير', en: 'Delays' }, full: { ar: 'ما الطلبات المدفوعة المتأخرة؟', en: 'Which paid orders are late?' } },
   conversion: { short: { ar: 'التحويل', en: 'Conversion' }, full: { ar: 'كيف تغيّر معدل التحويل هذا الأسبوع؟', en: 'How did conversion change this week?' } },
+  returns: { short: { ar: 'المرتجعات', en: 'Returns' }, full: { ar: 'ما وراء الاستردادات والمرتجعات؟', en: 'What is driving refunds and returns?' } },
+  risk: { short: { ar: 'عملاء قد لا يعودون', en: 'At-risk customers' }, full: { ar: 'أي العملاء قد لا يعودون؟', en: 'Which customers are at risk of not returning?' } },
+  restock: { short: { ar: 'إعادة التخزين', en: 'Restock' }, full: { ar: 'ماذا أعيد تخزينه أولًا؟', en: 'Which products to restock first?' } },
 };
 const SOURCE: Record<Question, L> = {
   sales: { ar: 'الإحصاء اليومي (الطلبات، صافي المبيعات، الزيارات) وسجل الطلبات', en: 'Daily stats (orders, net sales, visits) and the order book' },
   stock: { ar: 'مستويات المخزون لكل مستودع وسجل المبيعات لكل صنف', en: 'Stock levels per warehouse and sales history per SKU' },
   late: { ar: 'سجل الطلبات وحالات الدفع والتجهيز', en: 'The order book, payment and fulfilment states' },
   conversion: { ar: 'الزيارات اليومية والطلبات في الأيام التي فيها بيانات زيارات', en: 'Daily visits and orders on days with visit data' },
+  returns: { ar: 'استردادات الطلبات ومرتجعاتها بأسبابها، واستردادات السجل المالي', en: 'Order refunds and returns with their reasons, and ledger refunds' },
+  risk: { ar: 'طلبات كل عميل وتواريخها وموافقته على التواصل', en: 'Each customer’s orders, their dates and contact consent' },
+  restock: { ar: 'المخزون لكل مستودع وحد التنبيه وسجل المبيعات وآخر سعر بيع', en: 'Stock per warehouse, alert levels, sales history and last selling price' },
 };
 
 export default function Assistant({ route }: { route: Route }) {
@@ -76,6 +82,9 @@ export default function Assistant({ route }: { route: Route }) {
     stock: tx('المستويات الآن · معدل البيع من سجل كل صنف', 'Levels now · sales rate from each SKU’s history'),
     late: tx('الآن · مدفوعة منذ أكثر من 24 ساعة', 'Now · paid over 24 hours ago'),
     conversion: tx('آخر 7 أيام مكتملة مقابل السبعة قبلها', 'Last 7 complete days vs the 7 before'),
+    returns: tx('طلبات آخر 30 يومًا', 'Orders from the last 30 days'),
+    risk: tx('الآن · مقارنة بفاصل الشراء المعتاد لكل عميل', 'Now · against each customer’s usual buying gap'),
+    restock: tx('المستويات الآن · المبيعات المهددة خلال 7 أيام', 'Levels now · sales at risk over 7 days'),
   };
   const draft = q === 'sales' ? (s.kind === 'answer' ? s.draft : null) : a[q].draft;
 
@@ -90,6 +99,9 @@ export default function Assistant({ route }: { route: Route }) {
             {q === 'stock' && <StockView a={a} />}
             {q === 'late' && <LateView a={a} />}
             {q === 'conversion' && <ConversionView a={a} />}
+            {q === 'returns' && <ReturnsView a={a} />}
+            {q === 'risk' && <RiskView a={a} />}
+            {q === 'restock' && <RestockView a={a} />}
           </div>
           <dl className="grid gap-3 border-t border-border px-5 py-4 text-xs sm:grid-cols-3">
             <div><dt className="text-subtle">{tx('الفترة', 'Period')}</dt><dd className="mt-0.5 font-medium text-fg">{periodText[q]}</dd></div>
@@ -270,6 +282,107 @@ function ConversionView({ a }: { a: Answers }) {
   );
 }
 
+const REASON: Record<ReasonKey, L> = {
+  size: { ar: 'المقاس', en: 'Size' }, damaged: { ar: 'تالف', en: 'Damaged' }, described: { ar: 'لا يطابق الوصف', en: 'Not as described' },
+  mind: { ar: 'غيّر رأيه', en: 'Changed mind' }, late: { ar: 'تأخر التوصيل', en: 'Late delivery' }, other: { ar: 'سبب آخر', en: 'Other reason' }, unrecorded: { ar: 'سبب غير مسجّل', en: 'No reason recorded' },
+};
+
+function ReturnsView({ a }: { a: Answers }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const r = a.returns;
+  const max = Math.max(1, ...r.reasons.map((x) => x.count));
+  if (!r.affected) return <EmptyState icon={<FileText className="size-6" />} title={tx('لا استردادات أو مرتجعات في آخر 30 يومًا', 'No refunds or returns in the last 30 days')}>{tx(`من ${r.paidOrders} طلبًا مدفوعًا.`, `Out of ${r.paidOrders} paid orders.`)}</EmptyState>;
+  return (
+    <>
+      <p className="text-[15px] leading-relaxed text-fg">{tx(`${r.affected} من ${r.paidOrders} طلبًا (${r.rate}%) فيها استرداد أو إرجاع، بقيمة`, `${r.affected} of ${r.paidOrders} orders (${r.rate}%) had a refund or a return, worth`)} <Money v={r.amount} className="font-bold" />.</p>
+      {r.small && <Alert tone="warn" title={tx('العينة صغيرة', 'Small sample')}>{tx(`أقل من ${RETURNS_MIN_SAMPLE} طلبات؛ نعرض الأرقام ولا نسمّي سببًا رئيسيًا.`, `Fewer than ${RETURNS_MIN_SAMPLE} orders; we show the counts but name no main driver.`)}</Alert>}
+      <div>
+        <h3 className="mb-2 text-sm font-semibold text-fg">{tx('حسب السبب', 'By reason')}</h3>
+        <ul className="space-y-2.5">
+          {r.reasons.map((x) => (
+            <li key={x.key} className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-center gap-3 text-[13px]">
+              <span className="truncate text-muted">{REASON[x.key][lang]}</span>
+              <span className="h-2 overflow-hidden rounded-full bg-surface-2"><span className="block h-full rounded-full bg-amber-500/70" style={{ width: `${(x.count * 100) / max}%` }} /></span>
+              <span className="tabular-nums font-semibold text-fg">{x.count} · <Money v={x.amount} /></span>
+            </li>
+          ))}
+        </ul>
+      </div>
+      {r.products.length > 0 && (
+        <div>
+          <h3 className="mb-1 flex items-center gap-1 text-sm font-semibold text-fg">{tx('حسب المنتج', 'By product')}<InfoHint>{tx('الوحدات المرتجعة أو المستردة من المباع في الطلبات نفسها.', 'Units returned or refunded out of those sold in the same orders.')}</InfoHint></h3>
+          <ul className="divide-y divide-border rounded-xl border border-border">
+            {r.products.map((p) => (
+              <li key={p.key}><a href={sectionHref('products', p.key)} className="flex flex-wrap items-center gap-3 px-3 py-2.5 hover:bg-surface-2/60">
+                <ProductImage src={skuPhoto(p.sku)} alt="" size={36} />
+                <span className="min-w-0 flex-1 basis-40"><span className="block truncate text-sm font-semibold text-fg">{p.label?.[lang] ?? p.sku}</span><span className="text-xs text-muted">{tx(`${p.units} من ${p.sold} وحدة`, `${p.units} of ${p.sold} units`)}{p.top ? ` · ${REASON[p.top][lang]}` : ''}</span></span>
+                {p.rate !== null && <Badge tone={p.rate >= 10 ? 'red' : 'amber'}>{p.rate}%</Badge>}
+              </a></li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-2">{r.refs.map((x) => <a key={x} href={sectionHref('orders', x)} className="inline-flex h-8 items-center rounded-full border border-border px-3 text-[13px] font-medium text-fg hover:border-brand-300"><Ref>#{x}</Ref></a>)}</div>
+    </>
+  );
+}
+
+function RiskView({ a }: { a: Answers }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const r = a.risk;
+  const rule = tx(`اشترى ${RISK_MIN_ORDERS} مرات على الأقل، ومرّ على آخر طلب ضعف فاصله المعتاد (${RISK_FACTOR}×) و${RISK_MIN_DAYS} أيام على الأقل.`, `Bought ${RISK_MIN_ORDERS}+ times, and the last order is at least ${RISK_FACTOR}× their usual gap and ${RISK_MIN_DAYS}+ days ago.`);
+  if (!r.count) return <EmptyState icon={<FileText className="size-6" />} title={tx('لا عملاء متأخرون عن عادتهم', 'No customer is later than usual')}>{rule}</EmptyState>;
+  return (
+    <>
+      <p className="text-[15px] leading-relaxed text-fg">{tx(`${r.count} من ${r.eligible} عميلًا متكررًا تأخروا عن عادتهم في الشراء. طلبهم القادم المعتاد يساوي`, `${r.count} of ${r.eligible} repeat customers are later than their usual gap. Their usual next order is worth`)} <Money v={r.value} className="font-bold" />.</p>
+      <p className="flex items-start gap-1 text-xs text-muted">{rule}</p>
+      <ul className="divide-y divide-border rounded-xl border border-border">
+        {r.rows.map((c) => (
+          <li key={c.id}><a href={sectionHref('customers', c.id)} className="flex flex-wrap items-center gap-3 px-3 py-2.5 hover:bg-surface-2/60">
+            <span className="min-w-0 flex-1 basis-40"><span className="block truncate text-sm font-semibold text-fg">{c.name[lang]}</span><span className="text-xs text-muted">{tx(`${c.orders} طلبات · عادةً كل ${c.gapDays} يوم`, `${c.orders} orders · usually every ${c.gapDays} days`)}</span></span>
+            <Badge tone={c.lastDays >= 3 * c.gapDays ? 'red' : 'amber'}>{tx(`آخر طلب قبل ${c.lastDays} يومًا`, `Last order ${c.lastDays} days ago`)}</Badge>
+            {!c.reachable && <Badge tone="gray">{tx('لا موافقة تواصل', 'No contact consent')}</Badge>}
+            <span className="text-end text-xs text-muted"><Money v={c.aov} className="block text-sm font-semibold text-fg" />{tx('متوسط طلبه', 'avg order')}</span>
+          </a></li>
+        ))}
+      </ul>
+      <p className="text-xs text-muted">{tx(`${r.reachable} منهم وافقوا على التواصل. الباقون لا تُرسل لهم رسائل.`, `${r.reachable} of them agreed to be contacted. The others are not messaged.`)}</p>
+    </>
+  );
+}
+
+function RestockView({ a }: { a: Answers }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const products = productsStore.use();
+  const name = (sku: string) => products.find((p) => p.id === productIdForSku(sku))?.name[lang] ?? sku;
+  const r = a.restock;
+  if (!r.rows.length) return <EmptyState icon={<FileText className="size-6" />} title={tx('لا صنف يحتاج إعادة تخزين الآن', 'Nothing needs restocking now')}>{tx('كل الأصناف التي لها سجل مبيعات تكفي 14 يومًا أو أكثر.', 'Every SKU with sales history covers 14 days or more.')}</EmptyState>;
+  return (
+    <>
+      <p className="text-[15px] leading-relaxed text-fg">{tx(`${r.rows.length} أصناف مرتبة بالمبيعات المهددة خلال 7 أيام، مجموعها`, `${r.rows.length} SKUs ranked by sales at risk over 7 days, together`)} <Money v={r.atRiskValue} className="font-bold" />.</p>
+      <ol className="divide-y divide-border rounded-xl border border-border">
+        {r.rows.map((x, i) => (
+          <li key={x.sku} className="flex flex-wrap items-center gap-3 px-3 py-3">
+            <span className="grid size-6 shrink-0 place-items-center rounded-full bg-surface-2 text-xs font-bold tabular-nums text-fg">{i + 1}</span>
+            <ProductImage src={skuPhoto(x.sku)} alt="" size={40} />
+            <span className="min-w-0 flex-1 basis-40"><a href={sectionHref('inventory', '', { q: x.sku })} className="block truncate text-sm font-semibold text-fg hover:underline">{name(x.sku)}</a>
+              <span className="text-xs text-muted"><Ref>{x.sku}</Ref> · {tx(`يكفي ${x.days} يوم · ${x.perDay}/يوم`, `${x.days} days left · ${x.perDay}/day`)}</span></span>
+            <span className="flex flex-wrap items-center gap-1.5">
+              {x.reorder > 0 && <Badge tone="amber" icon={<PackagePlus className="size-3.5" aria-hidden="true" />}>{tx(`اطلب ${x.reorder} من المورّد`, `Order ${x.reorder} from supplier`)}</Badge>}
+              {x.transfer && <Badge tone="brand" icon={<ArrowRightLeft className="size-3.5" aria-hidden="true" />}>{tx(`انقل ${x.transfer.qty} إلى ${LOCATIONS[x.transfer.to].ar}`, `Move ${x.transfer.qty} to ${LOCATIONS[x.transfer.to].en}`)}</Badge>}
+            </span>
+            {x.lostWeek ? <span className="text-end text-xs text-muted"><Money v={x.lostWeek} className="block text-sm font-semibold text-fg" />{tx('مهددة خلال 7 أيام', 'at risk in 7 days')}</span> : null}
+          </li>
+        ))}
+      </ol>
+      <p className="text-xs text-muted">{tx('كمية الطلب تصل بالصنف إلى 14 يومًا بمعدل بيعه. النقل بين المستودعات يسد النقص مؤقتًا ولا يغني عن الطلب.', 'The order quantity brings each SKU to 14 days at its sales rate. Moving stock covers a gap for now; it does not replace reordering.')}</p>
+    </>
+  );
+}
+
 function DraftCard({ q, draft, role }: { q: Question; draft: Draft | null; role: Answers['role'] }) {
   const tx = useTx();
   const { lang } = useLang();
@@ -279,6 +392,9 @@ function DraftCard({ q, draft, role }: { q: Question; draft: Draft | null; role:
     stock: { href: sectionHref('inventory', '', { tab: 'low' }), label: tx('المخزون المنخفض', 'Low stock') },
     late: { href: sectionHref('orders', '', { view: 'late' }), label: tx('الطلبات المتأخرة', 'Late orders') },
     conversion: { href: sectionHref('analytics'), label: tx('التقارير', 'Reports') },
+    returns: { href: sectionHref('orders', 'returns', { stage: 'all' }), label: tx('المرتجعات', 'Returns') },
+    risk: { href: sectionHref('customers'), label: tx('العملاء', 'Customers') },
+    restock: { href: sectionHref('inventory', '', { tab: 'low' }), label: tx('المخزون المنخفض', 'Low stock') },
   };
   const open = () => {
     if (!draft) return;

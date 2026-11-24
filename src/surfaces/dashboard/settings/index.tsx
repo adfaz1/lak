@@ -5,6 +5,8 @@ import { ArrowLeft, Lock, Receipt, SearchX } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, type Route } from '../../../core/router';
 import { settingsStore, teamStore, testStore } from '../../merchant/stores';
+import { verificationStore } from '../../merchant/verification-store';
+import { STATUS_LABEL } from '../../merchant/verification';
 import { Badge, Card, EmptyState, LinkButton, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { PageHeader, SearchInput } from '../../../ds/kit';
 import { useDashState } from '../review';
@@ -23,6 +25,8 @@ const PAGES: Record<CatId, React.LazyExoticComponent<() => JSX.Element>> = {
   notifications: lazy(() => import('./notifications')),
   language: lazy(() => import('./language')),
   account: lazy(() => import('./account')),
+  verification: lazy(() => import('./verification')),
+  'order-statuses': lazy(() => import('./order-statuses')),
 };
 
 export default function Settings({ route }: { route: Route }) {
@@ -74,7 +78,8 @@ function SettingsIndex({ route }: { route: Route }) {
   );
   if (state === 'error') return <div className="space-y-6">{header}<PageError what={tx('الإعدادات', 'Settings')} /></div>;
 
-  const data = { providers: s.providers, zones: s.zones, domain: s.domain, policies: s.policies, members: team.members, plan: s.plan };
+  const kyc = verificationStore.use();
+  const data = { providers: s.providers, zones: s.zones, domain: s.domain, policies: s.policies, members: team.members, plan: s.plan, verification: kyc.status };
   return (
     <div className="space-y-6">
       <ReviewTools />
@@ -138,6 +143,7 @@ function StatusBadge({ s }: { s: CatStatus }) {
     seats: tx(`المقاعد ممتلئة (${n})`, `Seats full (${n})`),
     notConnected: tx('لا طريقة دفع مفعّلة', 'No payment method on'),
     failed: tx('فشل التحقق', 'Verification failed'),
+    kyc: s.kyc ? tx(STATUS_LABEL[s.kyc].ar, STATUS_LABEL[s.kyc].en) + (s.kyc === 'verified' ? '' : tx(' · التحويلات محجوزة', ' · payouts held')) : '',
   };
   return <Badge tone={TONE[s.tone]}>{text[s.code]}</Badge>;
 }

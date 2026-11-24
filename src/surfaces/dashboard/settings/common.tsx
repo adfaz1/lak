@@ -2,9 +2,9 @@
 // review-only tools (role preview, failing save) and the no-permission state.
 import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
-import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical, UserCircle } from 'lucide-react';
+import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical, UserCircle, BadgeCheck, ListTree } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { link, navigate } from '../../../core/router';
+import { link, navigate, useRoute } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
 import { testStore } from '../../merchant/stores';
 import { ROLES, type Role } from '../../merchant/perms';
@@ -15,7 +15,7 @@ import { CATEGORIES, ROLE_LABEL, canOpen, rolesFor, type CatId } from './model';
 import { settingsSimStore } from './stores';
 
 export const ICON: Record<CatId, ComponentType<{ className?: string }>> = {
-  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages, account: UserCircle,
+  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages, account: UserCircle, verification: BadgeCheck, 'order-statuses': ListTree,
 };
 export const settingsHref = (cat?: string, q?: Record<string, string | undefined>) => link(`/dashboard/settings${cat ? `/${cat}` : ''}`, q);
 
@@ -25,6 +25,7 @@ export function Frame({ cat, actions, children, meta }: { cat: CatId; actions?: 
   const { lang } = useLang();
   const role = testStore.use().role;
   const c = CATEGORIES.find((x) => x.id === cat)!;
+  useFocusSection();
   return (
     <div className="space-y-6">
       <ReviewTools />
@@ -183,4 +184,26 @@ export function Section({ title, hint, action, children, id, flush }: { title: R
       <div className={flush ? 'pb-2' : 'px-5 pb-5'}>{children}</div>
     </Card>
   );
+}
+
+/**
+ * `?focus=<section id>` (from a global-search hit on a setting) scrolls to that section once it has rendered and
+ * outlines it briefly, so «الشراء كضيف» lands on the guest-checkout switch, not the top of the page.
+ */
+function useFocusSection() {
+  const focus = useRoute().query.get('focus');
+  useEffect(() => {
+    if (!focus) return;
+    let tries = 0;
+    const t = window.setInterval(() => {
+      const el = document.getElementById(focus)?.closest('section, [aria-labelledby]') as HTMLElement | null;
+      if (!el && ++tries < 20) return;
+      window.clearInterval(t);
+      if (!el) return;
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      el.classList.add('ring-2', 'ring-brand-400');
+      window.setTimeout(() => el.classList.remove('ring-2', 'ring-brand-400'), 2200);
+    }, 100);
+    return () => window.clearInterval(t);
+  }, [focus]);
 }

@@ -2,6 +2,7 @@
 // only rules those files do not have yet are written here, each with a test in model.test.ts.
 import type { L } from '../../../core/lang';
 import { parseMoney } from '../../merchant/catalog';
+import { STATUS_TONE, type VStatus } from '../../merchant/verification';
 import { PLANS, STAFF_LIMIT, type Plan } from '../../merchant/finance';
 import { MATRIX_ACTIONS, MATRIX_PAGES, ROLES, can, canSee, canSeeSettings, type Action, type Page, type Role, type SettingsCat } from '../../merchant/perms';
 import {
@@ -12,7 +13,7 @@ import {
 /* ---------- Categories and search ---------- */
 
 /** Settings pages of the new dashboard. `checkout` extends the merchant categories (blueprint pp.15–16). */
-export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout' | 'account';
+export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout' | 'account' | 'verification' | 'order-statuses';
 export interface Category { id: CatId; title: L; desc: L; keys: string }
 
 export const CATEGORIES: Category[] = [
@@ -21,10 +22,12 @@ export const CATEGORIES: Category[] = [
   { id: 'payments', title: { ar: 'المدفوعات', en: 'Payments' }, desc: { ar: 'مزوّدو الدفع وحدود الدفع عند الاستلام', en: 'Payment providers and COD limits' }, keys: 'mada visa mastercard apple pay stc tabby tamara cod bank مدى تابي تمارا استلام تحويل' },
   { id: 'shipping', title: { ar: 'الشحن', en: 'Shipping' }, desc: { ar: 'الطرق والقواعد ووعود التوصيل', en: 'Methods, rules and delivery promises' }, keys: 'zones rates free weight carriers rules express same day international hs customs cod warehouse مناطق أسعار مجاني وزن ناقل شركات قواعد سريع نفس اليوم دولي جمارك استلام مستودع' },
   { id: 'checkout', title: { ar: 'إتمام الطلب', en: 'Checkout' }, desc: { ar: 'الشراء كضيف والإلغاء الذاتي وحد الدفع عند الاستلام', en: 'Guest checkout, self-cancel, COD per customer' }, keys: 'guest cancel cod limit ضيف إلغاء حد' },
+  { id: 'verification', title: { ar: 'توثيق المتجر', en: 'Store verification' }, desc: { ar: 'الكيان النظامي ووثائقه، وشرط بدء التحويلات', en: 'Legal entity and documents; needed for payouts' }, keys: 'kyc verify verification identity documents cr commercial registration vat tax number national id iqama iban payouts held توثيق موثق هوية إقامة سجل تجاري رقم ضريبي وثائق كيان مؤسسة شركة جهة خيرية تحويلات محجوزة' },
   { id: 'domains', title: { ar: 'النطاقات', en: 'Domains' }, desc: { ar: 'الرابط المجاني ونطاقك الخاص', en: 'Free link and your own domain' }, keys: 'domain dns cname txt slug link نطاق رابط' },
   { id: 'policies', title: { ar: 'السياسات', en: 'Policies' }, desc: { ar: 'الاسترجاع والشحن والخصوصية والشروط', en: 'Returns, shipping, privacy, terms' }, keys: 'returns privacy terms refund استرجاع خصوصية شروط' },
   { id: 'notifications', title: { ar: 'الإشعارات', en: 'Notifications' }, desc: { ar: 'تنبيهاتك ورسائل العملاء لكل حالة طلب', en: 'Your alerts and customer messages per order state' }, keys: 'alerts email sms whatsapp customer template tracking تنبيه إشعار بريد رسائل واتساب عميل قالب تتبع' },
   { id: 'account', title: { ar: 'حسابي', en: 'My account' }, desc: { ar: 'ملفك والأمان والأجهزة وتنبيهاتك', en: 'Your profile, security, devices and alerts' }, keys: 'profile account password 2fa two-factor sessions devices security ملف حساب كلمة مرور تحقق خطوتين جلسات أجهزة أمان' },
+  { id: 'order-statuses', title: { ar: 'حالات الطلب', en: 'Order statuses' }, desc: { ar: 'حالات فرعية تحت كل حالة طلب', en: 'Sub-statuses under each order state' }, keys: 'order status sub-status custom statuses workflow stage processing حالات الطلب حالة فرعية تخصيص الحالات مرحلة تجهيز' },
   { id: 'language', title: { ar: 'اللغة والمنطقة', en: 'Language & region' }, desc: { ar: 'لغة اللوحة ولغات المتجر والتوقيت', en: 'Admin language, store languages, time zone' }, keys: 'language currency timezone units لغة عملة توقيت وحدة' },
 ];
 
@@ -48,6 +51,10 @@ export function searchCategories(q: string, cats: Category[] = CATEGORIES): Cate
 /** Who may open a category. Checkout is a store setting and follows `settings.manage`. */
 export function canOpen(role: Role, cat: CatId): boolean {
   if (cat === 'account') return true;
+  // Verification decides where payouts go: owner and finance (billing.manage) only.
+  if (cat === 'verification') return canSeeSettings(role, 'billing');
+  // Sub-statuses are an operations setting: whoever fulfils orders can define them.
+  if (cat === 'order-statuses') return can(role, 'order.fulfil');
   return canSeeSettings(role, cat === 'checkout' ? 'store' : cat);
 }
 /** The roles that can open a category, to tell a refused member whom to ask. */
@@ -308,10 +315,15 @@ export const ROLE_LABEL: Record<Role, L> = {
 };
 
 export type StatusTone = 'green' | 'amber' | 'red' | 'gray';
-export interface CatStatus { tone: StatusTone; code: 'ok' | 'zones' | 'action' | 'pending' | 'missing' | 'seats' | 'notConnected' | 'failed'; n?: number }
+export interface CatStatus { tone: StatusTone; code: 'ok' | 'zones' | 'action' | 'pending' | 'missing' | 'seats' | 'notConnected' | 'failed' | 'kyc'; n?: number; kyc?: VStatus }
 /** One short status per category card so the index shows where attention is needed. Null when there is nothing to say. */
-export function categoryStatus(id: CatId, d: { providers: Provider[]; zones: Zone[]; domain: DomainSettings; policies: Policy[]; members: Member[]; plan: Plan }): CatStatus | null {
+export function categoryStatus(id: CatId, d: { providers: Provider[]; zones: Zone[]; domain: DomainSettings; policies: Policy[]; members: Member[]; plan: Plan; verification?: VStatus }): CatStatus | null {
   switch (id) {
+    case 'verification': {
+      // The same status the payouts notice and the work centre read (merchant/verification.ts).
+      if (!d.verification) return null;
+      return { tone: STATUS_TONE[d.verification], code: 'kyc', kyc: d.verification };
+    }
     case 'payments': {
       const s = providerSummary(d.providers);
       if (s.action) return { tone: 'red', code: 'action', n: s.action };

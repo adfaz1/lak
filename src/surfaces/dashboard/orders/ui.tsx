@@ -43,6 +43,7 @@ const AUDIT_TEXT: Record<string, [string, string]> = {
   returnRequested: ['فُتح مرتجع', 'Return opened'], returnApproved: ['وُوفق على مرتجع', 'Return approved'], returnRejected: ['رُفض مرتجع', 'Return rejected'],
   returnReceived: ['استُلم مرتجع', 'Return received'], returnInspected: ['فُحص مرتجع', 'Return inspected'], returnRefunded: ['رُدّ مبلغ مرتجع', 'Return refunded'],
   exchangeReserved: ['حُجز بديل', 'Replacement held'], exchangeShipped: ['شُحن بديل', 'Replacement shipped'], transferConfirmed: ['أُكّد التحويل البنكي', 'Bank transfer confirmed'],
+  subStatusSet: ['تغيّرت الحالة الفرعية', 'Sub-status changed'], subStatusCleared: ['أُزيلت الحالة الفرعية', 'Sub-status removed'], memberNotified: ['تنبيه داخلي لعضو', 'Member alerted'],
 };
 
 /** Apply order stock effects to the inventory, with stock-log lines naming the order. */

@@ -302,6 +302,8 @@ export interface Run {
   by?: string;
   /** Message cost charged at the test rate (halalas), when a message was handed to the provider. */
   cost?: number;
+  /** Operating-rule runs (merchant/ops.ts runRule): the order it ran on and what it changed, in plain words. */
+  order?: string; changes?: { text: L; status: string; why?: L }[];
 }
 export function runFixtures(): Run[] {
   const R = (id: string, a: string, wAr: string, wEn: string, sAr: string, sEn: string, o: RunOutcome, rAr: string, rEn: string): Run =>
@@ -379,6 +381,25 @@ export function retryRun(runs: Run[], id: string, ctx: { now: number; by: string
     ...(ok ? { cost: TEST_RATE.email } : {}),
   };
   return { runs: [run, ...runs], run };
+}
+
+/**
+ * Log operating-rule results as runs (newest first), one per order, numbered after the existing runs. A retry links to
+ * the first run of its chain. Results come from merchant/ops.ts runRule; this file only records them.
+ */
+export function appendRuleRuns(
+  runs: Run[],
+  results: { rule: string; ref: string; outcome: RunOutcome; reason: L; changes: { text: L; status: string; why?: L }[]; retryable?: boolean }[],
+  ctx: { now: number; by: string; retryOf?: Run },
+): { runs: Run[]; added: Run[] } {
+  let n = Math.max(900, ...runs.map((x) => Number(x.id.replace(/\D/g, '')) || 0));
+  const added: Run[] = results.map((r) => ({
+    id: `RUN-${++n}`, automation: r.rule, order: r.ref, subject: { ar: `طلب #${r.ref}`, en: `Order #${r.ref}` }, when: { ar: 'الآن', en: 'Just now' }, at: ctx.now,
+    outcome: r.outcome, reason: r.reason, changes: r.changes, by: ctx.by,
+    ...(r.outcome === 'failed' ? { retryable: r.retryable ?? false } : {}),
+    ...(ctx.retryOf ? { attempt: (ctx.retryOf.attempt ?? 1) + 1, retryOf: rootOf(ctx.retryOf) } : {}),
+  }));
+  return { runs: added.length ? [...[...added].reverse(), ...runs] : runs, added };
 }
 
 /* ---------- Loyalty points ---------- */

@@ -14,7 +14,7 @@ import { shippingQuote as quoteZone } from '../settings/model';
 import type { Product } from '../../merchant/catalog';
 import { can, canSee, type Role } from '../../merchant/perms';
 import {
-  act, canMarkShipped, collected as collectedOf, confirmTransfer, fulfilEffects, markShipped, openReturns, payView, placedAt, refundableNow, stamp, takeHeld,
+  act, liveSub, canMarkShipped, collected as collectedOf, confirmTransfer, fulfilEffects, markShipped, openReturns, payView, placedAt, refundableNow, stamp, takeHeld,
   type Actor, type PayView, type StockEffect,
 } from '../../merchant/ops';
 import { available, type Level, type StockLog } from '../../merchant/inventory';
@@ -40,6 +40,8 @@ export interface ListQuery {
   view: ListView; q: string; ch?: Channel; pay?: Pay; ful?: Ful; ship?: Ship; sort: Sort; page: number;
   /** Placed between these dates (YYYY-MM-DD, Riyadh), shipped-from location, payment method, tag, assignee. */
   from?: string; to?: string; loc?: LocId; method?: PayMethodFilter; tag?: string; who?: string;
+  /** Custom sub-status id, or '-' for orders without one (Settings → Order statuses). */
+  sub?: string;
 }
 
 const pick = <T extends string>(v: string | null, list: readonly T[]): T | undefined =>
@@ -59,7 +61,7 @@ export function readQuery(query: URLSearchParams): ListQuery {
     page: Math.max(1, Math.floor(Number(g('page'))) || 1),
     ...(isDate(g('from')) ? { from: g('from')! } : {}), ...(isDate(g('to')) ? { to: g('to')! } : {}),
     ...(g('loc') ? { loc: g('loc')! } : {}), ...(pick(g('method'), PAY_METHODS) ? { method: pick(g('method'), PAY_METHODS) } : {}),
-    ...(g('tag') ? { tag: g('tag')! } : {}), ...(g('who') ? { who: g('who')! } : {}),
+    ...(g('tag') ? { tag: g('tag')! } : {}), ...(g('who') ? { who: g('who')! } : {}), ...(g('sub') ? { sub: g('sub')! } : {}),
   };
 }
 const isDate = (s: string | null) => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -71,12 +73,13 @@ export function toParams(q: ListQuery, over: Partial<ListQuery> = {}): Record<st
     view: m.view !== 'all' ? m.view : undefined, q: m.q.trim() ? m.q : undefined, ch: m.ch, pay: m.pay, ful: m.ful, ship: m.ship,
     sort: m.sort !== 'new' ? m.sort : undefined, page: m.page > 1 ? String(m.page) : undefined,
     ...(m.from || m.to || m.loc || m.method || m.tag || m.who ? { from: m.from, to: m.to, loc: m.loc, method: m.method, tag: m.tag, who: m.who } : {}),
+    ...(m.sub ? { sub: m.sub } : {}),
   };
 }
 
-export const activeFilters = (q: ListQuery) => [q.ch, q.pay, q.ful, q.ship, q.from || q.to, q.loc, q.method, q.tag, q.who].filter(Boolean).length;
+export const activeFilters = (q: ListQuery) => [q.ch, q.pay, q.ful, q.ship, q.from || q.to, q.loc, q.method, q.tag, q.who, q.sub].filter(Boolean).length;
 /** Every filter key cleared (search kept). */
-export const NO_FILTERS: Partial<ListQuery> = { ch: undefined, pay: undefined, ful: undefined, ship: undefined, from: undefined, to: undefined, loc: undefined, method: undefined, tag: undefined, who: undefined };
+export const NO_FILTERS: Partial<ListQuery> = { ch: undefined, pay: undefined, ful: undefined, ship: undefined, from: undefined, to: undefined, loc: undefined, method: undefined, tag: undefined, who: undefined, sub: undefined };
 
 const RIYADH_MS = 3 * 3_600_000;
 /** The Riyadh calendar date an order was placed on. */
@@ -90,6 +93,7 @@ function extraFilter(q: ListQuery, now: number) {
     if (q.method && methodOf(o) !== q.method) return false;
     if (q.tag && !(o.tags ?? []).includes(q.tag)) return false;
     if (q.who && (q.who === '-' ? !!o.assignee : o.assignee !== q.who)) return false;
+    if (q.sub && (q.sub === '-' ? !!liveSub(o) : liveSub(o)?.id !== q.sub)) return false;
     return true;
   };
 }

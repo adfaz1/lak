@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowLeft, PackageSearch, Plus, Trash2, Truck, PackageCheck } from 'lucide-react';
 import { navigate, replace } from '../../../core/router';
+import { prefillQty } from '../../merchant/prefill';
 import { useLang } from '../../../core/lang';
 import { LOCATIONS, LOC_IDS, type LocId } from '../../merchant/domain';
 import { available, closeWithDiscrepancy, levelOf, receiveTransfer, sendTransfer, validateTransferDraft, type Transfer, type TransferError } from '../../merchant/inventory';
@@ -28,7 +29,11 @@ export default function TransferDetail({ id, query }: { id: string; query: URLSe
       <Card><EmptyState icon={<PackageSearch className="size-6" aria-hidden="true" />} title={tx('لا يوجد تحويل بهذا المرجع', 'No transfer with this reference')} action={<a className="text-sm font-semibold text-brand-700 hover:underline dark:text-brand-300" href={back.href}>{tx('كل التحويلات', 'All transfers')}</a>} /></Card>
     </div>
   );
-  return <Detail initial={stored ?? newTransfer(transfers, query.get('sku'), query.get('to'), levelsStore.get())} isNew={!stored} />;
+  const fresh = newTransfer(transfers, query.get('sku'), query.get('to'), levelsStore.get());
+  // `qty` from a prefilled link (assistant, search commands) sets the first line's quantity; still a draft.
+  const qty = prefillQty(query);
+  if (qty && fresh.lines[0]) fresh.lines[0] = { ...fresh.lines[0], qty };
+  return <Detail initial={stored ?? fresh} isNew={!stored} />;
 }
 
 function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {

@@ -15,12 +15,15 @@ import { RUN_VIEWS, TEMPLATES, canActivate, filterRunView, flowCost, lastRun, ne
 import { RetryModal, RunDrawer } from './runs';
 import Builder from './builder';
 import { A_TONE, OutcomeIcon, R_TONE, T_ICON, ahref, useNames } from './names';
+import { RuleEditor, RuleRetryModal, RulesList, rhref } from './rules';
+import { rulesStore } from '../../merchant/stores';
 
 export default function Automations({ route }: { route: Route }) {
   const tx = useTx();
   const role = useRole();
   if (!canSee(role, 'automations')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('الأتمتة غير متاحة لدورك', 'Automations are not available for your role')} /></div>;
   const id = route.path[0];
+  if (id === 'rules') return route.path[1] ? <RuleEditor key={route.path[1]} id={route.path[1]} /> : <List route={route} />;
   if (id === 'new' && !route.query.get('tpl')) return <TemplatePicker />;
   if (id) return <Builder key={id + (route.query.get('tpl') ?? '')} id={id} tpl={route.query.get('tpl')} />;
   return <List route={route} />;
@@ -37,7 +40,9 @@ function List({ route }: { route: Route }) {
   const empty = state === 'empty';
   const list = empty ? [] : autos;
   const rlist = empty ? [] : runs;
-  const tab = route.query.get('tab') === 'runs' ? 'runs' : 'flows';
+  const rules = rulesStore.use();
+  const rulesList = empty ? [] : rules;
+  const tab = route.query.get('tab') === 'runs' ? 'runs' : route.query.get('tab') === 'rules' || route.path[0] === 'rules' ? 'rules' : 'flows';
   const manage = can(role, 'automation.manage');
   const toast = useToast();
   const [toggle, setToggle] = useState<Automation | null>(null);
@@ -46,10 +51,11 @@ function List({ route }: { route: Route }) {
   const header = (
     <>
       <PageHeader title={tx('الأتمتة', 'Automations')} description={tx('حدث ← شروط ← انتظار ← إجراءات', 'Event → conditions → wait → actions')}
-        actions={manage ? <LinkButton href={ahref('new')}><Plus className="size-4" aria-hidden="true" />{tx('أتمتة جديدة', 'New automation')}</LinkButton> : undefined} />
+        actions={manage ? (tab === 'rules' ? <LinkButton href={rhref('new')}><Plus className="size-4" aria-hidden="true" />{tx('قاعدة جديدة', 'New rule')}</LinkButton> : <LinkButton href={ahref('new')}><Plus className="size-4" aria-hidden="true" />{tx('أتمتة جديدة', 'New automation')}</LinkButton>) : undefined} />
       <ReviewRole />
       <Tabs label={tx('أقسام الأتمتة', 'Automation sections')} items={[
         { href: ahref(), label: tx('المسارات', 'Flows'), current: tab === 'flows', count: list.length },
+        { href: ahref('', { tab: 'rules' }), label: tx('قواعد التشغيل', 'Operating rules'), current: tab === 'rules', count: rulesList.length },
         { href: ahref('', { tab: 'runs' }), label: tx('سجل التشغيل', 'Run log'), current: tab === 'runs', count: rlist.length },
       ]} />
     </>
@@ -73,7 +79,7 @@ function List({ route }: { route: Route }) {
     const aq = route.query.get('automation') ?? '';
     const shown = filterRunView(rlist, outcome, aq);
     const href = (p: Record<string, string | undefined>) => ahref('', { tab: 'runs', outcome: outcome === 'all' ? undefined : outcome, automation: aq || undefined, ...p });
-    const name = (r: Run) => autos.find((a) => a.id === r.automation)?.name[lang] ?? r.automation;
+    const name = (r: Run) => autos.find((a) => a.id === r.automation)?.name[lang] ?? rules.find((x) => x.id === r.automation)?.name[lang] ?? r.automation;
     const open = rlist.find((r) => r.id === route.query.get('run'));
     const retryOf = rlist.find((r) => r.id === route.query.get('retry'));
     const viewName = (v: RunView) => (v === 'all' ? tx('الكل', 'All') : v === 'followup' ? tx('يحتاج متابعة', 'Needs follow-up') : n.outcome(v));
@@ -91,7 +97,7 @@ function List({ route }: { route: Route }) {
             <Tabs label={tx('النتيجة', 'Outcome')} items={RUN_VIEWS.map((v) => ({ href: href({ outcome: v === 'all' ? undefined : v }), label: viewName(v), current: outcome === v, count: filterRunView(rlist, v, aq).length }))} />
           </div>
           <div className="flex flex-wrap items-center gap-2 p-4 sm:px-5">
-            <FilterChip label={tx('الأتمتة', 'Automation')} value={aq} onChange={(v) => replace(href({ automation: v || undefined }))} options={autos.map((a) => ({ value: a.id, label: a.name[lang] }))} />
+            <FilterChip label={tx('الأتمتة', 'Automation')} value={aq} onChange={(v) => replace(href({ automation: v || undefined }))} options={[...autos.map((a) => ({ value: a.id, label: a.name[lang] })), ...rules.map((x) => ({ value: x.id, label: x.name[lang] }))]} />
             {outcome === 'followup' && <span className="flex items-center gap-1 text-xs text-muted">{tx('فشل لن ينجح بإعادة المحاولة، أو استنفد المحاولات', 'Failures a retry will not fix, or out of attempts')}<InfoHint>{tx('عالج السبب (مثل عنوان بريد غير صالح في ملف العميل) ثم أعد المحاولة أو تجاهله.', 'Fix the cause (e.g. an invalid email on the customer) then retry, or leave it.')}</InfoHint></span>}
           </div>
           {shown.length === 0 ? (
@@ -112,10 +118,13 @@ function List({ route }: { route: Route }) {
           )}
         </Card>
         {open && <RunDrawer run={open} runs={rlist} automation={autos.find((a) => a.id === open.automation)} canManage={manage} onClose={() => replace(href({ run: undefined }))} onRetry={(r) => replace(href({ run: undefined, retry: r.id }))} />}
-        {retryOf && manage && <RetryModal run={retryOf} automation={autos.find((a) => a.id === retryOf.automation)} onClose={(id) => replace(href({ retry: undefined, run: id }))} />}
+        {retryOf && manage && retryOf.order && <RuleRetryModal run={retryOf} onClose={(id) => replace(href({ retry: undefined, run: id }))} />}
+        {retryOf && manage && !retryOf.order && <RetryModal run={retryOf} automation={autos.find((a) => a.id === retryOf.automation)} onClose={(id) => replace(href({ retry: undefined, run: id }))} />}
       </div>
     );
   }
+
+  if (tab === 'rules') return <div className="space-y-6">{header}<RulesList rules={rulesList} runs={rlist} manage={manage} /></div>;
 
   const cols: Column<Automation>[] = [
     { key: 'n', header: tx('المسار', 'Flow'), cell: (a) => <span className="flex items-center gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-brand-500/10 text-brand-600 dark:text-brand-300" aria-hidden="true">{T_ICON[a.trigger]}</span><span className="min-w-0"><span className="block font-semibold">{a.name[lang]}</span><span className="block text-xs font-normal text-muted">{n.trigger(a.trigger)} {tx('←', '→')} {a.actions.map(n.action).join(tx('، ', ', '))}</span></span></span> },

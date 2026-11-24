@@ -128,3 +128,41 @@ export function noticeCtx(o: NoticeOrder, now = Date.now()): NoticeCtx {
     if (noted !== after) write(noted);
   };
 }
+
+/* ---------- Sub-statuses and operating rules (Phase B; merchant/ops.ts) ---------- */
+import { applyRulesOnWrite, ruleFixtures, subStatusFixtures, type OpRule, type RuleCtx, type SubStatus } from './ops';
+import { appendRuleRuns } from './growth';
+/** Custom sub-statuses under each main order state (Settings → Order statuses). */
+export const subStatusesStore = createStore.key('merchant.subStatusesStore')<SubStatus[]>(subStatusFixtures);
+/** Operating rules (Automations → Operating rules). Only active rules run. */
+export const rulesStore = createStore.key('merchant.rulesStore')<OpRule[]>(ruleFixtures);
+/** What a rule needs to read: team members, sub-statuses and the catalogue's SKUs. */
+export function ruleCtx(): RuleCtx {
+  return {
+    members: teamStore.get().members,
+    subs: subStatusesStore.get(),
+    skusOf: (id) => { const p = productsStore.get().find((x) => x.id === id); return p ? skusOf(p) : []; },
+  };
+}
+{
+  // Every orders write — online store checkout (storefront/bridge.ts), manual orders, payment confirmations — clears
+  // sub-statuses whose state has passed and runs active rules on created/paid orders. Each run is logged per order.
+  const write = ordersStore.set;
+  ordersStore.set = (next) => {
+    const before = ordersStore.get();
+    write(next);
+    const after = ordersStore.get();
+    const now = Date.now();
+    const r = applyRulesOnWrite(before, after, rulesStore.get(), ruleCtx(), now);
+    if (r.orders !== after) write(r.orders);
+    if (r.results.length) runsStore.set((runs) => appendRuleRuns(runs, r.results, { now, by: 'rule' }).runs);
+    if (Object.keys(r.rr).length) rulesStore.set((list) => list.map((x) => (x.id in r.rr ? { ...x, rr: r.rr[x.id] } : x)));
+  };
+}
+
+/* ---------- After-sale service inbox (inbox group; merchant/inbox.ts). Simulated: nothing is sent. ---------- */
+import { cannedFixtures, caseFixtures, type Canned, type Case } from './inbox';
+/** Cases opened by shoppers or staff, and derived cases (reviews, questions, returns) once someone acted on them. */
+export const inboxStore = createStore.key('merchant.inboxStore')<Case[]>(() => caseFixtures());
+/** Bilingual canned replies, editable in the inbox. */
+export const cannedStore = createStore.key('merchant.cannedStore')<Canned[]>(cannedFixtures);

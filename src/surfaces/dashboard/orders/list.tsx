@@ -21,6 +21,9 @@ import { SavedViewsBar } from './saved-views-ui';
 import { savedViewsStore } from './saved-views';
 import { can } from '../../merchant/perms';
 import type { MoreBulk } from './bulk-more-model';
+import { SubBadge, SubBulkModal, type SubOutcome } from './substatus-ui';
+import { subStatusesStore } from '../../merchant/stores';
+import { ListTree } from 'lucide-react';
 
 /** Scroll position per list URL, restored when coming back from an order. */
 const scrollMemo = new Map<string, number>();
@@ -51,6 +54,8 @@ export default function OrdersList({ route }: { route: Route }) {
   useEffect(() => { if (last.current !== scope) { last.current = scope; setSel(new Set()); setAllMatching(false); } }, [scope]);
   const [bulk, setBulk] = useState<OpsBulk | null>(null);
   const [more, setMore] = useState<MoreBulk | null>(null);
+  const [subBulk, setSubBulk] = useState(false);
+  const subDefs = subStatusesStore.use();
   const role = testStore.use().role;
   const canMessage = can(role, 'customer.message');
 
@@ -127,6 +132,13 @@ export default function OrdersList({ route }: { route: Route }) {
     toast({ tone: 'ok', text: tx(`${T[o.action][0]} ${formatInt(o.ok.length)} طلبًا`, `${T[o.action][1]} ${formatInt(o.ok.length)} orders`), action: o.undo ? { label: tx('تراجع', 'Undo'), run: o.undo } : undefined });
   };
 
+  const onSubDone = (o: SubOutcome | null) => {
+    setSubBulk(false);
+    if (!o || !o.ok.length) return;
+    clear();
+    toast({ tone: 'ok', text: tx(`${formatInt(o.ok.length)} طلبات صارت «${o.name}»`, `${formatInt(o.ok.length)} orders now “${o.name}”`), action: o.undo ? { label: tx('تراجع', 'Undo'), run: o.undo } : undefined });
+  };
+
   const chips = [
     { key: 'ch' as const, label: tx('القناة', 'Channel'), options: CHANNELS.map((v) => ({ value: v, label: L.channel(v) })) },
     { key: 'pay' as const, label: tx('الدفع', 'Payment'), options: PAYS.map((v) => ({ value: v, label: L.pay(v) })) },
@@ -135,6 +147,7 @@ export default function OrdersList({ route }: { route: Route }) {
     { key: 'method' as const, label: tx('وسيلة الدفع', 'Pay method'), options: PAY_METHODS.map((v) => ({ value: v, label: L.method(v) })) },
     { key: 'loc' as const, label: tx('الموقع', 'Location'), options: LOC_IDS.map((v) => ({ value: v, label: LOCATIONS[v][lang] })) },
     { key: 'who' as const, label: tx('المسؤول', 'Assignee'), options: [...members.map((m) => ({ value: m.name, label: m.name === who.name ? tx(`${m.name} (أنا)`, `${m.name} (me)`) : m.name })), { value: '-', label: tx('غير مسند', 'Unassigned') }] },
+    ...(subDefs.length ? [{ key: 'sub' as const, label: tx('الحالة الفرعية', 'Sub-status'), options: [...subDefs.map((d) => ({ value: d.id, label: d.name[lang] + (d.archived ? tx(' (مؤرشفة)', ' (archived)') : '') })), { value: '-', label: tx('بلا حالة فرعية', 'No sub-status') }] }] : []),
     ...(tags.length ? [{ key: 'tag' as const, label: tx('الوسم', 'Tag'), options: tags.map((v) => ({ value: v, label: v })) }] : []),
   ];
   const dateRange = (
@@ -144,7 +157,7 @@ export default function OrdersList({ route }: { route: Route }) {
     </span>
   );
   const nf = activeFilters(lq);
-  const extra = [lq.method, lq.loc, lq.who, lq.tag, lq.from || lq.to].filter(Boolean).length;
+  const extra = [lq.method, lq.loc, lq.who, lq.tag, lq.sub, lq.from || lq.to].filter(Boolean).length;
   const sortSelect = (
     <label className="relative inline-flex h-10 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-[13px] font-medium text-muted hover:text-fg">
       <ArrowUpDown className="size-3.5" aria-hidden="true" /><span>{L.sort(lq.sort)}</span>
@@ -174,6 +187,7 @@ export default function OrdersList({ route }: { route: Route }) {
           <MenuItem icon={<UserRound className="size-4" />} onClick={() => { close(); setMore('assign'); }}>{tx('أسند إلى عضو', 'Assign to a member')}</MenuItem>
           <MenuItem icon={<Tag className="size-4" />} onClick={() => { close(); setMore('tagAdd'); }}>{tx('أضف وسمًا', 'Add a tag')}</MenuItem>
           <MenuItem icon={<Tag className="size-4" />} onClick={() => { close(); setMore('tagRemove'); }}>{tx('احذف وسمًا', 'Remove a tag')}</MenuItem>
+          <MenuItem icon={<ListTree className="size-4" />} onClick={() => { close(); setSubBulk(true); }}>{tx('غيّر الحالة الفرعية', 'Change sub-status')}</MenuItem>
         </>}
       </Menu>
       <Menu label={tx('طباعة وتصدير', 'Print & export')} size="sm" button={<MenuButtonLabel icon={<Printer className="size-4" aria-hidden="true" />}>{tx('طباعة وتصدير', 'Print & export')}</MenuButtonLabel>}>
@@ -222,7 +236,7 @@ export default function OrdersList({ route }: { route: Route }) {
     ) },
     { key: 'customer', header: tx('العميل', 'Customer'), cell: (o) => <span className="block max-w-48 truncate text-fg">{o.customer[lang]}<span className="block text-xs text-muted">{L.channel(o.channel)}</span></span> },
     { key: 'pay', header: tx('الدفع', 'Payment'), cell: (o) => <PayBadge o={o} /> },
-    { key: 'ful', header: tx('التجهيز', 'Fulfilment'), cell: (o) => <FulBadge o={o} /> },
+    { key: 'ful', header: tx('التجهيز', 'Fulfilment'), cell: (o) => <span className="flex flex-col items-start gap-1"><FulBadge o={o} /><SubBadge o={o} /></span> },
     { key: 'ship', header: tx('الشحن', 'Shipment'), cell: (o) => <ShipBadge o={o} />, hideBelow: 'lg' },
     { key: 'flags', header: <span className="sr-only">{tx('تنبيهات', 'Flags')}</span>, cell: (o) => <Flags o={o} /> },
     { key: 'who', header: tx('المسؤول', 'Assignee'), cell: (o) => (o.assignee ? <span className="inline-flex items-center gap-1 text-xs text-muted"><UserRound className="size-3.5" aria-hidden="true" />{o.assignee}</span> : null), hideBelow: 'lg' },
@@ -238,7 +252,7 @@ export default function OrdersList({ route }: { route: Route }) {
           <Money v={total(o)} className="text-sm font-semibold text-fg" />
         </div>
         <p className="text-xs text-muted"><Ref>#{o.ref}</Ref> · {age(o.hoursAgo)} · {L.channel(o.channel)}</p>
-        <div className="mt-2 flex flex-wrap gap-1.5"><PayBadge o={o} />{o.pay !== 'failed' && <FulBadge o={o} />}{o.ship !== 'none' && <ShipBadge o={o} />}<Flags o={o} /></div>
+        <div className="mt-2 flex flex-wrap gap-1.5"><PayBadge o={o} />{o.pay !== 'failed' && <FulBadge o={o} />}<SubBadge o={o} />{o.ship !== 'none' && <ShipBadge o={o} />}<Flags o={o} /></div>
       </div>
     </div>
   );
@@ -287,6 +301,7 @@ export default function OrdersList({ route }: { route: Route }) {
         </Drawer>
       )}
       {bulk && <BulkModal action={bulk} orders={selectedOrders} allMatching={allMatching} onClose={onBulkDone} />}
+      {subBulk && <SubBulkModal orders={selectedOrders} allMatching={allMatching} onClose={onSubDone} />}
       {more && <MoreBulkModal action={more} orders={selectedOrders} allMatching={allMatching} canRefund={perms.refund} tags={tags} onClose={onMoreDone} />}
     </div>
   );

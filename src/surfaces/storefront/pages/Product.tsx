@@ -16,6 +16,7 @@ import { deliverableCities, shipOptions } from '../bridge';
 import { locationsStore } from '../../merchant/stores';
 import { ProductGrid } from './Listing';
 import { ProductReviews } from '../../dashboard/marketing/storefront-reviews';
+import { AskQuestion } from './Help';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
   const { t, l, lang, dl, m } = useS();
@@ -224,6 +225,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
       </div>
 
       <ProductReviews productId={p.id} />
+      <AskQuestion productId={p.id} />
 
       {related.length > 0 && (
         <section aria-labelledby="sf-rel-h" className="pt-16 sm:pt-20">

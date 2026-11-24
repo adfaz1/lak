@@ -166,6 +166,11 @@ export interface Order {
   lang?: 'ar' | 'en';
   /** Payment deadline (epoch ms) for orders awaiting a transfer or a payment link; absent = placed + 3 days. */
   payDue?: number;
+  /**
+   * Custom sub-status under the order's main state (merchant/ops.ts sub-statuses). A snapshot of the name and
+   * the notify choice at the time it was set, so renaming or archiving a sub-status never rewrites history.
+   */
+  sub?: { id: string; parent: string; name: L; notify: boolean; at: number; by: string };
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {

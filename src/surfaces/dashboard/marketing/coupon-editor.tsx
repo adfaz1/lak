@@ -1,11 +1,12 @@
 // Create / edit an offer: a typed code or an automatic offer (no code), value (percent, amount, free shipping or
 // buy X get Y), items in scope, conditions, limits, schedule; live preview on a sample basket and conflict check.
 // Unsaved input is kept for the session (navigating away does not lose it). Editing a live offer is reviewed in a Modal.
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { ArrowLeft, Pause, Play, ReceiptText, SearchX, Sparkles, Ticket } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
-import { link, navigate } from '../../../core/router';
+import { link, navigate, replace, useRoute } from '../../../core/router';
+import { couponPrefill } from '../../merchant/prefill';
 import { parseMoney } from '../../merchant/catalog';
 import { couponsStore, productsStore } from '../../merchant/stores';
 import { logAction } from '../../merchant/stores';
@@ -35,7 +36,17 @@ export default function CouponEditor({ code, auto }: { code: string; auto?: bool
   const isNew = code === 'new';
   const base = isNew ? undefined : all.find((c) => c.code === code);
   const initial = base ? draftFromCoupon(base) : emptyDraft(undefined, !!auto);
-  const d = drafts[code] ?? initial;
+  // A prefilled link (assistant, search commands) becomes this session's draft once, then leaves the URL.
+  const route = useRoute();
+  const prefill = isNew ? couponPrefill(route.query) : null;
+  const [fromLink] = useState(() => !!prefill);
+  const qs = route.query.toString();
+  useEffect(() => {
+    if (!prefill) return;
+    draftsStore.set((x) => ({ ...x, [code]: { ...initial, ...prefill } }));
+    replace(link(`/dashboard/marketing/coupons/${code}`, { auto: route.query.get('auto') ?? undefined }));
+  }, [qs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const d = (prefill ? { ...initial, ...prefill } : drafts[code]) ?? initial;
   const dirty = JSON.stringify(d) !== JSON.stringify(initial);
   const [tried, setTried] = useState(false);
   // Start on the first sample the offer applies to, so a scoped or buy-X-get-Y offer shows its effect at once.
@@ -128,7 +139,8 @@ export default function CouponEditor({ code, auto }: { code: string; auto?: bool
           </ul>
         </Modal>
       )}
-      {drafts[code] && dirty && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We kept your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard')}</Button>} />}
+      {fromLink && dirty ? <Alert tone="info" title={tx('مسودة معبّأة مسبقًا: راجع القيم ثم احفظ', 'Prefilled draft: review the values, then save')}>{tx('لا يُفعَّل شيء ولا يُرسل للعملاء حتى تحفظه وتفعّله.', 'Nothing is active or sent to customers until you save and activate it.')}</Alert>
+        : drafts[code] && dirty && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We kept your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard')}</Button>} />}
       {!canManage && <Locked>{tx('دورك يعرض الكوبون فقط.', 'Your role can only view this coupon.')}</Locked>}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
