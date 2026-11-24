@@ -192,7 +192,8 @@ export function CouponBox({ idp = 'sf-coupon', products }: { idp?: string; produ
   couponsStore.use();
   const [code, setCode] = useState(cart.coupon ?? '');
   const [open, setOpen] = useState(!!cart.coupon);
-  const res = couponResult(cart, products);
+  // Only a typed code is shown here; an automatic offer appears as a discount line in the totals.
+  const res = cart.coupon ? couponResult(cart, products) : undefined;
   const ok = res?.status === 'valid';
   if (!open && !res) {
     return <button type="button" onClick={() => setOpen(true)} className={cn('text-sm', LINK)}>{t.haveCoupon}</button>;

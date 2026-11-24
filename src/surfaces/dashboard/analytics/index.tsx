@@ -1,23 +1,28 @@
-// Analytics (blueprint pp. 27–28, skill ch. 03 analytics). Period of complete days with an equal-period comparison,
-// metric definitions, "no data" kept apart from zero, a primary chart with a table, and breakdowns by channel,
-// product and city. Money settlement lives in Finance, not here. View only: rules live in ./model.ts.
-import { useMemo, type ReactNode } from 'react';
-import { Lock, Wallet, ShoppingBag, Receipt, MousePointerClick, Eye, BarChart3, PackageOpen, MapPin, Store } from 'lucide-react';
+// Reports & analytics (blueprint pp. 27–28, skill ch. 03 analytics, owner requirement 4, BP-P03-ANA-001…011).
+// Overview plus eight reports (sales, funnel, products, customers, channels, coupons, carts, payments), each with a
+// period (preset or custom), a comparison (previous period or same period last year), a definition per number,
+// "no data" kept apart from zero, CSV from every table, and saved views. Money settlement lives in Finance.
+// View only: rules live in ./model.ts, ./reports.ts and ./range.ts.
+import { useMemo, useState, type ReactNode } from 'react';
+import { Lock, Wallet, ShoppingBag, Receipt, MousePointerClick, Eye, BarChart3, PackageOpen, MapPin, Store, Download, Bookmark, X } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { formatMoney } from '../../../core/format';
 import { link, replace, type Route } from '../../../core/router';
-import { ordersStore, productsStore, testStore } from '../../merchant/stores';
+import { cartsStore, couponsStore, financeStore, ordersStore, productsStore, testStore } from '../../merchant/stores';
 import { canSee } from '../../merchant/perms';
-import { Badge, Card, CardHeader, Delta, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
-import { PageHeader, Switch } from '../../../ds/kit';
+import { Badge, Button, Card, CardHeader, Delta, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
+import { Field, Input, Modal, PageHeader, Tabs, useToast } from '../../../ds/kit';
 import { AreaChart } from '../../../ds/charts';
 import { productPhoto } from '../model/media';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
-import {
-  byChannel, chartPoints, dailyRows, figures, history, parseMetric, parsePeriod, periodOrders, periodProducts, topCities,
-  type ChartMetric, type Figure,
-} from './model';
+import { downloadCsv } from '../finance/download';
+import { byChannel, figuresFor, history, overviewCsv, parseMetric, periodProducts, rangePoints, rangeRows, topCities, type ChartMetric, type Figure } from './model';
+import { compareRange, ordersIn, periodQuery, readCompare, readPeriod, type CompareMode, type Preset, type Range } from './range';
+import { REPORTS, REPORT_LABEL, buildReport, isReport, parseProductSort, type Inputs, type ReportId } from './reports';
+import { PeriodBar, useDay } from './period';
+import { ReportView } from './report-view';
+import { addView, checkViewName, currentView, removeView, viewQuery, viewsStore, type ViewError } from './views';
 
 const href = (q?: Record<string, string | undefined>) => link('/dashboard/analytics', q);
 
@@ -33,57 +38,162 @@ export default function Analytics({ route }: { route: Route }) {
   return <Page route={route} />;
 }
 
+type Tab = 'overview' | ReportId;
+
 function Page({ route }: { route: Route }) {
   const tx = useTx();
   const { lang } = useLang();
   const state = useDashState();
+  const role = testStore.use().role;
   const allOrders = ordersStore.use();
   const products = productsStore.use();
-  const full = useMemo(history, []);
-  const period = parsePeriod(route.query.get('period'));
-  const cmp = route.query.get('cmp') !== 'off';
-  const metric = parseMetric(route.query.get('metric'));
-  const qs = (o: Record<string, string | undefined>) => ({ period: period === 30 ? undefined : String(period), cmp: cmp ? undefined : 'off', metric: metric === 'net' ? undefined : metric, ...o });
+  const carts = cartsStore.use();
+  const coupons = couponsStore.use();
+  const fin = financeStore.use();
+  const full = useMemo(() => history(), []);
+  const q = route.query;
+  const rp = q.get('report');
+  const tab: Tab = isReport(rp) ? rp : 'overview';
+  const per = readPeriod(q);
+  const cmp = readCompare(q);
+  const metric = parseMetric(q.get('metric'));
+  const sort = parseProductSort(q.get('sort'));
   const empty = state === 'empty';
-  const series = empty ? [] : full;
-  const orders = empty ? [] : allOrders;
+  const c = compareRange(per.range, cmp);
+  const qs = (o: Record<string, string | undefined> = {}, keep = true) => ({
+    report: tab === 'overview' ? undefined : tab, ...periodQuery(per.preset, per.range, cmp),
+    metric: keep && metric !== 'net' ? metric : undefined, sort: keep && sort !== 'best' ? sort : undefined, ...o,
+  });
+  const go = (o: Record<string, string | undefined>) => replace(href(qs(o)));
+  const day = useDay();
 
-  const f = figures(series, period);
-  const compare = cmp && f.comparable;
-  const rows = dailyRows(series, period);
-  const po = periodOrders(orders, period);
-  const channels = byChannel(po);
-  const cities = topCities(po);
-  const top = periodProducts(po);
-
-  const loc = lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB';
-  const day = (iso: string, withYear = false) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(loc, { day: 'numeric', month: 'short', ...(withYear ? { year: 'numeric' } : {}), timeZone: 'UTC' });
-  const wday = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(loc, { weekday: 'short', timeZone: 'UTC' });
-  const range = f.range.from && f.range.to ? `${day(f.range.from)} – ${day(f.range.to, true)}` : '';
-  const prevRange = f.range.prevFrom && f.range.prevTo ? `${day(f.range.prevFrom)} – ${day(f.range.prevTo)}` : '';
-  const money = (v: number) => `${formatMoney(v)} ${tx('ر.س', 'SAR')}`;
-
+  const presets: { value: Preset; label: string }[] = [
+    { value: '7', label: tx('7 أيام', '7 days') }, { value: '30', label: tx('30 يومًا', '30 days') }, { value: '90', label: tx('90 يومًا', '90 days') },
+    { value: 'mtd', label: tx('هذا الشهر', 'This month') }, { value: 'custom', label: tx('مخصص', 'Custom') },
+  ];
   const header = (
     <div className="space-y-4">
-      <PageHeader title={tx('التحليلات', 'Analytics')}
-        description={range ? tx(`${range} · أيام مكتملة بتوقيت الرياض · كل القنوات`, `${range} · complete days, Riyadh time · all channels`) : tx('أيام مكتملة بتوقيت الرياض', 'Complete days, Riyadh time')}
-        actions={<LinkButton variant="secondary" href={sectionHref('finance')}><Wallet className="size-4" aria-hidden="true" />{tx('التحصيل والتحويلات', 'Payouts & fees')}</LinkButton>} />
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <Segmented label={tx('الفترة', 'Period')} value={String(period) as '7' | '30' | '90'} onChange={(v) => replace(href(qs({ period: v === '30' ? undefined : v })))}
-          options={[{ value: '7', label: tx('7 أيام', '7 days') }, { value: '30', label: tx('30 يومًا', '30 days') }, { value: '90', label: tx('90 يومًا', '90 days') }]} />
-        <label className="flex items-center gap-2 text-[13px] font-medium text-fg">
-          <Switch checked={cmp} onChange={(v) => replace(href(qs({ cmp: v ? undefined : 'off' })))} label={tx('قارن بالفترة السابقة', 'Compare with previous period')} />
-          <span>{tx('قارن', 'Compare')}{compare && prevRange && <span className="font-normal text-muted"> · {prevRange}</span>}</span>
-        </label>
-      </div>
+      <PageHeader title={tx('التقارير والتحليلات', 'Reports & analytics')}
+        description={tx('أيام مكتملة بتوقيت الرياض · ريال سعودي', 'Complete days, Riyadh time · Saudi riyal')}
+        actions={<>
+          {state === 'live' && <SaveView route={route} />}
+          <LinkButton variant="secondary" href={sectionHref('finance')}><Wallet className="size-4" aria-hidden="true" />{tx('التحصيل والتحويلات', 'Payouts & fees')}</LinkButton>
+        </>} />
+      <PeriodBar presets={presets} preset={per.preset} range={per.range} cmp={cmp} urlError={per.error}
+        onPreset={(p) => go(p === 'custom' ? { period: 'custom', from: per.range.from, to: per.range.to } : { period: p === '30' ? undefined : p, from: undefined, to: undefined })}
+        onCustom={(r) => go({ period: 'custom', from: r.from, to: r.to })}
+        onCompare={(m) => go({ cmp: m === 'prev' ? undefined : m })} />
+      <SavedViews route={route} />
     </div>
   );
   if (state === 'loading') return <div className="space-y-6" aria-busy="true">{header}<AnalyticsSkeleton /></div>;
   if (state === 'error') return (
     <div className="space-y-6">{header}
-      <Card><ErrorState as="h2" title={tx('تعذّر تحميل التحليلات', 'Analytics could not load')} onRetry={() => setDashState('live')}>{tx('طلباتك ومبيعاتك لم تتأثر. المرجع SIM-ANA-503.', 'Your orders and sales are unaffected. Ref SIM-ANA-503.')}</ErrorState></Card>
+      <Card><ErrorState as="h2" title={tx('تعذّر تحميل التقارير', 'Reports could not load')} onRetry={() => setDashState('live')}>{tx('طلباتك ومبيعاتك لم تتأثر. المرجع SIM-ANA-503.', 'Your orders and sales are unaffected. Ref SIM-ANA-503.')}</ErrorState></Card>
     </div>
   );
+
+  const tabs = (['overview', ...REPORTS] as Tab[]).map((t) => ({
+    href: href({ ...qs({}, false), report: t === 'overview' ? undefined : t }),
+    label: t === 'overview' ? tx('نظرة عامة', 'Overview') : REPORT_LABEL[t][lang], current: tab === t,
+  }));
+  const inputs: Inputs = { orders: empty ? [] : allOrders, series: empty ? [] : full, products, carts: empty ? [] : carts, coupons: empty ? [] : coupons, txs: empty ? [] : fin.txs, names: canSee(role, 'customers') };
+
+  return (
+    <div className="space-y-6">
+      {header}
+      <Tabs label={tx('التقارير', 'Reports')} items={tabs} />
+      {tab === 'overview'
+        ? <Overview series={inputs.series} orders={inputs.orders} range={per.range} cmp={cmp} compare={c} metric={metric} empty={empty} go={go} qs={qs} />
+        : <ReportView rep={buildReport(tab, inputs, per.range, c, { sort })} range={per.range} cmp={cmp} compareOn={cmp !== 'off'}
+            extra={tab === 'products' ? (
+              <Segmented label={tx('الترتيب', 'Sort')} value={sort} onChange={(v) => go({ sort: v === 'best' ? undefined : v })}
+                options={[{ value: 'best', label: tx('الأكثر مبيعًا', 'Best selling') }, { value: 'worst', label: tx('الأقل مبيعًا', 'Lowest selling') }, { value: 'margin', label: tx('الأعلى هامشًا', 'Highest margin') }]} />
+            ) : undefined} />}
+      {tab !== 'overview' && !empty && <p className="text-xs text-subtle">{tx(`الفترة ${day(per.range.from)} – ${day(per.range.to, true)}. الأرقام بيانات تجريبية للمعاينة.`, `Period ${day(per.range.from)} – ${day(per.range.to, true)}. Figures are demo data for this preview.`)}</p>}
+    </div>
+  );
+}
+
+/* ---------- Saved views ---------- */
+
+function SaveView({ route }: { route: Route }) {
+  const tx = useTx();
+  const toast = useToast();
+  const views = viewsStore.use();
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState('');
+  const [err, setErr] = useState<ViewError | null>(null);
+  const cur = currentView(views, route.query);
+  const msg: Record<ViewError, string> = { empty: tx('اكتب اسمًا', 'Enter a name'), long: tx('40 حرفًا كحد أقصى', '40 characters at most'), taken: tx('يوجد عرض بهذا الاسم', 'A view with this name exists'), full: tx('وصلت للحد (12 عرضًا). احذف عرضًا أولًا.', 'Limit reached (12 views). Delete one first.') };
+  const save = () => {
+    const e = checkViewName(name, views);
+    if (e) { setErr(e); return; }
+    viewsStore.set((l) => addView(l, name, viewQuery(route.query), 'owner', new Date().toISOString()));
+    toast({ tone: 'ok', text: tx(`حُفظ العرض «${name.trim()}»`, `View “${name.trim()}” saved`) });
+    setOpen(false); setName('');
+  };
+  if (cur) return <Badge tone="brand" icon={<Bookmark className="size-3.5" aria-hidden="true" />}>{cur.name}</Badge>;
+  return (
+    <>
+      <Button variant="secondary" onClick={() => { setOpen(true); setErr(null); }}><Bookmark className="size-4" aria-hidden="true" />{tx('احفظ العرض', 'Save view')}</Button>
+      {open && (
+        <Modal title={tx('حفظ العرض', 'Save view')} description={tx('يحفظ التقرير والفترة والمقارنة والترتيب.', 'Keeps the report, period, comparison and sort.')} onClose={() => setOpen(false)}
+          footer={<><Button variant="secondary" onClick={() => setOpen(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={save}>{tx('احفظ', 'Save')}</Button></>}>
+          <Field label={tx('اسم العرض', 'View name')} error={err ? msg[err] : null}>
+            {(p) => <Input {...p} autoFocus value={name} maxLength={60} onChange={(e) => { setName(e.target.value); setErr(null); }} onKeyDown={(e) => { if (e.key === 'Enter') save(); }} placeholder={tx('مثال: مبيعات الشهر مقابل العام الماضي', 'e.g. Monthly sales vs last year')} />}
+          </Field>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+function SavedViews({ route }: { route: Route }) {
+  const tx = useTx();
+  const toast = useToast();
+  const views = viewsStore.use();
+  if (!views.length) return null;
+  const cur = currentView(views, route.query);
+  return (
+    <nav aria-label={tx('العروض المحفوظة', 'Saved views')} className="flex flex-wrap items-center gap-2">
+      <span className="text-xs font-medium text-muted">{tx('عروضك:', 'Your views:')}</span>
+      {views.map((v) => (
+        <span key={v.id} className={cn('inline-flex h-8 items-center rounded-full border text-[13px] font-medium', cur?.id === v.id ? 'border-brand-300 bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'border-border bg-surface text-fg')}>
+          <a href={`#/dashboard/analytics${v.query ? `?${v.query}` : ''}`} aria-current={cur?.id === v.id ? 'page' : undefined} className="ps-3 pe-1 hover:underline">{v.name}</a>
+          <button type="button" aria-label={tx(`احذف العرض ${v.name}`, `Delete view ${v.name}`)} className="grid size-7 place-items-center rounded-full text-subtle hover:text-fg"
+            onClick={() => { const before = viewsStore.get(); viewsStore.set((l) => removeView(l, v.id)); toast({ tone: 'info', text: tx(`حُذف «${v.name}»`, `“${v.name}” deleted`), action: { label: tx('تراجع', 'Undo'), run: () => viewsStore.set(before) } }); }}>
+            <X className="size-3.5" aria-hidden="true" />
+          </button>
+        </span>
+      ))}
+    </nav>
+  );
+}
+
+/* ---------- Overview ---------- */
+
+function Overview({ series, orders, range, cmp, compare: c, metric, empty, go, qs }: {
+  series: ReturnType<typeof history>; orders: ReturnType<typeof ordersStore.get>; range: Range; cmp: CompareMode; compare: Range | null; metric: ChartMetric; empty: boolean;
+  go: (o: Record<string, string | undefined>) => void; qs: (o?: Record<string, string | undefined>, keep?: boolean) => Record<string, string | undefined>;
+}) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const toast = useToast();
+  const products = productsStore.use();
+  const day = useDay();
+  const f = figuresFor(series, range, c);
+  const compareOn = cmp !== 'off' && f.comparable;
+  const rows = rangeRows(series, range, c);
+  const po = ordersIn(orders, range);
+  const channels = byChannel(po);
+  const cities = topCities(po);
+  const top = periodProducts(po);
+  const loc = lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB';
+  const wday = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(loc, { weekday: 'short', timeZone: 'UTC' });
+  const money = (v: number) => `${formatMoney(v)} ${tx('ر.س', 'SAR')}`;
+  const reportHref = (id: ReportId) => href({ ...qs({}, false), report: id });
+  const exportDays = () => { downloadCsv(`lak-analytics-daily-${range.from}-${range.to}.csv`, overviewCsv(rows)); toast({ tone: 'ok', text: tx(`نُزّل ${rows.length} يوم`, `${rows.length} days downloaded`) }); };
 
   const DEF: Record<Figure['id'], { label: string; hint: string; icon: ReactNode }> = {
     net: { label: tx('صافي المبيعات', 'Net sales'), hint: tx('المبيعات بعد الخصومات والاستردادات، شامل الضريبة، قبل الرسوم والتكلفة. ليست ربحًا.', 'Sales after discounts and refunds, VAT included, before fees and costs. Not profit.'), icon: <Wallet className="size-5" /> },
@@ -93,11 +203,12 @@ function Page({ route }: { route: Route }) {
     sessions: { label: tx('الزيارات', 'Visits'), hint: tx('جلسات المتجر المسجلة. يوم بلا بيانات لا يُحسب صفرًا.', 'Recorded store sessions. A day without data is not counted as zero.'), icon: <Eye className="size-5" /> },
   };
   const partial = f.coverage.known < f.coverage.days;
+  const REPORT_OF: Record<Figure['id'], ReportId> = { net: 'sales', orders: 'sales', aov: 'sales', conversion: 'funnel', sessions: 'funnel' };
 
   return (
     <div className="space-y-6">
-      {header}
-      {cmp && !f.comparable && !empty && <p className="text-xs text-muted">{tx('لا مقارنة: السجل أقصر من فترتين متساويتين.', 'No comparison: history is shorter than two equal periods.')}</p>}
+      {cmp !== 'off' && !f.comparable && !empty && <p className="text-xs text-muted">{tx('لا مقارنة: السجل لا يغطي فترة المقارنة كاملة.', 'No comparison: history does not cover the whole comparison period.')}</p>}
+      {!f.covered && !empty && <p className="text-xs text-amber-700 dark:text-amber-400">{tx('السجل اليومي لا يغطي الفترة كاملة.', 'Daily history does not cover the whole period.')}</p>}
 
       <section aria-label={tx('مؤشرات الفترة', 'Period figures')} className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
         {f.list.map((x, i) => {
@@ -106,16 +217,17 @@ function Page({ route }: { route: Route }) {
           const val = empty ? null : show(x.value);
           const coverageNote = (x.id === 'conversion' || x.id === 'sessions') && partial && !empty;
           return (
-            <div key={x.id} className={cn('rounded-2xl border border-border bg-surface p-4 sm:p-5', i === 4 && 'col-span-2 lg:col-span-1')}>
+            <div key={x.id} className={cn('flex flex-col rounded-2xl border border-border bg-surface p-4 sm:p-5', i === 4 && 'col-span-2 lg:col-span-1')}>
               <div className="flex items-start justify-between gap-2">
                 <p className="flex items-center gap-1 text-[13px] font-medium text-muted">{d.label}<InfoHint>{d.hint}</InfoHint></p>
                 <span className="hidden size-9 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted sm:grid" aria-hidden="true">{d.icon}</span>
               </div>
               <p className="mt-1 text-xl font-bold tracking-tight text-fg tabular-nums sm:text-2xl">{val ?? <span className="text-base font-semibold text-muted">{tx('لا بيانات', 'No data')}</span>}</p>
               <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-subtle">
-                {compare && !empty && (x.delta !== null ? <><Delta v={x.delta} /><span className="text-muted">{tx('مقابل', 'vs')} {show(x.prev)}</span></> : x.value !== null && <span className="text-muted">{tx('لا مقارنة عادلة', 'No fair comparison')}</span>)}
+                {compareOn && !empty && (x.delta !== null ? <><Delta v={x.delta} /><span className="text-muted">{tx('مقابل', 'vs')} {show(x.prev)}</span></> : x.value !== null && <span className="text-muted">{tx('لا مقارنة عادلة', 'No fair comparison')}</span>)}
                 {coverageNote && <Badge tone="amber">{tx(`${f.coverage.known} من ${f.coverage.days} أيام`, `${f.coverage.known} of ${f.coverage.days} days`)}</Badge>}
               </div>
+              {!empty && <a href={reportHref(REPORT_OF[x.id])} className="mt-auto pt-2 text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('التقرير', 'Report')}</a>}
             </div>
           );
         })}
@@ -125,11 +237,11 @@ function Page({ route }: { route: Route }) {
         <Card className="lg:col-span-2" aria-labelledby="h-chart">
           <CardHeader id="h-chart" title={metric === 'net' ? tx('صافي المبيعات يوميًا', 'Net sales per day') : tx('الطلبات يوميًا', 'Orders per day')}
             hint={tx('أيام مكتملة فقط؛ اليوم الحالي لا يُحتسب. الرسم متاح كجدول.', 'Complete days only; today is excluded. The chart is also available as a table.')}
-            action={<Segmented label={tx('المؤشر', 'Metric')} value={metric} onChange={(v: ChartMetric) => replace(href(qs({ metric: v === 'net' ? undefined : v })))}
+            action={<Segmented label={tx('المؤشر', 'Metric')} value={metric} onChange={(v: ChartMetric) => go({ metric: v === 'net' ? undefined : v })}
               options={[{ value: 'net', label: tx('المبيعات', 'Sales') }, { value: 'orders', label: tx('الطلبات', 'Orders') }]} />} />
           <div className="px-5 pb-5">
-            {empty || series.length === 0 ? <EmptyState icon={<BarChart3 className="size-6" aria-hidden="true" />} title={tx('لا بيانات بعد', 'No data yet')}>{tx('يظهر الرسم بعد أول يوم مكتمل فيه مبيعات.', 'The chart appears after your first complete day with sales.')}</EmptyState>
-              : <AreaChart rtl={lang === 'ar'} points={chartPoints(series, period, metric).map((p) => ({ key: p.key, label: day(p.key), value: p.value }))} format={(v) => (metric === 'net' ? money(v) : tx(`${v} طلب`, `${v} orders`))} />}
+            {empty || rows.length === 0 ? <EmptyState icon={<BarChart3 className="size-6" aria-hidden="true" />} title={tx('لا بيانات بعد', 'No data yet')}>{tx('يظهر الرسم بعد أول يوم مكتمل فيه مبيعات.', 'The chart appears after your first complete day with sales.')}</EmptyState>
+              : <AreaChart rtl={lang === 'ar'} points={rangePoints(series, range, metric).map((p) => ({ key: p.key, label: day(p.key), value: p.value }))} format={(v) => (metric === 'net' ? money(v) : tx(`${v} طلب`, `${v} orders`))} />}
           </div>
         </Card>
 
@@ -144,7 +256,7 @@ function Page({ route }: { route: Route }) {
                 </div>
                 <p className="mt-2 flex items-center gap-3 text-xs text-muted"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-brand-500/60" aria-hidden="true" />{tx('متوفرة', 'Available')}</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-amber-400/70" aria-hidden="true" />{tx('لا بيانات', 'No data')}</span></p>
                 {f.coverage.missing.length > 0 && (
-                  <ul className="mt-4 flex flex-wrap gap-1.5">{f.coverage.missing.map((d) => <li key={d}><Badge tone="amber">{day(d)}</Badge></li>)}</ul>
+                  <ul className="mt-4 flex flex-wrap gap-1.5">{f.coverage.missing.slice(0, 12).map((d) => <li key={d}><Badge tone="amber">{day(d)}</Badge></li>)}{f.coverage.missing.length > 12 && <li><Badge>+{f.coverage.missing.length - 12}</Badge></li>}</ul>
                 )}
                 {rows.some((r) => r.orders === 0) && <p className="mt-4 rounded-xl bg-surface-2 px-3 py-2 text-xs text-muted">{tx('أيام بصفر طلبات هي صفر فعلي (المتجر كان في الصيانة)، وليست نقصًا في البيانات.', 'Days with zero orders are a true zero (store in maintenance), not missing data.')}</p>}
               </>
@@ -155,29 +267,29 @@ function Page({ route }: { route: Route }) {
 
       <Card aria-labelledby="h-days">
         <CardHeader id="h-days" title={tx('يومًا بيوم', 'Day by day')} hint={tx('«لا بيانات» تعني أن المصدر لم يرسل رقمًا لذلك اليوم؛ «0» تعني أنه لم يحدث شيء.', '“No data” means the source sent nothing for that day; “0” means nothing happened.')}
-          action={<span className="text-xs text-muted tabular-nums">{tx(`${rows.length} يوم`, `${rows.length} days`)}</span>} />
+          action={<Button size="sm" variant="secondary" onClick={exportDays} disabled={!rows.length}><Download className="size-4" aria-hidden="true" />CSV</Button>} />
         {rows.length === 0 ? <EmptyState icon={<BarChart3 className="size-6" aria-hidden="true" />} title={tx('لا بيانات بعد', 'No data yet')} /> : (
           <div className="scrollbar-thin max-h-[420px] overflow-auto border-t border-border">
-            <table className="w-full min-w-[560px] text-sm">
+            <table className="w-full text-sm">
               <caption className="sr-only">{tx('الأرقام اليومية للفترة', 'Daily figures for the period')}</caption>
               <thead className="sticky top-0 z-10 bg-surface text-xs text-muted shadow-[0_1px_0_var(--border)]">
                 <tr>
                   <th scope="col" className="px-5 py-3 text-start font-semibold">{tx('اليوم', 'Day')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{tx('الطلبات', 'Orders')}</th>
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{tx('صافي المبيعات', 'Net sales')}</th>
-                  {compare && <th scope="col" className="hidden px-4 py-3 text-end font-semibold md:table-cell">{tx('اليوم المقابل', 'Matching day')}</th>}
-                  <th scope="col" className="px-4 py-3 text-end font-semibold">{tx('الزيارات', 'Visits')}</th>
+                  <th scope="col" className="px-3 py-3 text-end font-semibold">{tx('الطلبات', 'Orders')}</th>
+                  <th scope="col" className="px-3 py-3 text-end font-semibold">{tx('صافي المبيعات', 'Net sales')}</th>
+                  {compareOn && <th scope="col" className="hidden px-3 py-3 text-end font-semibold md:table-cell">{cmp === 'yoy' ? tx('اليوم نفسه العام الماضي', 'Same day last year') : tx('اليوم المقابل', 'Matching day')}</th>}
+                  <th scope="col" className="hidden px-3 py-3 text-end font-semibold sm:table-cell">{tx('الزيارات', 'Visits')}</th>
                   <th scope="col" className="px-5 py-3 text-end font-semibold">{tx('التحويل', 'Conversion')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
                 {rows.map((r) => (
                   <tr key={r.date} className="hover:bg-surface-2/50">
-                    <th scope="row" className="px-5 py-2.5 text-start font-medium text-fg"><span className="text-subtle">{wday(r.date)}</span> {day(r.date)}</th>
-                    <td className="px-4 py-2.5 text-end tabular-nums">{r.orders}</td>
-                    <td className="px-4 py-2.5 text-end"><Money v={r.net} /></td>
-                    {compare && <td className="hidden px-4 py-2.5 text-end text-muted md:table-cell">{r.prev ? <Money v={r.prev.net} /> : '—'}</td>}
-                    <td className="px-4 py-2.5 text-end tabular-nums">{r.sessions === null ? <Badge tone="amber">{tx('لا بيانات', 'No data')}</Badge> : r.sessions.toLocaleString('en-US')}</td>
+                    <th scope="row" className="whitespace-nowrap px-5 py-2.5 text-start font-medium text-fg"><span className="text-subtle">{wday(r.date)}</span> {day(r.date)}</th>
+                    <td className="px-3 py-2.5 text-end tabular-nums">{r.orders}</td>
+                    <td className="px-3 py-2.5 text-end"><Money v={r.net} /></td>
+                    {compareOn && <td className="hidden px-3 py-2.5 text-end text-muted md:table-cell">{r.prev ? <Money v={r.prev.net} /> : '—'}</td>}
+                    <td className="hidden px-3 py-2.5 text-end tabular-nums sm:table-cell">{r.sessions === null ? <Badge tone="amber">{tx('لا بيانات', 'No data')}</Badge> : r.sessions.toLocaleString('en-US')}</td>
                     <td className="px-5 py-2.5 text-end tabular-nums">{r.conversion === null ? <span className="text-muted">—</span> : <bdi dir="ltr">{r.conversion}%</bdi>}</td>
                   </tr>
                 ))}
@@ -189,17 +301,18 @@ function Page({ route }: { route: Route }) {
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card aria-labelledby="h-ch">
-          <CardHeader id="h-ch" title={tx('المبيعات حسب القناة', 'Sales by channel')} hint={tx('من الطلبات المدفوعة في الأيام المكتملة للفترة. النسبة من قيمة الطلبات.', 'From paid orders on the complete days of the period. Share of order value.')} />
+          <CardHeader id="h-ch" title={tx('المبيعات حسب القناة', 'Sales by channel')} hint={tx('من الطلبات المدفوعة في أيام الفترة. النسبة من قيمة الطلبات.', 'From paid orders on the days of the period. Share of order value.')}
+            action={<a href={reportHref('channels')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('التقرير', 'Report')}</a>} />
           {po.length === 0 ? <EmptyState icon={<Store className="size-6" aria-hidden="true" />} title={tx('لا طلبات في الفترة', 'No orders in this period')} /> : (
             <ul className="space-y-4 px-5 pb-5">
-              {channels.map((c) => (
-                <li key={c.channel}>
+              {channels.map((ch) => (
+                <li key={ch.channel}>
                   <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                    <span className="font-medium text-fg">{c.channel === 'online' ? tx('المتجر الإلكتروني', 'Online store') : c.channel === 'market' ? tx('سوق لك', 'LAK marketplace') : tx('تطبيق المتجر', 'Store app')}</span>
-                    <span className="tabular-nums text-muted">{c.share}%</span>
+                    <span className="font-medium text-fg">{ch.channel === 'online' ? tx('المتجر الإلكتروني', 'Online store') : ch.channel === 'market' ? tx('سوق لك', 'LAK marketplace') : tx('تطبيق المتجر', 'Store app')}</span>
+                    <span className="tabular-nums text-muted">{ch.share}%</span>
                   </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-brand-gradient" style={{ width: `${c.share}%` }} /></div>
-                  <p className="mt-1 flex justify-between text-xs text-muted"><span>{tx(`${c.orders} طلب`, `${c.orders} orders`)}</span><Money v={c.revenue} /></p>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-brand-gradient" style={{ width: `${ch.share}%` }} /></div>
+                  <p className="mt-1 flex justify-between text-xs text-muted"><span>{tx(`${ch.orders} طلب`, `${ch.orders} orders`)}</span><Money v={ch.revenue} /></p>
                 </li>
               ))}
             </ul>
@@ -208,7 +321,7 @@ function Page({ route }: { route: Route }) {
 
         <Card aria-labelledby="h-prod">
           <CardHeader id="h-prod" title={tx('الأكثر مبيعًا', 'Top products')} hint={tx('حسب قيمة المبيعات في الطلبات المدفوعة للفترة.', 'By sales value in paid orders of the period.')}
-            action={<a href={sectionHref('products')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المنتجات', 'Products')}</a>} />
+            action={<a href={reportHref('products')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('التقرير', 'Report')}</a>} />
           {top.length === 0 ? <EmptyState icon={<PackageOpen className="size-6" aria-hidden="true" />} title={tx('لا مبيعات في الفترة', 'No sales in this period')} /> : (
             <ol className="space-y-1 px-3 pb-4">
               {top.map((p, i) => (
@@ -227,27 +340,31 @@ function Page({ route }: { route: Route }) {
         </Card>
 
         <Card aria-labelledby="h-city">
-          <CardHeader id="h-city" title={tx('أعلى المدن', 'Top cities')} hint={tx('مدينة الشحن في الطلبات المدفوعة للفترة، بلا تفاصيل العنوان.', 'Shipping city of paid orders in the period, without address detail.')} />
+          <CardHeader id="h-city" title={tx('أعلى المدن', 'Top cities')} hint={tx('مدينة الشحن في الطلبات المدفوعة للفترة، بلا تفاصيل العنوان.', 'Shipping city of paid orders in the period, without address detail.')}
+            action={cities.length ? <button type="button" className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300" onClick={() => { downloadCsv(`lak-cities-${range.from}-${range.to}.csv`, citiesCsv(cities, lang)); toast({ tone: 'ok', text: tx('نُزّلت المدن', 'Cities downloaded') }); }}>CSV</button> : undefined} />
           {cities.length === 0 ? <EmptyState icon={<MapPin className="size-6" aria-hidden="true" />} title={tx('لا طلبات في الفترة', 'No orders in this period')} /> : (
             <ol className="space-y-3 px-5 pb-5">
-              {cities.map((c) => (
-                <li key={c.key}>
+              {cities.map((ci) => (
+                <li key={ci.key}>
                   <div className="flex items-baseline justify-between gap-2 text-[13px]">
-                    <span className="flex items-center gap-1.5 font-medium text-fg"><MapPin className="size-3.5 text-subtle" aria-hidden="true" />{c.name[lang]}</span>
-                    <Money v={c.revenue} className="text-muted" />
+                    <span className="flex items-center gap-1.5 font-medium text-fg"><MapPin className="size-3.5 text-subtle" aria-hidden="true" />{ci.name[lang]}</span>
+                    <Money v={ci.revenue} className="text-muted" />
                   </div>
-                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-sky-500/70" style={{ width: `${c.share}%` }} /></div>
-                  <p className="mt-1 text-xs text-muted tabular-nums">{tx(`${c.orders} طلب · ${c.share}%`, `${c.orders} orders · ${c.share}%`)}</p>
+                  <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-surface-2"><div className="h-full rounded-full bg-sky-500/70" style={{ width: `${ci.share}%` }} /></div>
+                  <p className="mt-1 text-xs text-muted tabular-nums">{tx(`${ci.orders} طلب · ${ci.share}%`, `${ci.orders} orders · ${ci.share}%`)}</p>
                 </li>
               ))}
             </ol>
           )}
         </Card>
       </div>
-      {!empty && <p className="text-xs text-subtle">{tx(`المؤشرات اليومية من إحصاءات المتجر، والتوزيعات من ${po.length} طلبًا مدفوعًا في دفتر الطلبات للفترة نفسها.`, `Daily figures come from store statistics; breakdowns from ${po.length} paid orders in the order book for the same period.`)}</p>}
+      {!empty && <p className="text-xs text-subtle">{tx(`المؤشرات اليومية من إحصاءات المتجر، والتوزيعات من ${po.length} طلبًا مدفوعًا في دفتر الطلبات للفترة نفسها. بيانات تجريبية.`, `Daily figures come from store statistics; breakdowns from ${po.length} paid orders in the order book for the same period. Demo data.`)}</p>}
     </div>
   );
 }
+
+const citiesCsv = (cities: ReturnType<typeof topCities>, lang: 'ar' | 'en') =>
+  ['city,orders,value_sar,share_pct', ...cities.map((c) => `"${c.name[lang]}",${c.orders},${(c.revenue / 100).toFixed(2)},${c.share}`)].join('\r\n') + '\r\n';
 
 function AnalyticsSkeleton() {
   return (

@@ -11,7 +11,7 @@ import {
   type Address, type Cart, type CityId, type Draft, type Order, type Outcome, type PayEvent, type PayMethod, type Product, type ShipId,
 } from './domain';
 import {
-  cartWeight, couponUses, matchCustomer, nextStoreRef, phoneKey, standardFor, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
+  autoOfferResult, cartWeight, couponUses, matchCustomer, scopedResult, nextStoreRef, phoneKey, standardFor, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
   withMerchant, type StoreConfig,
 } from './bridge';
 
@@ -78,11 +78,12 @@ export function checkoutCustomerId(): string | undefined {
 }
 
 export function couponResult(cart: Cart, products: Product[]) {
-  if (!cart.coupon) return undefined;
+  // No code typed: the merchant's best automatic offer (buy X get Y, category discount…) applies on its own.
+  if (!cart.coupon) return autoOfferResult(couponsStore.get(), pricedLines(cart, products), productsStore.get(), Date.now());
   const code = cart.coupon.trim().toUpperCase();
   const uses = couponUses(merchantOrders.get(), checkoutCustomerId(), code);
   const list = couponsStore.get().map((c) => toStoreCoupon(c, c.code === code ? uses : 0));
-  return evaluateCoupon(cart.coupon, pricedLines(cart, products), list, Date.now());
+  return scopedResult(evaluateCoupon(cart.coupon, pricedLines(cart, products), list, Date.now()), couponsStore.get(), pricedLines(cart, products), productsStore.get());
 }
 
 export function buildDraft(): Draft {

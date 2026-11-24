@@ -10,11 +10,11 @@ describe('list and run log', () => {
   it('finds the newest run and counts outcomes per automation', () => {
     expect(lastRun(runs, 'AU-11')?.id).toBe('RUN-901');
     expect(lastRun(runs, 'AU-99')).toBeNull();
-    expect(runCounts(runs, 'AU-11')).toEqual({ succeeded: 1, failed: 1, skipped: 3 });
-    expect(runCounts(runs)).toEqual({ succeeded: 2, failed: 1, skipped: 3 });
+    expect(runCounts(runs, 'AU-11')).toEqual({ succeeded: 1, failed: 2, skipped: 3 });
+    expect(runCounts(runs)).toEqual({ succeeded: 2, failed: 2, skipped: 3 });
   });
   it('filters by outcome and automation', () => {
-    expect(filterRuns(runs, { outcome: 'failed' }).map((r) => r.id)).toEqual(['RUN-898']);
+    expect(filterRuns(runs, { outcome: 'failed' }).map((r) => r.id)).toEqual(['RUN-898', 'RUN-895']);
     expect(filterRuns(runs, { automation: 'AU-12' }).map((r) => r.id)).toEqual(['RUN-896']);
     expect(filterRuns(runs, {}).length).toBe(runs.length);
   });

@@ -1,17 +1,25 @@
 // Growth domain: coupons, abandoned-cart audience, automations dry-run, and analytics series.
 // Deterministic fixtures; nothing is sent or charged.
-import { people, seeded, type Channel, type L } from './domain';
+import { people, seeded, type Channel, type L, type Order } from './domain';
 
 /* ---------- Coupons ---------- */
 
-export type CouponType = 'percent' | 'fixed' | 'freeShip';
+export type CouponType = 'percent' | 'fixed' | 'freeShip' | 'bogo';
 export type CouponStatus = 'active' | 'paused' | 'draft' | 'expired';
+/** Which items an offer counts: everything, some categories (English category name) or some products (product id). */
+export interface OfferScope { kind: 'all' | 'category' | 'product'; ids: string[] }
 export interface Coupon {
   code: string; type: CouponType;
-  /** Percent (1–90) for percent coupons, halalas for fixed. Ignored for free shipping. */
+  /** Percent (1–90) for percent coupons, halalas for fixed. Ignored for free shipping and buy-X-get-Y. */
   value: number;
   minSpend: number; limitTotal: number | null; limitPerCustomer: number | null; used: number;
   starts: string; ends: string | null; status: CouponStatus;
+  /** Automatic offer: applied at checkout without a code (the code is its internal name). Absent = typed code. */
+  auto?: boolean;
+  /** Items the discount counts. Absent = all items. */
+  scope?: OfferScope;
+  /** Buy-X-get-Y: for every `buy` units in scope, the next `get` cheapest units are `pct`% off (100 = free). */
+  bogo?: { buy: number; get: number; pct: number };
 }
 
 export function couponFixtures(): Coupon[] {
@@ -20,31 +28,47 @@ export function couponFixtures(): Coupon[] {
     { code: 'SHIPFREE', type: 'freeShip', value: 0, minSpend: 30000, limitTotal: 500, limitPerCustomer: null, used: 118, starts: '2026-11-01', ends: '2026-11-30', status: 'active' },
     { code: 'NOV50', type: 'fixed', value: 5000, minSpend: 40000, limitTotal: 200, limitPerCustomer: 1, used: 200, starts: '2026-11-01', ends: '2026-11-30', status: 'active' },
     { code: 'RAMADAN15', type: 'percent', value: 15, minSpend: 0, limitTotal: 1000, limitPerCustomer: 2, used: 0, starts: '2027-02-15', ends: '2027-03-20', status: 'draft' },
+    // Automatic offer (no code): buy 2 fragrance items, the cheapest third is free. A draft until the merchant activates it.
+    { code: 'FRAGRANCE3', type: 'bogo', value: 0, minSpend: 0, limitTotal: null, limitPerCustomer: null, used: 0, starts: '2026-11-24', ends: '2026-12-31', status: 'draft', auto: true, scope: { kind: 'category', ids: ['Fragrance'] }, bogo: { buy: 2, get: 1, pct: 100 } },
   ];
 }
 
-export interface CouponDraft { code: string; type: CouponType; value: string; minSpend: string; limitTotal: string; limitPerCustomer: string; starts: string; ends: string }
-export type CouponError = 'code' | 'codeTaken' | 'value' | 'percent' | 'money' | 'limit' | 'dates';
+export interface CouponDraft {
+  code: string; type: CouponType; value: string; minSpend: string; limitTotal: string; limitPerCustomer: string; starts: string; ends: string;
+  auto?: boolean; scopeKind?: OfferScope['kind']; scopeIds?: string[]; buy?: string; get?: string; getPct?: string;
+}
+export type CouponError = 'code' | 'codeTaken' | 'value' | 'percent' | 'money' | 'limit' | 'dates' | 'scope' | 'bogo';
 
 export function validateCoupon(d: CouponDraft, taken: string[], parseMoney: (s: string) => number | null): Record<string, CouponError> {
   const e: Record<string, CouponError> = {};
   if (!/^[A-Z0-9]{4,16}$/.test(d.code)) e.code = 'code';
   else if (taken.includes(d.code)) e.code = 'codeTaken';
-  if (d.type === 'percent') { const v = Number(d.value); if (!Number.isInteger(v) || v < 1 || v > 90) e.value = 'percent'; }
+  if (d.type === 'percent') { const v = Number(toLatin(d.value)); if (!Number.isInteger(v) || v < 1 || v > 90) e.value = 'percent'; }
   if (d.type === 'fixed') { const v = parseMoney(d.value); if (v === null || v === 0) e.value = 'money'; }
   if (d.minSpend.trim() && parseMoney(d.minSpend) === null) e.minSpend = 'money';
   for (const k of ['limitTotal', 'limitPerCustomer'] as const) {
-    if (d[k].trim()) { const v = Number(d[k]); if (!Number.isInteger(v) || v < 1) e[k] = 'limit'; }
+    if (d[k].trim()) { const v = Number(toLatin(d[k])); if (!Number.isInteger(v) || v < 1) e[k] = 'limit'; }
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d.starts) || (d.ends && (!/^\d{4}-\d{2}-\d{2}$/.test(d.ends) || d.ends < d.starts))) e.dates = 'dates';
+  if (d.scopeKind && d.scopeKind !== 'all' && !(d.scopeIds ?? []).length) e.scope = 'scope';
+  if (d.type === 'bogo') {
+    const b = Number(toLatin(d.buy ?? '')), g = Number(toLatin(d.get ?? '')), p = Number(toLatin(d.getPct ?? ''));
+    if (![b, g].every((x) => Number.isInteger(x) && x >= 1 && x <= 10) || !Number.isInteger(p) || p < 1 || p > 100) e.value = 'bogo';
+  }
   return e;
 }
 
+/** Arabic-Indic digits typed by the merchant read as Latin digits. */
+export const toLatin = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0)).trim();
+
 export function couponFromDraft(d: CouponDraft, parseMoney: (s: string) => number | null): Coupon {
   return {
-    code: d.code, type: d.type, value: d.type === 'percent' ? Number(d.value) : d.type === 'fixed' ? parseMoney(d.value) ?? 0 : 0,
-    minSpend: d.minSpend.trim() ? parseMoney(d.minSpend) ?? 0 : 0, limitTotal: d.limitTotal.trim() ? Number(d.limitTotal) : null,
-    limitPerCustomer: d.limitPerCustomer.trim() ? Number(d.limitPerCustomer) : null, used: 0, starts: d.starts, ends: d.ends || null, status: 'draft',
+    code: d.code, type: d.type, value: d.type === 'percent' ? Number(toLatin(d.value)) : d.type === 'fixed' ? parseMoney(d.value) ?? 0 : 0,
+    minSpend: d.minSpend.trim() ? parseMoney(d.minSpend) ?? 0 : 0, limitTotal: d.limitTotal.trim() ? Number(toLatin(d.limitTotal)) : null,
+    limitPerCustomer: d.limitPerCustomer.trim() ? Number(toLatin(d.limitPerCustomer)) : null, used: 0, starts: d.starts, ends: d.ends || null, status: 'draft',
+    ...(d.auto ? { auto: true } : {}),
+    ...(d.scopeKind && d.scopeKind !== 'all' ? { scope: { kind: d.scopeKind, ids: [...(d.scopeIds ?? [])] } } : {}),
+    ...(d.type === 'bogo' ? { bogo: { buy: Number(toLatin(d.buy ?? '1')), get: Number(toLatin(d.get ?? '1')), pct: Number(toLatin(d.getPct ?? '100')) } } : {}),
   };
 }
 
@@ -67,16 +91,98 @@ export function applyCoupon(c: Coupon, s: SampleOrder, today = '2026-11-24') {
   return { block, discount, shippingOff, total: s.subtotal - discount + s.shipping - shippingOff, before: s.subtotal + s.shipping };
 }
 
+/* ---------- Offers: scope, buy X get Y, automatic ---------- */
+
+/** One basket line as an offer sees it. `category` is the product's English category name. */
+export interface OfferLine { productId: string; category: string; qty: number; unit: number }
+
+export const inScope = (c: Coupon, l: OfferLine) =>
+  !c.scope || c.scope.kind === 'all' || (c.scope.kind === 'category' ? c.scope.ids.includes(l.category) : c.scope.ids.includes(l.productId));
+
+/**
+ * Discount of an offer on basket lines, ignoring dates and limits. Percent and fixed count only items in scope;
+ * buy-X-get-Y sorts the units in scope from dearest to cheapest and, in each full group of buy+get, takes the
+ * `get` cheapest units `pct`% off. Free shipping removes the shipping charge.
+ */
+export function offerDiscount(c: Coupon, lines: OfferLine[], shipping = 0) {
+  const scoped = lines.filter((l) => inScope(c, l));
+  const eligible = scoped.reduce((s, l) => s + l.qty * l.unit, 0);
+  let discount = 0, freeUnits = 0;
+  if (c.type === 'percent') discount = Math.floor((eligible * c.value) / 100);
+  else if (c.type === 'fixed') discount = Math.min(c.value, eligible);
+  else if (c.type === 'bogo' && c.bogo) {
+    const units = scoped.flatMap((l) => Array.from({ length: l.qty }, () => l.unit)).sort((a, b) => b - a);
+    const size = c.bogo.buy + c.bogo.get;
+    for (let g = 0; g + size <= units.length; g += size) {
+      const free = units.slice(g + c.bogo.buy, g + size);
+      freeUnits += free.length;
+      discount += free.reduce((s, u) => s + Math.floor((u * c.bogo!.pct) / 100), 0);
+    }
+  }
+  return { eligible, discount, shippingOff: c.type === 'freeShip' && eligible > 0 ? shipping : 0, freeUnits, units: scoped.reduce((s, l) => s + l.qty, 0) };
+}
+
+export type OfferBlock = CouponBlock | 'scope' | 'qty';
+/** The offer on a basket as checkout would apply it today, with the first reason it does not. */
+export function applyOffer(c: Coupon, lines: OfferLine[], s: { shipping: number; customerUses: number }, today = '2026-11-24') {
+  const subtotal = lines.reduce((a, l) => a + l.qty * l.unit, 0);
+  const base = applyCoupon(c, { subtotal, shipping: s.shipping, customerUses: s.customerUses }, today);
+  const d = offerDiscount(c, lines, s.shipping);
+  let block: OfferBlock | null = base.block;
+  if (!block && d.eligible === 0) block = 'scope';
+  if (!block && c.type === 'bogo' && c.bogo && d.units < c.bogo.buy + c.bogo.get) block = 'qty';
+  const discount = block ? 0 : d.discount;
+  const shippingOff = block ? 0 : d.shippingOff;
+  return { block, discount, shippingOff, freeUnits: block ? 0 : d.freeUnits, eligible: d.eligible, total: subtotal - discount + s.shipping - shippingOff, before: subtotal + s.shipping, subtotal };
+}
+
+/** The best automatic offer for a basket (largest saving), or null. Automatic offers do not stack. */
+export function bestAutoOffer(list: Coupon[], lines: OfferLine[], s: { shipping: number; customerUses?: number }, today = '2026-11-24') {
+  let best: { coupon: Coupon; saving: number; r: ReturnType<typeof applyOffer> } | null = null;
+  for (const c of list) {
+    if (!c.auto) continue;
+    const r = applyOffer(c, lines, { shipping: s.shipping, customerUses: s.customerUses ?? 0 }, today);
+    const saving = r.discount + r.shippingOff;
+    if (!r.block && saving > 0 && (!best || saving > best.saving)) best = { coupon: c, saving, r };
+  }
+  return best;
+}
+
 /* ---------- Abandoned carts ---------- */
 
-export interface Cart { id: string; customer: L; value: number; hoursAgo: number; emailConsent: boolean; smsConsent: boolean; purchased: boolean; optedOut: boolean; contactedByAutomation: boolean }
+export interface CartItem { sku: string; name: L; qty: number; unit: number }
+export interface Cart {
+  id: string; customer: L; value: number; hoursAgo: number; emailConsent: boolean; smsConsent: boolean; purchased: boolean; optedOut: boolean; contactedByAutomation: boolean;
+  /** Customer record (C-…) and the items left in the cart. Value = sum of items. */
+  customerId?: string; items?: CartItem[];
+  /** Set when a recovery message led to the order (simulated attribution). */
+  recovered?: { campaign: string; revenue: number; discount: number; coupon?: string };
+}
+const CART_ITEMS: CartItem[] = [
+  { sku: 'ABY-LIN-BLA-M', name: { ar: 'عباية سوداء مطرّزة', en: 'Embroidered black abaya' }, qty: 1, unit: 29000 },
+  { sku: 'SHL-SLK-01', name: { ar: 'شال حرير موغا', en: 'Muga silk stole' }, qty: 1, unit: 9800 },
+  { sku: 'OUD-100', name: { ar: 'زجاجة عطر كوبالت', en: 'Cobalt perfume bottle' }, qty: 1, unit: 12900 },
+  { sku: 'BAG-LTH-01', name: { ar: 'حقيبة جلد بنية', en: 'Tan leather handbag' }, qty: 1, unit: 42000 },
+  { sku: 'WLT-LTH-01', name: { ar: 'محفظة جلد', en: 'Leather wallet' }, qty: 1, unit: 16100 },
+  { sku: 'COF-SET-01', name: { ar: 'دلّة وفناجين قهوة', en: 'Dallah and coffee cups' }, qty: 1, unit: 24000 },
+  { sku: 'MAT-PRY-01', name: { ar: 'سجادة صلاة', en: 'Prayer mat' }, qty: 1, unit: 8900 },
+  { sku: 'BKH-MAM-01', name: { ar: 'بخور معمول فاخر', en: 'Premium mamoul bakhoor' }, qty: 2, unit: 6500 },
+];
 export function cartFixtures(): Cart[] {
   const ppl = people();
   const r = seeded(7);
-  return Array.from({ length: 48 }, (_, i) => ({
-    id: `CRT-${3100 + i}`, customer: ppl[(i * 7) % ppl.length].name, value: 5000 + Math.floor(r() * 60) * 1000, hoursAgo: 1 + Math.floor(r() * 96),
-    emailConsent: r() < 0.7, smsConsent: r() < 0.45, purchased: r() < 0.12, optedOut: r() < 0.06, contactedByAutomation: r() < 0.15,
-  }));
+  const ri = seeded(23);
+  return Array.from({ length: 48 }, (_, i) => {
+    const n = 1 + Math.floor(ri() * 3);
+    const items = Array.from({ length: n }, (_, k) => CART_ITEMS[(i * 3 + k * 5) % CART_ITEMS.length]).filter((x, k, a) => a.findIndex((y) => y.sku === x.sku) === k);
+    const p = (i * 7) % ppl.length;
+    r(); // the draw that used to set a random value: kept so consent and status fields stay as before
+    return {
+      id: `CRT-${3100 + i}`, customer: ppl[p].name, value: items.reduce((s, x) => s + x.qty * x.unit, 0), hoursAgo: 1 + Math.floor(r() * 96),
+      emailConsent: r() < 0.7, smsConsent: r() < 0.45, purchased: r() < 0.12, optedOut: r() < 0.06, contactedByAutomation: r() < 0.15,
+      customerId: `C-${1001 + p}`, items,
+    };
+  });
 }
 export type MsgChannel = 'email' | 'sms';
 export type Exclusion = 'purchased' | 'optedOut' | 'tooRecent' | 'automation' | 'noConsent';
@@ -103,8 +209,8 @@ export const simSendFails = (c: Cart) => c.id.endsWith('7');
 
 /* ---------- Automations ---------- */
 
-export type Trigger = 'cartAbandoned' | 'lowStock' | 'orderLate';
-export type CondField = 'cartValue' | 'stockBelow' | 'hoursLate' | 'channel';
+export type Trigger = 'cartAbandoned' | 'lowStock' | 'orderLate' | 'customerCreated' | 'orderDelivered' | 'backInStock';
+export type CondField = 'cartValue' | 'stockBelow' | 'hoursLate' | 'channel' | 'orderTotal' | 'subscribers';
 export interface Condition { field: CondField; value: string }
 export type ActionKind = 'sendEmail' | 'sendSms' | 'createTask' | 'notifyStaff';
 export type AutoStatus = 'active' | 'paused' | 'draft';
@@ -112,13 +218,22 @@ export interface Automation {
   id: string; name: L; trigger: Trigger; conditions: Condition[]; waitHours: number; actions: ActionKind[];
   status: AutoStatus; version: number; dryRunVersion: number | null; owner: L;
 }
-export const TRIGGER_FIELDS: Record<Trigger, CondField[]> = { cartAbandoned: ['cartValue', 'channel'], lowStock: ['stockBelow'], orderLate: ['hoursLate', 'channel'] };
-export const TRIGGER_ACTIONS: Record<Trigger, ActionKind[]> = { cartAbandoned: ['sendEmail', 'sendSms'], lowStock: ['createTask', 'notifyStaff'], orderLate: ['notifyStaff', 'createTask'] };
+export const TRIGGER_FIELDS: Record<Trigger, CondField[]> = {
+  cartAbandoned: ['cartValue', 'channel'], lowStock: ['stockBelow'], orderLate: ['hoursLate', 'channel'],
+  customerCreated: ['channel'], orderDelivered: ['orderTotal', 'channel'], backInStock: ['subscribers'],
+};
+export const TRIGGER_ACTIONS: Record<Trigger, ActionKind[]> = {
+  cartAbandoned: ['sendEmail', 'sendSms'], lowStock: ['createTask', 'notifyStaff'], orderLate: ['notifyStaff', 'createTask'],
+  customerCreated: ['sendEmail', 'sendSms'], orderDelivered: ['sendEmail', 'sendSms'], backInStock: ['sendEmail', 'sendSms', 'notifyStaff'],
+};
 
 export const TEMPLATES: Automation[] = [
   { id: 'tpl-cart', name: { ar: 'تذكير بالسلة المتروكة', en: 'Abandoned cart reminder' }, trigger: 'cartAbandoned', conditions: [{ field: 'cartValue', value: '100' }], waitHours: 4, actions: ['sendEmail'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
   { id: 'tpl-stock', name: { ar: 'مخزون منخفض ينشئ مهمة', en: 'Low stock creates a task' }, trigger: 'lowStock', conditions: [{ field: 'stockBelow', value: '3' }], waitHours: 0, actions: ['createTask'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
   { id: 'tpl-late', name: { ar: 'طلب متأخر ينبّه الموظف', en: 'Late order alerts staff' }, trigger: 'orderLate', conditions: [{ field: 'hoursLate', value: '24' }], waitHours: 0, actions: ['notifyStaff'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
+  { id: 'tpl-welcome', name: { ar: 'ترحيب بالعميل الجديد', en: 'Welcome a new customer' }, trigger: 'customerCreated', conditions: [], waitHours: 1, actions: ['sendEmail'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
+  { id: 'tpl-review', name: { ar: 'طلب تقييم بعد التسليم', en: 'Ask for a review after delivery' }, trigger: 'orderDelivered', conditions: [], waitHours: 72, actions: ['sendEmail'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
+  { id: 'tpl-back', name: { ar: 'تنبيه عودة المخزون', en: 'Back-in-stock alert' }, trigger: 'backInStock', conditions: [{ field: 'subscribers', value: '1' }], waitHours: 0, actions: ['sendEmail'], status: 'draft', version: 1, dryRunVersion: null, owner: { ar: 'المالك', en: 'Owner' } },
 ];
 
 export function automationFixtures(): Automation[] {
@@ -128,7 +243,7 @@ export function automationFixtures(): Automation[] {
   ];
 }
 
-export interface SampleEvent { id: string; trigger: Trigger; label: L; cartValue?: number; consent?: boolean; stock?: number; hoursLate?: number; channel?: Channel; alreadyMessaged?: boolean }
+export interface SampleEvent { id: string; trigger: Trigger; label: L; cartValue?: number; consent?: boolean; stock?: number; hoursLate?: number; channel?: Channel; alreadyMessaged?: boolean; orderTotal?: number; subscribers?: number }
 export const SAMPLE_EVENTS: SampleEvent[] = [
   { id: 'E1', trigger: 'cartAbandoned', label: { ar: 'سلة بقيمة 420 ر.س، عميلة موافقة على البريد', en: 'SAR 420 cart, customer consented to email' }, cartValue: 42000, consent: true, channel: 'online' },
   { id: 'E2', trigger: 'cartAbandoned', label: { ar: 'سلة بقيمة 90 ر.س', en: 'SAR 90 cart' }, cartValue: 9000, consent: true, channel: 'online' },
@@ -138,6 +253,12 @@ export const SAMPLE_EVENTS: SampleEvent[] = [
   { id: 'E6', trigger: 'lowStock', label: { ar: 'شال حرير: متاح 8 في جدة', en: 'Silk shawl: 8 available in Jeddah' }, stock: 8 },
   { id: 'E7', trigger: 'orderLate', label: { ar: 'طلب مدفوع لم يُجهّز منذ 30 ساعة', en: 'Paid order unfulfilled for 30 hours' }, hoursLate: 30, channel: 'online' },
   { id: 'E8', trigger: 'orderLate', label: { ar: 'طلب مدفوع لم يُجهّز منذ 6 ساعات', en: 'Paid order unfulfilled for 6 hours' }, hoursLate: 6, channel: 'market' },
+  { id: 'E9', trigger: 'customerCreated', label: { ar: 'عميلة جديدة من المتجر، موافقة على البريد', en: 'New store customer, consented to email' }, consent: true, channel: 'online' },
+  { id: 'E10', trigger: 'customerCreated', label: { ar: 'عميل جديد من التطبيق، بلا موافقة تسويق', en: 'New app customer, no marketing consent' }, consent: false, channel: 'app' },
+  { id: 'E11', trigger: 'orderDelivered', label: { ar: 'طلب بقيمة 450 ر.س سُلّم اليوم، العميلة موافقة', en: 'SAR 450 order delivered today, customer consented' }, orderTotal: 45000, consent: true, channel: 'online' },
+  { id: 'E12', trigger: 'orderDelivered', label: { ar: 'طلب بقيمة 80 ر.س سُلّم، طُلب تقييمه سابقًا', en: 'SAR 80 order delivered, review already requested' }, orderTotal: 8000, consent: true, alreadyMessaged: true, channel: 'online' },
+  { id: 'E13', trigger: 'backInStock', label: { ar: 'عاد عطر عود ملكي، 12 مشتركًا ينتظرونه', en: 'Royal oud is back, 12 subscribers waiting' }, subscribers: 12, consent: true },
+  { id: 'E14', trigger: 'backInStock', label: { ar: 'عادت محفظة جلد، لا مشتركين', en: 'Leather wallet is back, no subscribers' }, subscribers: 0, consent: true },
 ];
 
 export type SkipReason = 'condition' | 'noConsent' | 'dedup';
@@ -148,6 +269,8 @@ function meets(c: Condition, e: SampleEvent): boolean {
     case 'stockBelow': return (e.stock ?? Infinity) <= n;
     case 'hoursLate': return (e.hoursLate ?? 0) >= n;
     case 'channel': return !c.value || e.channel === c.value;
+    case 'orderTotal': return (e.orderTotal ?? 0) >= n * 100;
+    case 'subscribers': return (e.subscribers ?? 0) >= n;
   }
 }
 /** Evaluate the automation against safe sample events. No side effects: it only reports what would happen. */
@@ -165,7 +288,19 @@ export function dryRun(a: Automation, events: SampleEvent[] = SAMPLE_EVENTS) {
 export const canActivate = (a: Automation) => a.actions.length > 0 && a.dryRunVersion === a.version;
 
 export type RunOutcome = 'succeeded' | 'failed' | 'skipped';
-export interface Run { id: string; automation: string; when: L; subject: L; outcome: RunOutcome; reason: L }
+export interface Run {
+  id: string; automation: string; when: L; subject: L; outcome: RunOutcome; reason: L;
+  /** Epoch ms for runs recorded in this session (fixtures carry only the `when` label). */
+  at?: number;
+  /** 1 for the first attempt; a retry links to the first run of the chain. */
+  attempt?: number; retryOf?: string;
+  /** Whether a failure is worth retrying (provider timeout) or will fail again until fixed (invalid address). */
+  retryable?: boolean;
+  /** Who started it: the flow itself, a retry by staff, or a test run. */
+  by?: string;
+  /** Message cost charged at the test rate (halalas), when a message was handed to the provider. */
+  cost?: number;
+}
 export function runFixtures(): Run[] {
   const R = (id: string, a: string, wAr: string, wEn: string, sAr: string, sEn: string, o: RunOutcome, rAr: string, rEn: string): Run =>
     ({ id, automation: a, when: { ar: wAr, en: wEn }, subject: { ar: sAr, en: sEn }, outcome: o, reason: { ar: rAr, en: rEn } });
@@ -176,8 +311,290 @@ export function runFixtures(): Run[] {
     R('RUN-898', 'AU-11', 'أمس 19:30', 'Yesterday 19:30', 'سلة CRT-3127', 'Cart CRT-3127', 'failed', 'رفض المزود العنوان: بريد غير صالح. لن يُعاد تلقائيًا', 'Provider rejected the address: invalid email. Not retried automatically'),
     R('RUN-897', 'AU-11', 'أمس 16:00', 'Yesterday 16:00', 'سلة CRT-3102', 'Cart CRT-3102', 'skipped', 'وصلته رسالة للسلة نفسها من مسار آخر (منع التكرار)', 'Already messaged for this cart by another flow (deduplicated)'),
     R('RUN-896', 'AU-12', 'قبل 3 أيام', '3 days ago', 'زجاجة عطر كوبالت · الرياض', 'Oud perfume · Riyadh', 'succeeded', 'أُنشئت مهمة إعادة طلب للمخزون', 'Restock task created'),
+    { ...R('RUN-895', 'AU-11', 'قبل 3 أيام', '3 days ago', 'سلة CRT-3115', 'Cart CRT-3115', 'failed', 'انتهت مهلة مزود الإرسال قبل الرد', 'The sending provider timed out before answering'), retryable: true },
+  ].map((r) => (r.outcome === 'failed' && r.retryable === undefined ? { ...r, retryable: false } : r.outcome === 'succeeded' && r.automation === 'AU-11' ? { ...r, cost: TEST_RATE.email } : r));
+}
+
+/* ---------- Run steps and retries ---------- */
+
+export type StepOutcome = 'ok' | 'skipped' | 'failed' | 'notReached';
+export interface RunStep { kind: 'event' | 'conditions' | 'wait' | 'action'; outcome: StepOutcome; action?: ActionKind }
+/**
+ * Per-step outcome of a run, in plain order: event received, conditions, wait, then each action.
+ * A skipped run stops at the step that skipped it; a failed run fails at the first action.
+ */
+export function runSteps(run: Run, a: Pick<Automation, 'actions' | 'waitHours'> | undefined): RunStep[] {
+  const actions = a?.actions.length ? a.actions : (['sendEmail'] as ActionKind[]);
+  const en = run.reason.en.toLowerCase();
+  const skipAt: RunStep['kind'] | null = run.outcome !== 'skipped' ? null
+    : /purchased|during the wait|before the wait/.test(en) ? 'wait' : /consent|dedup|already messaged/.test(en) ? 'action' : 'conditions';
+  const order: RunStep['kind'][] = ['event', 'conditions', 'wait'];
+  const steps: RunStep[] = order.map((k) => ({ kind: k, outcome: skipAt === k ? 'skipped' : skipAt && order.indexOf(k) > order.indexOf(skipAt as typeof k) ? 'notReached' : 'ok' }));
+  actions.forEach((x, i) => {
+    let outcome: StepOutcome = 'ok';
+    if (skipAt === 'action') outcome = i === 0 ? 'skipped' : 'notReached';
+    else if (skipAt) outcome = 'notReached';
+    else if (run.outcome === 'failed') outcome = i === 0 ? 'failed' : 'notReached';
+    steps.push({ kind: 'action', outcome, action: x });
+  });
+  return steps;
+}
+
+export const MAX_ATTEMPTS = 3;
+/** The first run of a retry chain. */
+export const rootOf = (r: Run) => r.retryOf ?? r.id;
+/** Every attempt of a chain, oldest first. */
+export const attemptsOf = (runs: Run[], root: string) => runs.filter((r) => rootOf(r) === root).sort((a, b) => (a.attempt ?? 1) - (b.attempt ?? 1));
+/** The latest attempt of each chain, so a retried failure is not counted twice. */
+export const latestAttempts = (runs: Run[]) => runs.filter((r) => !runs.some((x) => x.id !== r.id && rootOf(x) === rootOf(r) && (x.attempt ?? 1) > (r.attempt ?? 1)));
+
+export type RetryBlock = 'notFailed' | 'superseded' | 'maxAttempts';
+export function retryBlock(runs: Run[], r: Run): RetryBlock | null {
+  if (r.outcome !== 'failed') return 'notFailed';
+  const chain = attemptsOf(runs, rootOf(r));
+  if (chain[chain.length - 1]?.id !== r.id) return 'superseded';
+  if ((r.attempt ?? 1) >= MAX_ATTEMPTS) return 'maxAttempts';
+  return null;
+}
+/** Failed chains that need a person: out of attempts, or a failure that will repeat until its cause is fixed. */
+export const needsFollowUp = (runs: Run[]) =>
+  latestAttempts(runs).filter((r) => r.outcome === 'failed' && ((r.attempt ?? 1) >= MAX_ATTEMPTS || r.retryable === false));
+
+/**
+ * Retry one failed run (simulated). Only the failed step is repeated: steps that succeeded are not run again.
+ * A retryable failure (timeout) succeeds; a permanent one (invalid address) fails again with the same cause.
+ */
+export function retryRun(runs: Run[], id: string, ctx: { now: number; by: string }): { runs: Run[]; run: Run | null } {
+  const r = runs.find((x) => x.id === id);
+  if (!r || retryBlock(runs, r)) return { runs, run: null };
+  const n = Math.max(900, ...runs.map((x) => Number(x.id.replace(/\D/g, '')) || 0)) + 1;
+  const ok = r.retryable === true;
+  const run: Run = {
+    id: `RUN-${n}`, automation: r.automation, subject: r.subject, when: { ar: 'الآن', en: 'Just now' }, at: ctx.now,
+    attempt: (r.attempt ?? 1) + 1, retryOf: rootOf(r), retryable: r.retryable, by: ctx.by,
+    outcome: ok ? 'succeeded' : 'failed',
+    reason: ok ? { ar: 'نجحت إعادة المحاولة: سُلّم لمزود الإرسال (محاكاة)', en: 'Retry succeeded: handed to the sending provider (simulated)' } : r.reason,
+    ...(ok ? { cost: TEST_RATE.email } : {}),
+  };
+  return { runs: [run, ...runs], run };
+}
+
+/* ---------- Loyalty points ---------- */
+
+/** Earn and redeem rules. Points are whole numbers; a point is worth `pointValue` halalas at checkout. */
+export interface LoyaltyRules {
+  enabled: boolean;
+  /** Points per SAR 1 paid (after discount, before shipping is not separated in fixtures: the order total). */
+  earnPerSar: number;
+  pointValue: number;
+  /** Smallest balance that can be used at checkout. */
+  minRedeem: number;
+  /** Largest share of the items subtotal points may pay (%). */
+  maxRedeemPct: number;
+  version: number; by: string; at: string;
+}
+export const loyaltyFixture = (): LoyaltyRules => ({ enabled: true, earnPerSar: 1, pointValue: 5, minRedeem: 200, maxRedeemPct: 30, version: 1, by: 'المالك', at: '2026-10-01' });
+
+export interface PointsTxn { id: string; customerId: string; delta: number; kind: 'earn' | 'redeem' | 'adjust' | 'reverse'; ref?: string; note?: string; at: string; by: string }
+
+export type LoyaltyError = 'earn' | 'value' | 'min' | 'pct';
+export function validateLoyalty(d: { earnPerSar: string; pointValue: string; minRedeem: string; maxRedeemPct: string }): Partial<Record<LoyaltyError, true>> {
+  const n = (x: string) => Number(toLatin(x));
+  const e: Partial<Record<LoyaltyError, true>> = {};
+  if (!Number.isInteger(n(d.earnPerSar)) || n(d.earnPerSar) < 1 || n(d.earnPerSar) > 20) e.earn = true;
+  if (!Number.isInteger(n(d.pointValue)) || n(d.pointValue) < 1 || n(d.pointValue) > 100) e.value = true;
+  if (!Number.isInteger(n(d.minRedeem)) || n(d.minRedeem) < 0) e.min = true;
+  if (!Number.isInteger(n(d.maxRedeemPct)) || n(d.maxRedeemPct) < 1 || n(d.maxRedeemPct) > 100) e.pct = true;
+  return e;
+}
+
+/** Points earned on a paid amount (halalas): whole riyals × points per riyal. */
+export const earnFor = (r: Pick<LoyaltyRules, 'earnPerSar'>, amount: number) => Math.floor(amount / 100) * r.earnPerSar;
+export const pointsBalance = (ledger: PointsTxn[], customerId: string) => ledger.reduce((s, t) => (t.customerId === customerId ? s + t.delta : s), 0);
+
+/**
+ * Record points for paid orders that have none yet (idempotent: one earn entry per order), and take back the
+ * points of confirmed refunds. Points are recorded with the rules in force when they are recorded, so a rule
+ * change applies to new orders only. Orders without a customer record are skipped.
+ */
+export function syncEarned(
+  ledger: PointsTxn[], orders: { ref: string; customer: L; customerId?: string; pay: string; refunds: { id: string; amount: number; status: string }[]; hoursAgo: number }[],
+  customers: { id: string; name: L }[], rules: LoyaltyRules, total: (o: never) => number,
+): PointsTxn[] {
+  if (!rules.enabled) return ledger;
+  const byName = new Map(customers.map((c) => [c.name.en, c.id]));
+  const has = new Set(ledger.map((t) => t.ref));
+  const add: PointsTxn[] = [];
+  for (const o of orders) {
+    if (o.pay === 'failed') continue;
+    const cid = o.customerId ?? byName.get(o.customer.en);
+    if (!cid) continue;
+    if (!has.has(o.ref)) add.push({ id: `PT-${o.ref}`, customerId: cid, delta: earnFor(rules, total(o as never)), kind: 'earn', ref: o.ref, at: o.hoursAgo < 24 ? 'today' : `${Math.floor(o.hoursAgo / 24)}d`, by: 'system' });
+    for (const r of o.refunds) {
+      if (r.status !== 'confirmed' || has.has(r.id)) continue;
+      add.push({ id: `PT-${r.id}`, customerId: cid, delta: -earnFor(rules, r.amount), kind: 'reverse', ref: r.id, at: 'today', by: 'system' });
+    }
+  }
+  return add.length ? [...add, ...ledger] : ledger;
+}
+
+export type RedeemBlock = 'disabled' | 'belowMin' | 'none';
+/** How many points this basket can use, and their value. Points never pay shipping or more than the cap. */
+export function redeemQuote(r: LoyaltyRules, balance: number, subtotal: number, want?: number) {
+  const capValue = Math.floor((subtotal * r.maxRedeemPct) / 100);
+  const maxPoints = Math.max(0, Math.min(balance, Math.floor(capValue / r.pointValue)));
+  const block: RedeemBlock | null = !r.enabled ? 'disabled' : balance < r.minRedeem || balance <= 0 ? 'belowMin' : maxPoints === 0 ? 'none' : null;
+  const points = block ? 0 : Math.max(0, Math.min(maxPoints, want ?? maxPoints));
+  return { block, points, value: points * r.pointValue, maxPoints, capValue, cappedBy: maxPoints < balance ? ('cap' as const) : ('balance' as const) };
+}
+/** Value of every unredeemed point (what the store owes in discounts if all were used). */
+export const pointsLiability = (ledger: PointsTxn[], r: Pick<LoyaltyRules, 'pointValue'>) =>
+  Math.max(0, ledger.reduce((s, t) => s + t.delta, 0)) * r.pointValue;
+
+/* ---------- Gift cards ---------- */
+
+export interface GiftTxn { id: string; kind: 'issue' | 'redeem' | 'disable' | 'enable'; amount: number; ref?: string; by: string; at: string }
+export interface GiftCard {
+  code: string; initial: number; balance: number; to: string; customerId?: string;
+  source: 'manual' | 'order'; orderRef?: string; status: 'active' | 'disabled'; expires: string | null; issued: string; log: GiftTxn[];
+}
+export function giftFixtures(): GiftCard[] {
+  const card = (code: string, initial: number, balance: number, to: string, customerId: string | undefined, issued: string, expires: string | null, status: GiftCard['status'] = 'active'): GiftCard => {
+    const log: GiftTxn[] = [{ id: `${code}-1`, kind: 'issue', amount: initial, by: 'المالك', at: issued }];
+    if (balance < initial) log.unshift({ id: `${code}-2`, kind: 'redeem', amount: initial - balance, ref: '10476', by: 'system', at: issued });
+    return { code, initial, balance, to, customerId, source: 'manual', status, expires, issued, log };
+  };
+  return [
+    card('GC-7Q4K-2M9P', 50000, 50000, 'customer1007@example.test', 'C-1007', '2026-11-02', '2027-11-02'),
+    card('GC-3H8D-6T1R', 20000, 7500, 'customer1013@example.test', 'C-1013', '2026-08-14', '2027-08-14'),
+    card('GC-9W2B-4N7X', 10000, 0, 'customer1020@example.test', 'C-1020', '2026-03-01', '2027-03-01'),
+    card('GC-5J6C-8L3V', 30000, 30000, 'customer1031@example.test', 'C-1031', '2025-06-10', '2026-06-10'),
   ];
 }
+export type GiftState = 'active' | 'used' | 'expired' | 'disabled';
+export const giftState = (g: GiftCard, today = '2026-11-24'): GiftState =>
+  g.status === 'disabled' ? 'disabled' : g.expires && g.expires < today ? 'expired' : g.balance === 0 ? 'used' : 'active';
+
+export type GiftError = 'amount' | 'to' | 'expires';
+export function validateGift(d: { amount: string; to: string; expires: string }, parseMoney: (s: string) => number | null, today = '2026-11-24'): Partial<Record<GiftError, true>> {
+  const e: Partial<Record<GiftError, true>> = {};
+  const v = parseMoney(d.amount);
+  if (v === null || v < 1000 || v > 500000) e.amount = true;
+  if (!/^\S+@\S+\.\S+$/.test(d.to.trim()) && !/^\+?[\d\s٠-٩]{9,15}$/.test(d.to.trim())) e.to = true;
+  if (d.expires && (!/^\d{4}-\d{2}-\d{2}$/.test(d.expires) || d.expires <= today)) e.expires = true;
+  return e;
+}
+/** A new card code that is not in the list: GC- and two groups of four (no 0/O/1/I to avoid misreading). */
+export function newGiftCode(taken: string[], seed: number): string {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const r = seeded(seed);
+  for (;;) {
+    const g = () => Array.from({ length: 4 }, () => A[Math.floor(r() * A.length)]).join('');
+    const code = `GC-${g()}-${g()}`;
+    if (!taken.includes(code)) return code;
+  }
+}
+export function issueGift(list: GiftCard[], d: { amount: number; to: string; customerId?: string; expires: string | null }, ctx: { by: string; today: string; seed: number }): { list: GiftCard[]; card: GiftCard } {
+  const code = newGiftCode(list.map((g) => g.code), ctx.seed);
+  const card: GiftCard = {
+    code, initial: d.amount, balance: d.amount, to: d.to.trim(), customerId: d.customerId, source: 'manual', status: 'active', expires: d.expires, issued: ctx.today,
+    log: [{ id: `${code}-1`, kind: 'issue', amount: d.amount, by: ctx.by, at: ctx.today }],
+  };
+  return { list: [card, ...list], card };
+}
+export type RedeemGiftError = 'disabled' | 'expired' | 'empty' | 'amount';
+/** Use part or all of a card's balance against an order. The amount used never exceeds the balance or the order. */
+export function redeemGift(g: GiftCard, orderTotal: number, ctx: { ref: string; by: string; today: string }): { card: GiftCard; applied: number; error: RedeemGiftError | null } {
+  const st = giftState(g, ctx.today);
+  const error: RedeemGiftError | null = st === 'disabled' ? 'disabled' : st === 'expired' ? 'expired' : g.balance === 0 ? 'empty' : orderTotal <= 0 ? 'amount' : null;
+  if (error) return { card: g, applied: 0, error };
+  const applied = Math.min(g.balance, orderTotal);
+  return {
+    card: { ...g, balance: g.balance - applied, log: [{ id: `${g.code}-${g.log.length + 1}`, kind: 'redeem', amount: applied, ref: ctx.ref, by: ctx.by, at: ctx.today }, ...g.log] },
+    applied, error: null,
+  };
+}
+export function setGiftStatus(g: GiftCard, status: GiftCard['status'], ctx: { by: string; today: string }): GiftCard {
+  return { ...g, status, log: [{ id: `${g.code}-${g.log.length + 1}`, kind: status === 'disabled' ? 'disable' : 'enable', amount: 0, by: ctx.by, at: ctx.today }, ...g.log] };
+}
+/**
+ * Cards bought in the store: one card per gift-card unit in a paid order (the digital gift-card product, SKU GFT-…),
+ * worth the unit price, sent to the buyer. Idempotent by code (GC-<order>-<n>).
+ */
+export function cardsFromOrders(list: GiftCard[], orders: { ref: string; pay: string; customerId?: string; items: { sku: string; qty: number; unit: number }[] }[], today: string): GiftCard[] {
+  const have = new Set(list.map((g) => g.code));
+  const add: GiftCard[] = [];
+  for (const o of orders) {
+    if (o.pay === 'failed') continue;
+    let n = 0;
+    for (const it of o.items) {
+      if (!it.sku.startsWith('GFT-')) continue;
+      for (let k = 0; k < it.qty; k++) {
+        const code = `GC-${o.ref}-${++n}`;
+        if (have.has(code)) continue;
+        add.push({ code, initial: it.unit, balance: it.unit, to: o.customerId ?? '', customerId: o.customerId, source: 'order', orderRef: o.ref, status: 'active', expires: null, issued: today, log: [{ id: `${code}-1`, kind: 'issue', amount: it.unit, ref: o.ref, by: 'system', at: today }] });
+      }
+    }
+  }
+  return add.length ? [...add, ...list] : list;
+}
+/** Unused balance of cards that can still be used: money received that customers may still spend. */
+export const giftLiability = (list: GiftCard[], today = '2026-11-24') => list.filter((g) => giftState(g, today) === 'active').reduce((s, g) => s + g.balance, 0);
+
+/* ---------- Reviews and questions ---------- */
+
+export type ReviewKind = 'review' | 'question';
+export type ReviewStatus = 'pending' | 'published' | 'hidden';
+export interface Review {
+  id: string; kind: ReviewKind; productId: string; customerId?: string; author: L;
+  /** 1–5 for reviews; absent for questions. */
+  rating?: number;
+  text: string; at: string; status: ReviewStatus;
+  /** Bought the product (a paid order on record). */
+  verified: boolean;
+  reply?: { text: string; by: string; at: string };
+  /** Sent to LAK for an abuse check; the review stays hidden meanwhile. */
+  report?: { reason: 'abuse' | 'spam' | 'personal'; by: string; at: string };
+  log: { what: 'published' | 'hidden' | 'replied' | 'reported' | 'restored'; by: string; at: string }[];
+}
+export interface ReviewSettings { products: boolean; moderation: boolean; maskNames: boolean; questions: boolean; questionsSignedIn: boolean; showOnCategory: boolean }
+export const reviewSettingsFixture = (): ReviewSettings => ({ products: true, moderation: true, maskNames: true, questions: true, questionsSignedIn: false, showOnCategory: true });
+
+export function reviewFixtures(): Review[] {
+  const R = (id: string, kind: ReviewKind, productId: string, customerId: string, ar: string, en: string, text: string, at: string, status: ReviewStatus, rating?: number, extra: Partial<Review> = {}): Review =>
+    ({ id, kind, productId, customerId, author: { ar, en }, text, at, status, rating, verified: kind === 'review', log: [], ...extra });
+  return [
+    R('RV-118', 'review', 'p1', 'C-1001', 'سارة العتيبي', 'Sarah Alotaibi', 'التطريز أجمل من الصور، والمقاس مطابق للجدول.', '2026-11-23', 'pending', 5),
+    R('RV-117', 'review', 'p3', 'C-1008', 'محمد القحطاني', 'Mohammed Alqahtani', 'الزجاجة وصلت سليمة لكن الغطاء أصغر مما توقعت.', '2026-11-22', 'pending', 3),
+    R('RV-116', 'review', 'p4', 'C-1015', 'نوف الشهري', 'Nouf Alshehri', 'Great leather, the strap is a bit short for me.', '2026-11-21', 'pending', 4),
+    R('RV-115', 'review', 'p6', 'C-1022', 'عبدالله الدوسري', 'Abdullah Aldossari', 'اتصلوا على 0500000000 للطلب الجماعي!!! أرخص سعر', '2026-11-21', 'pending', 1),
+    R('RV-114', 'review', 'p2', 'C-1029', 'ريم الحربي', 'Reem Alharbi', 'لون ذهبي طبيعي وخفيف جدًا. يستحق.', '2026-11-18', 'published', 5, { log: [{ what: 'published', by: 'فيصل', at: '2026-11-18' }] }),
+    R('RV-113', 'review', 'p1', 'C-1036', 'فهد المطيري', 'Fahad Almutairi', 'تأخر التوصيل يومين، لكن العباية ممتازة.', '2026-11-15', 'published', 4, { reply: { text: 'شكرًا فهد، نعتذر عن التأخير وأبلغنا شركة الشحن.', by: 'المالك', at: '2026-11-15' }, log: [{ what: 'published', by: 'المالك', at: '2026-11-15' }, { what: 'replied', by: 'المالك', at: '2026-11-15' }] }),
+    R('RV-112', 'review', 'p13', 'C-1043', 'لمى العتيبي', 'Lama Alotaibi', 'Lasts all day on my abaya. Strong but elegant.', '2026-11-12', 'published', 5, { log: [{ what: 'published', by: 'المالك', at: '2026-11-12' }] }),
+    R('RV-111', 'review', 'p5', 'C-1050', 'خالد القحطاني', 'Khalid Alqahtani', 'خياطة الحواف بدأت تتفكك بعد شهر.', '2026-11-08', 'hidden', 2, { log: [{ what: 'hidden', by: 'فيصل', at: '2026-11-09' }] }),
+    R('QA-208', 'question', 'p1', 'C-1004', 'سارة الدوسري', 'Sarah Aldossari', 'هل يتوفر مقاس XL قريبًا؟', '2026-11-23', 'pending'),
+    R('QA-207', 'question', 'p13', 'C-1011', 'محمد الحربي', 'Mohammed Alharbi', 'Is this the 50 ml or the 100 ml bottle?', '2026-11-20', 'published', undefined, { reply: { text: '50 ml. The 100 ml size is coming in December.', by: 'المالك', at: '2026-11-20' }, log: [{ what: 'replied', by: 'المالك', at: '2026-11-20' }] }),
+    R('QA-206', 'question', 'p4', 'C-1018', 'نوف المطيري', 'Nouf Almutairi', 'هل الحزام قابل للتعديل؟', '2026-11-19', 'pending'),
+  ];
+}
+
+/** Name as shown publicly: first name and the initial of the family name when masking is on. */
+export function publicName(n: L, mask: boolean): L {
+  if (!mask) return n;
+  const m = (s: string) => { const [f, ...rest] = s.trim().split(/\s+/); const last = rest.join(' ').replace(/^ال/, ''); return last ? `${f} ${last[0]}.` : f; };
+  return { ar: m(n.ar), en: m(n.en) };
+}
+/** What a shopper sees on a product page: published entries only, newest first, with the merchant's reply. */
+export function storeReviews(list: Review[], productId: string, s: ReviewSettings) {
+  const pub = list.filter((r) => r.productId === productId && r.status === 'published');
+  const reviews = s.products ? pub.filter((r) => r.kind === 'review') : [];
+  const questions = s.questions ? pub.filter((r) => r.kind === 'question' && r.reply) : [];
+  const avg = reviews.length ? Math.round((reviews.reduce((a, r) => a + (r.rating ?? 0), 0) / reviews.length) * 10) / 10 : null;
+  const show = (r: Review) => ({ ...r, author: publicName(r.author, s.maskNames) });
+  return { reviews: reviews.map(show), questions: questions.map(show), avg, count: reviews.length };
+}
+/** A review's text that looks like contact details or spam (phone, link, repeated punctuation): flagged for a closer look. */
+export const looksSuspicious = (text: string) => /(\+?9665|05)\d{8}|https?:\/\/|www\.|!!!/.test(text.replace(/\s/g, ''));
 
 /* ---------- Analytics ---------- */
 
@@ -222,4 +639,31 @@ export function change(cur: number | null, prev: number | null): number | null {
 /** Current and previous equal-length periods of complete days. */
 export function periods(series: DayStat[], len: number) {
   return { cur: series.slice(-len), prev: series.slice(-2 * len, -len) };
+}
+
+/* ---------- Coupon redemptions (reports: BP-P03-ANA-009) ---------- */
+
+export interface Redemption { code: string; orderRef: string; hoursAgo: number; discount: number; revenue: number; demo: boolean }
+/**
+ * Coupon uses on orders. Orders placed in the online store carry their real code and discount; the older demo order book
+ * has none, so a fixed-seed demo ledger attributes active coupons to some paid orders (within the coupon dates and
+ * minimum spend). Demo rows are flagged so reports can say where each number comes from.
+ */
+export function couponRedemptions(orders: Order[], coupons: Coupon[], today = '2026-11-24'): Redemption[] {
+  const out: Redemption[] = [];
+  const t0 = Date.parse(`${today}T00:00:00Z`);
+  for (const o of orders) {
+    if (o.pay === 'failed') continue;
+    const sub = o.items.reduce((s, i) => s + i.qty * i.unit, 0);
+    if (o.coupon) { out.push({ code: o.coupon, orderRef: o.ref, hoursAgo: o.hoursAgo, discount: o.discount ?? 0, revenue: sub - (o.discount ?? 0) + o.fee, demo: false }); continue; }
+    const r = seeded(Number(o.ref) || 1)();
+    if (r > 0.14) continue;
+    const day = new Date(t0 - Math.floor(o.hoursAgo / 24) * 86400000).toISOString().slice(0, 10);
+    const live = coupons.filter((c) => c.status !== 'draft' && c.starts <= day && (!c.ends || c.ends >= day) && sub >= c.minSpend);
+    if (!live.length) continue;
+    const c = live[Math.floor(r * 1000) % live.length];
+    const discount = c.type === 'percent' ? Math.round((sub * c.value) / 100) : c.type === 'fixed' ? Math.min(c.value, sub) : o.fee;
+    out.push({ code: c.code, orderRef: o.ref, hoursAgo: o.hoursAgo, discount, revenue: sub + o.fee - discount, demo: true });
+  }
+  return out;
 }

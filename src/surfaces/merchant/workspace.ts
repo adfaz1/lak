@@ -104,6 +104,12 @@ export function providerFixtures(): Provider[] {
     { id: 'stcpay', name: k('STC Pay', 'STC Pay'), kind: k('محفظة', 'Wallet'), minPlan: 'plus', state: 'action_required' },
     { id: 'tabby', name: k('تابي', 'Tabby'), kind: k('اشترِ الآن وادفع لاحقًا', 'Buy now, pay later'), minPlan: 'plus', state: 'not_connected' },
     { id: 'tamara', name: k('تمارا', 'Tamara'), kind: k('اشترِ الآن وادفع لاحقًا', 'Buy now, pay later'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'amex', name: k('أمريكان إكسبريس', 'American Express'), kind: k('بطاقات دولية', 'International cards'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'mispay', name: k('MIS Pay', 'MIS Pay'), kind: k('اشترِ الآن وادفع لاحقًا', 'Buy now, pay later'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'madfu', name: k('مدفوع', 'Madfu'), kind: k('اشترِ الآن وادفع لاحقًا', 'Buy now, pay later'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'emkan', name: k('إمكان', 'Emkan'), kind: k('تمويل المشتريات', 'Purchase financing'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'mokafaa', name: k('مكافأة', 'Mokafaa'), kind: k('الدفع بنقاط الولاء', 'Pay with loyalty points'), minPlan: 'pro', state: 'not_connected' },
+    { id: 'paypal', name: k('PayPal', 'PayPal'), kind: k('محفظة دولية', 'International wallet'), minPlan: 'pro', state: 'not_connected' },
   ];
 }
 
@@ -123,13 +129,34 @@ export const validSlug = (s: string) => /^[a-z0-9]+(-[a-z0-9]+)*$/.test(s) && s.
 export const validHost = (s: string) => /^(?!-)[a-z0-9-]{1,63}(\.[a-z0-9-]{1,63})+$/.test(s.trim().toLowerCase()) && !s.includes('..');
 
 export type PolicyId = 'returns' | 'shipping' | 'privacy' | 'terms';
-export interface Policy { id: PolicyId; text: string; state: 'missing' | 'draft' | 'published' }
-export const policyFixtures = (): Policy[] => [
-  { id: 'returns', state: 'published', text: 'Returns are accepted within 14 days of delivery for unworn items in their original condition.' },
-  { id: 'shipping', state: 'draft', text: 'Orders are prepared within 2 working days.' },
-  { id: 'privacy', state: 'missing', text: '' },
-  { id: 'terms', state: 'missing', text: '' },
-];
+/**
+ * A policy in both store languages. `text` is the working copy the merchant edits; `live` is what shoppers see
+ * (null until first published). Saving a draft never changes `live`. `state` is 'published' while a live text exists.
+ */
+export interface Policy { id: PolicyId; text: L; live: L | null; state: 'missing' | 'draft' | 'published' }
+const pl = (ar: string, en: string): L => ({ ar, en });
+export const policyFixtures = (): Policy[] => {
+  const returns = pl('نقبل الإرجاع خلال 14 يومًا من الاستلام للقطع غير الملبوسة وبحالتها الأصلية.', 'Returns are accepted within 14 days of delivery for unworn items in their original condition.');
+  return [
+    { id: 'returns', state: 'published', text: returns, live: returns },
+    { id: 'shipping', state: 'draft', text: pl('نجهّز الطلبات خلال يومي عمل.', 'Orders are prepared within 2 working days.'), live: null },
+    { id: 'privacy', state: 'missing', text: pl('', ''), live: null },
+    { id: 'terms', state: 'missing', text: pl('', ''), live: null },
+  ];
+};
+/** Policies saved by an earlier version kept one plain string; read them as the same text in both languages. */
+export function normPolicy(p: Policy | (Omit<Policy, 'text' | 'live'> & { text: string | L; live?: L | null })): Policy {
+  const text: L = typeof p.text === 'string' ? { ar: p.text, en: p.text } : p.text;
+  const live = p.live !== undefined ? p.live : p.state === 'published' ? text : null;
+  return { id: p.id, state: p.state, text, live };
+}
+/** The published text a shopper reads in their language, falling back to the other language; '' when unpublished. */
+export function livePolicyText(p: Policy | undefined, lang: 'ar' | 'en'): string {
+  if (!p) return '';
+  const live = normPolicy(p).live;
+  if (!live) return '';
+  return live[lang].trim() || live[lang === 'ar' ? 'en' : 'ar'].trim();
+}
 
 export type NotifyEvent = 'newOrder' | 'paymentFailed' | 'lowStock' | 'payout' | 'review';
 export const NOTIFY_EVENTS: NotifyEvent[] = ['newOrder', 'paymentFailed', 'lowStock', 'payout', 'review'];
@@ -139,7 +166,13 @@ export const notifyFixture = (): Notify => ({
   payout: { email: true, sms: false }, review: { email: false, sms: false },
 });
 
-export interface StoreDetails { name: string; category: string; email: string; phone: string; timezone: string; weightUnit: 'g' | 'kg' }
+export type SocialId = 'instagram' | 'x' | 'tiktok' | 'snapchat' | 'facebook' | 'linkedin' | 'youtube';
+export const SOCIAL_IDS: SocialId[] = ['instagram', 'x', 'tiktok', 'snapchat', 'facebook', 'linkedin', 'youtube'];
+export interface StoreDetails {
+  name: string; category: string; email: string; phone: string; timezone: string; weightUnit: 'g' | 'kg';
+  /** Social profile links shown in the store footer (BP-P03-STP-019). Optional: sessions saved earlier have none. */
+  social?: Partial<Record<SocialId, string>>;
+}
 export const storeFixture = (): StoreDetails => ({ name: 'دار نُوى', category: 'fashion', email: 'owner@darnuwa.test', phone: '+966 5x xxx 0123', timezone: 'Asia/Riyadh', weightUnit: 'kg' });
 export const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
@@ -246,7 +279,11 @@ export function articles(): Article[] {
 
 /* ---------- Customers ---------- */
 
-export interface Customer { id: string; name: L; city: L; email: string; phone: string; consent: { email: boolean; sms: boolean }; since: string }
+export interface Customer {
+  id: string; name: L; city: L; email: string; phone: string; consent: { email: boolean; sms: boolean }; since: string;
+  /** Blocked from placing new orders in this store, with the reason and who decided. */
+  blocked?: { reason: string; by: string; at: string };
+}
 export function customerFixtures(): Customer[] {
   const list = [...people(), { name: { ar: 'لمى الزهراني', en: 'Lama Alzahrani' }, city: { ar: 'الطائف', en: 'Taif' } }];
   return list.map((p, i) => ({
@@ -264,6 +301,48 @@ export function customerStats(c: Customer, orders: Order[]) {
   const spent = paid.reduce((s, o) => s + total(o) - o.refunds.filter((r) => r.status === 'confirmed').reduce((a, r) => a + r.amount, 0), 0);
   return { orders: mine, paidCount: paid.length, spent };
 }
+/* ---------- Custom segments (rules the merchant saves) ---------- */
+
+export type SegField = 'spent' | 'orders' | 'lastDays' | 'city' | 'emailConsent' | 'smsConsent' | 'product';
+export type SegOp = 'gte' | 'lte' | 'is';
+export interface SegRule { field: SegField; op: SegOp; value: string }
+export interface SavedSegment { id: string; name: L; rules: SegRule[]; by: string; at: string }
+export const SEG_FIELDS: SegField[] = ['spent', 'orders', 'lastDays', 'city', 'emailConsent', 'smsConsent', 'product'];
+/** Operators each field takes. Numbers compare; city, consent and product are equality. */
+export const SEG_OPS: Record<SegField, SegOp[]> = { spent: ['gte', 'lte'], orders: ['gte', 'lte'], lastDays: ['lte', 'gte'], city: ['is'], emailConsent: ['is'], smsConsent: ['is'], product: ['is'] };
+const latin = (x: string) => x.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).trim();
+export function segRuleError(r: SegRule): boolean {
+  if (!SEG_OPS[r.field].includes(r.op)) return true;
+  if (r.field === 'spent' || r.field === 'orders' || r.field === 'lastDays') { const n = Number(latin(r.value)); return !/^\d+$/.test(latin(r.value)) || (r.field !== 'spent' && r.field !== 'lastDays' && n < 0); }
+  if (r.field === 'emailConsent' || r.field === 'smsConsent') return r.value !== 'yes' && r.value !== 'no';
+  return !r.value.trim();
+}
+/**
+ * Whether a customer matches every rule. Spend is in riyals (paid orders after confirmed refunds); "last order"
+ * is days since the most recent order (customers with none never match it); product matches a SKU prefix bought.
+ */
+export function matchesRules(c: Customer, st: { orders: Order[]; paidCount: number; spent: number }, rules: SegRule[]): boolean {
+  return rules.every((r) => {
+    const v = latin(r.value);
+    const cmp = (x: number, y: number) => (r.op === 'gte' ? x >= y : x <= y);
+    switch (r.field) {
+      case 'spent': return cmp(st.spent, Number(v) * 100);
+      case 'orders': return cmp(st.paidCount, Number(v));
+      case 'lastDays': {
+        if (!st.orders.length) return false;
+        return cmp(Math.floor(Math.min(...st.orders.map((o) => o.hoursAgo)) / 24), Number(v));
+      }
+      case 'city': return c.city.en.toLowerCase() === v.toLowerCase() || c.city.ar === v;
+      case 'emailConsent': return c.consent.email === (v === 'yes');
+      case 'smsConsent': return c.consent.sms === (v === 'yes');
+      case 'product': return st.orders.some((o) => o.pay !== 'failed' && o.items.some((it) => it.sku.toUpperCase().startsWith(v.toUpperCase())));
+    }
+  });
+}
+export const segmentFixtures = (): SavedSegment[] => [
+  { id: 'SG-1', name: { ar: 'منفقون غابوا 30 يومًا', en: 'Big spenders away 30 days' }, rules: [{ field: 'spent', op: 'gte', value: '2000' }, { field: 'lastDays', op: 'gte', value: '30' }], by: 'المالك', at: '2026-11-10' },
+];
+
 /** Segments are rules over order history and consent; nothing is inferred about age, gender or credit. */
 export function segmentsOf(c: Customer, s: { paidCount: number; spent: number }): Segment[] {
   const out: Segment[] = [];

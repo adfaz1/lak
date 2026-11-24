@@ -4,7 +4,13 @@ import type { Channel, L } from './domain';
 
 export type ProductStatus = 'active' | 'draft' | 'archived';
 export type ProductType = 'physical' | 'digital';
-export interface Media { id: string; label: L; alt: string }
+export interface Media {
+  id: string; label: L; alt: string;
+  /** A local preview (object URL) for an image the merchant picked from their device in this session. */
+  src?: string;
+  /** The colour this image shows, so the storefront can switch to it when that variant is picked. */
+  variant?: string;
+}
 export interface Variant { color: string; size: string; sku: string; price: number }
 export interface Product {
   id: string;
@@ -27,6 +33,8 @@ export interface Product {
   channels: Record<Channel, boolean>;
   category: L;
   version: number;
+  /** Free-form labels used by filters, bulk actions and smart collections. */
+  tags?: string[];
 }
 
 const CH_ALL: Record<Channel, boolean> = { online: true, market: true, app: true };
@@ -62,6 +70,32 @@ export function productFixtures(): Product[] {
     prod('p10', 'بطاقة هدية إلكترونية 100', 'E-gift card 100', 'GFT-100', 10000, { type: 'digital', weight: null, category: cat('هدايا', 'Gifts') }),
     prod('p11', 'تمر مجدول فاخر', 'Premium Medjool dates', 'DAT-BOX-01', 7500, { status: 'draft', category: cat('أغذية', 'Food'), weight: 1000, channels: { online: false, market: false, app: false } }),
     prod('p12', 'وشاح صوف زيتي', 'Olive wool scarf', 'SCF-WOL-01', 11000, { status: 'archived', weight: 250 }),
+    // Added 2026-11-24 so the demo store does not look thin. Existing ids and SKUs above are unchanged.
+    prod('p13', 'عطر عود ملكي 50 مل', 'Royal oud perfume 50 ml', 'OUD-ROY-50', 34500, {
+      compareAt: 39000, cost: 16000, category: cat('عطور', 'Fragrance'), weight: 350,
+      desc: { ar: 'عطر بخلاصة دهن العود الكمبودي مع لمسة ورد طائفي، يدوم طويلًا على الملابس.', en: 'Perfume built on Cambodian oud oil with a touch of Taif rose; long-lasting on fabric.' },
+    }),
+    prod('p14', 'بخور معمول فاخر', 'Premium mamoul bakhoor', 'BKH-MAM-01', 6500, {
+      cost: 2800, category: cat('عطور', 'Fragrance'), weight: 120,
+      desc: { ar: 'معمول بخور معجون بالعود والمسك في علبة 40 غرامًا، يكفي لنحو أربعين جلسة.', en: 'Bakhoor paste blended with oud and musk, 40 g tin, enough for about forty sessions.' },
+    }),
+    prod('p15', 'قميص كتان رجالي', 'Men\'s linen shirt', 'SHR-LIN', 15900, {
+      cost: 7200, colors: ['White', 'Sand'], sizes: ['M', 'L', 'XL'], variants: matrix('SHR-LIN', 15900, ['White', 'Sand'], ['M', 'L', 'XL']), weight: 300,
+      desc: { ar: 'قميص من الكتان الخالص بأكمام طويلة وقصة مريحة، يناسب الصيف والسفر.', en: 'Pure linen shirt with long sleeves and a relaxed cut, made for summer and travel.' },
+    }),
+    prod('p16', 'طقم فناجين خزف', 'Porcelain coffee cup set', 'CUP-POR-06', 9500, {
+      cost: 4100, category: cat('منزل', 'Home'), weight: 900,
+      desc: { ar: 'ستة فناجين قهوة عربية من الخزف الأبيض بحافة ذهبية، آمنة في غسالة الصحون.', en: 'Six white porcelain Arabic coffee cups with a gold rim, dishwasher safe.' },
+    }),
+    prod('p17', 'حقيبة ظهر جلدية', 'Leather backpack', 'BAG-BPK', 52000, {
+      compareAt: 58000, cost: 24000, colors: ['Black', 'Tan'], sizes: [], variants: matrix('BAG-BPK', 52000, ['Black', 'Tan'], ['']).map((v) => ({ ...v, sku: `BAG-BPK-${v.color.slice(0, 3).toUpperCase()}` })),
+      category: cat('حقائب', 'Bags'), weight: 1200,
+      desc: { ar: 'حقيبة ظهر من جلد طبيعي بجيب مبطّن لحاسوب حتى 15 بوصة.', en: 'Genuine-leather backpack with a padded sleeve for laptops up to 15 inches.' },
+    }),
+    prod('p18', 'علبة هدية تمر وقهوة', 'Dates and coffee gift box', 'GFT-BOX-01', 18900, {
+      cost: 9000, category: cat('هدايا', 'Gifts'), weight: 1400,
+      desc: { ar: 'علبة هدية فيها نصف كيلو تمر سكري وقهوة عربية مطحونة 250 غرامًا وبطاقة إهداء.', en: 'Gift box with half a kilo of Sukkari dates, 250 g ground Arabic coffee and a gift card.' },
+    }),
   ];
 }
 
@@ -296,8 +330,8 @@ export function toCsv(rows: (string | number)[][]): string {
 
 /* ---------- Import (QA08) ---------- */
 
-export type ImportField = 'name' | 'sku' | 'price' | 'compareAt' | 'qty' | 'status' | 'ignore';
-export const IMPORT_FIELDS: ImportField[] = ['name', 'sku', 'price', 'compareAt', 'qty', 'status', 'ignore'];
+export type ImportField = 'name' | 'sku' | 'price' | 'compareAt' | 'qty' | 'status' | 'ignore' | 'nameAr' | 'cost' | 'category';
+export const IMPORT_FIELDS: ImportField[] = ['name', 'nameAr', 'sku', 'price', 'compareAt', 'cost', 'qty', 'status', 'category', 'ignore'];
 export const REQUIRED_FIELDS: ImportField[] = ['name', 'sku', 'price'];
 export const TEMPLATE_HEADERS = ['name', 'sku', 'price', 'compare_at_price', 'quantity', 'status'];
 
@@ -306,6 +340,9 @@ export function suggestMapping(headers: string[]): ImportField[] {
     const k = h.toLowerCase();
     if (k.includes('compare')) return 'compareAt';
     if (k.includes('sku')) return 'sku';
+    if (k.includes('cost') || k.includes('تكلفة')) return 'cost';
+    if (k.includes('categor') || k.includes('فئة')) return 'category';
+    if (/name[ _-]?ar|arabic|بالعربية/.test(k)) return 'nameAr';
     if (k.includes('price') || k.includes('سعر')) return 'price';
     if (k.includes('qty') || k.includes('quantity') || k.includes('كمية')) return 'qty';
     if (k.includes('status') || k.includes('حالة')) return 'status';
@@ -322,7 +359,7 @@ export function validateMapping(mapping: ImportField[]): { missing: ImportField[
   };
 }
 
-export type RowProblem = 'nameMissing' | 'skuMissing' | 'price' | 'compareAt' | 'qty' | 'status';
+export type RowProblem = 'nameMissing' | 'skuMissing' | 'price' | 'compareAt' | 'qty' | 'status' | 'cost' | 'category';
 export interface CheckedRow {
   line: number;
   name: string; sku: string; price: number | null; compareAt: number | null; qty: number; status: ProductStatus;
@@ -420,4 +457,147 @@ export function sampleFile(kind: 'large' | 'small', existingSkus: string[]): str
     rows.push([name, sku, price, compare, qty, status]);
   }
   return toCsv(rows);
+}
+
+/* ---------- Categories (tree) and collections ---------- */
+// A product belongs to one category through `product.category` (its name in both languages), so every existing
+// screen and the storefront keep working. Renaming a category renames it on its products too.
+
+export interface Category {
+  id: string;
+  name: L;
+  /** Parent category id; null for a top-level category. One level of nesting. */
+  parent: string | null;
+  slug: string;
+  desc: L;
+  seo: { title: string; desc: string };
+  /** Shown in the storefront menu and listing. Hidden categories keep their products. */
+  visible: boolean;
+  /** Position among its siblings (0 first). */
+  order: number;
+  version: number;
+}
+
+const catFx = (id: string, ar: string, en: string, order: number, parent: string | null = null): Category => ({
+  id, name: { ar, en }, parent, slug: en.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''), desc: { ar: '', en: '' },
+  seo: { title: '', desc: '' }, visible: true, order, version: 1,
+});
+export function categoryFixtures(): Category[] {
+  return [
+    catFx('c-fashion', 'أزياء', 'Fashion', 0), catFx('c-fragrance', 'عطور', 'Fragrance', 1), catFx('c-bags', 'حقائب', 'Bags', 2),
+    catFx('c-home', 'منزل', 'Home', 3), catFx('c-gifts', 'هدايا', 'Gifts', 4), catFx('c-food', 'أغذية', 'Food', 5), catFx('c-general', 'عام', 'General', 6),
+  ];
+}
+
+/** The key products and categories are matched on (the English name, case-insensitive). */
+export const catKey = (c: L) => c.en.trim().toLowerCase();
+export const inCategory = (p: Product, c: Category) => catKey(p.category) === catKey(c.name);
+
+export type CategoryError = 'required' | 'taken' | 'slug' | 'parent';
+/** Names must be unique in both languages (products are matched by name); one level of nesting. */
+export function validateCategory(c: Pick<Category, 'id' | 'name' | 'parent' | 'slug'>, all: Category[]): Partial<Record<'nameAr' | 'nameEn' | 'slug' | 'parent', CategoryError>> {
+  const e: Partial<Record<'nameAr' | 'nameEn' | 'slug' | 'parent', CategoryError>> = {};
+  const others = all.filter((x) => x.id !== c.id);
+  if (!c.name.ar.trim()) e.nameAr = 'required';
+  else if (others.some((x) => x.name.ar.trim() === c.name.ar.trim())) e.nameAr = 'taken';
+  if (!c.name.en.trim()) e.nameEn = 'required';
+  else if (others.some((x) => catKey(x.name) === catKey(c.name))) e.nameEn = 'taken';
+  if (c.slug && !/^[a-z0-9]+(-[a-z0-9]+)*$/.test(c.slug)) e.slug = 'slug';
+  else if (c.slug && others.some((x) => x.slug === c.slug)) e.slug = 'taken';
+  if (c.parent) {
+    const parent = others.find((x) => x.id === c.parent);
+    if (!parent || parent.parent !== null || all.some((x) => x.parent === c.id)) e.parent = 'parent';
+  }
+  return e;
+}
+
+/** Categories in display order: each top-level category followed by its children. */
+export function categoryTree(all: Category[]): { cat: Category; depth: 0 | 1 }[] {
+  const by = (a: Category, b: Category) => a.order - b.order || a.name.en.localeCompare(b.name.en);
+  const out: { cat: Category; depth: 0 | 1 }[] = [];
+  for (const top of all.filter((c) => !c.parent || !all.some((x) => x.id === c.parent)).sort(by)) {
+    out.push({ cat: top, depth: 0 });
+    for (const ch of all.filter((c) => c.parent === top.id).sort(by)) out.push({ cat: ch, depth: 1 });
+  }
+  return out;
+}
+
+/** Rename a category and carry the new name onto its products (one write, so the storefront never sees a mix). */
+export function renameCategory(products: Product[], from: L, to: L): Product[] {
+  if (catKey(from) === catKey(to) && from.ar === to.ar) return products;
+  return products.map((p) => (catKey(p.category) === catKey(from) ? { ...p, category: { ...to }, version: p.version + 1 } : p));
+}
+
+/** Move products to a category. Products already in it are left untouched (no version bump). */
+export function moveToCategory(products: Product[], ids: Set<string>, to: L): { products: Product[]; moved: number } {
+  let moved = 0;
+  const next = products.map((p) => {
+    if (!ids.has(p.id) || (catKey(p.category) === catKey(to) && p.category.ar === to.ar)) return p;
+    moved++;
+    return { ...p, category: { ...to }, version: p.version + 1 };
+  });
+  return { products: next, moved };
+}
+
+export type RuleField = 'price' | 'category' | 'tag' | 'stock' | 'status' | 'compareAt';
+export type RuleOp = 'lt' | 'gt' | 'is' | 'isNot' | 'inStock' | 'outOfStock' | 'onSale';
+export interface Rule { field: RuleField; op: RuleOp; value: string }
+export interface Collection {
+  id: string;
+  name: L;
+  kind: 'manual' | 'smart';
+  /** Manual collections: product ids in display order. */
+  productIds: string[];
+  /** Smart collections: every rule (all) or any rule must match. */
+  match: 'all' | 'any';
+  rules: Rule[];
+  visible: boolean;
+  version: number;
+}
+
+export function collectionFixtures(): Collection[] {
+  return [
+    { id: 'col-eid', name: { ar: 'هدايا العيد', en: 'Eid gifts' }, kind: 'manual', productIds: ['p6', 'p18', 'p2', 'p13'], match: 'all', rules: [], visible: true, version: 1 },
+    { id: 'col-under-100', name: { ar: 'أقل من 100 ريال ومتوفر', en: 'Under SAR 100, in stock' }, kind: 'smart', productIds: [], match: 'all',
+      rules: [{ field: 'price', op: 'lt', value: '100' }, { field: 'stock', op: 'inStock', value: '' }], visible: true, version: 1 },
+  ];
+}
+
+export type RuleError = 'money' | 'value';
+export function validateRule(r: Rule): RuleError | null {
+  if (r.field === 'price' && (r.op === 'lt' || r.op === 'gt')) { const m = parseMoney(r.value); return m === null || m === 0 ? 'money' : null; }
+  if ((r.field === 'category' || r.field === 'tag' || r.field === 'status') && !r.value.trim()) return 'value';
+  return null;
+}
+
+/** Whether a product matches one rule. `stockOf` gives sellable units (null for digital: always in stock). */
+export function ruleMatches(p: Product, r: Rule, stockOf: (p: Product) => number | null): boolean {
+  const low = Math.min(...(p.variants.length ? p.variants.map((v) => v.price) : [p.price]));
+  switch (r.field) {
+    case 'price': { const v = parseMoney(r.value) ?? 0; return r.op === 'lt' ? low < v : r.op === 'gt' ? low > v : false; }
+    case 'compareAt': return p.compareAt !== null && p.compareAt > low;
+    case 'category': { const hit = catKey(p.category) === r.value.trim().toLowerCase(); return r.op === 'isNot' ? !hit : hit; }
+    case 'tag': { const hit = (p.tags ?? []).some((t) => t.toLowerCase() === r.value.trim().toLowerCase()); return r.op === 'isNot' ? !hit : hit; }
+    case 'status': return r.op === 'isNot' ? p.status !== r.value : p.status === r.value;
+    case 'stock': { const s = stockOf(p); const has = s === null || s > 0; return r.op === 'outOfStock' ? !has : has; }
+    default: return false;
+  }
+}
+
+/** Products in a collection, in order. Smart collections with an invalid rule match nothing (never "everything"). */
+export function collectionMembers(c: Pick<Collection, 'kind' | 'productIds' | 'match' | 'rules'>, products: Product[], stockOf: (p: Product) => number | null): Product[] {
+  if (c.kind === 'manual') return c.productIds.map((id) => products.find((p) => p.id === id)).filter((p): p is Product => !!p);
+  if (!c.rules.length || c.rules.some((r) => validateRule(r))) return [];
+  return products.filter((p) => (c.match === 'all' ? c.rules.every((r) => ruleMatches(p, r, stockOf)) : c.rules.some((r) => ruleMatches(p, r, stockOf))));
+}
+
+/**
+ * Storefront menu order: the merchant's category order (parents before their children); hidden categories, and the
+ * children of hidden parents, are left out of the menu. Categories the merchant has not listed keep their place at the end.
+ */
+export function arrangeStoreCategories<T extends { name: L }>(list: T[], cats: Category[]): T[] {
+  const order = new Map(categoryTree(cats).map((t, i) => [catKey(t.cat.name), i]));
+  const hidden = new Set(cats.filter((c) => !c.visible || (c.parent && cats.find((x) => x.id === c.parent)?.visible === false)).map((c) => catKey(c.name)));
+  return list.filter((x) => !hidden.has(catKey(x.name))).map((x, i) => ({ x, i }))
+    .sort((a, b) => (order.get(catKey(a.x.name)) ?? 1000 + a.i) - (order.get(catKey(b.x.name)) ?? 1000 + b.i)).map((o) => o.x);
 }

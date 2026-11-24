@@ -4,14 +4,14 @@ import { useMemo, useState } from 'react';
 import { Megaphone, Send } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, type Route } from '../../../core/router';
-import { ordersStore, settingsStore } from '../../merchant/stores';
-import { customerFixtures } from '../../merchant/workspace';
+import { customersStore, ordersStore, segmentsStore, settingsStore } from '../../merchant/stores';
+import { entitled } from '../../merchant/finance';
 import { estimateCost, type MsgChannel } from '../../merchant/growth';
 import { Badge, Button, Card, CardHeader, EmptyState, InfoHint, LinkButton, Money, Ref, Segmented, useTx, type Tone } from '../../../ds/ui';
 import { DataTable, Field, Select, Simulated, Textarea, type Column } from '../../../ds/kit';
 import {
-  BROADCAST_AUDIENCES, MESSAGE_MAX, audienceAllowed, audienceMinPlan, broadcastAudience, broadcastFails, campaignOutcome, campaignsStore, messageError,
-  type BroadcastAudience, type CampaignOutcome, type CampaignRecord,
+  ATTRIBUTION_DAYS, BROADCAST_AUDIENCES, MESSAGE_MAX, audienceAllowed, audienceMinPlan, broadcastAudience, broadcastFails, campaignOutcome, campaignsStore, messageError,
+  returnOnCost, simulateBroadcastResult, type BroadcastAudience, type CampaignOutcome, type CampaignRecord,
 } from './model';
 import { SendProgress, SendReview, channelName, sendStore, type SendSpec } from './send';
 import { Locked } from './access';
@@ -34,6 +34,7 @@ export default function Campaigns({ route, empty, canSend }: { route: Route; emp
     { key: 'res', header: tx('سُلّم / فشل / لم يُرسل', 'Handed / failed / not sent'), cell: (c) => <span className="tabular-nums"><span className="text-emerald-700 dark:text-emerald-400">{c.handed}</span> / <span className="text-red-700 dark:text-red-400">{c.failed}</span> / <span className="text-muted">{c.notSent}</span></span> },
     { key: 'o', header: tx('النتيجة', 'Outcome'), cell: (c) => <Badge tone={O_TONE[campaignOutcome(c)]}>{outcome(campaignOutcome(c))}</Badge> },
     { key: 'cost', header: <span className="inline-flex items-center gap-1">{tx('التكلفة', 'Cost')}<InfoHint>{tx('بسعر الاختبار وعلى الرسائل المسلّمة فقط.', 'At the test rate, on handed-over messages only.')}</InfoHint></span>, align: 'end', cell: (c) => <Money v={c.cost} /> },
+    { key: 'biz', header: <span className="inline-flex items-center gap-1">{tx('النتيجة التجارية', 'Business result')}<InfoHint>{tx(`طلبات المستلمين خلال ${ATTRIBUTION_DAYS} أيام من الإرسال وإيرادها، والعائد لكل ريال تكلفة. محاكاة في هذه النسخة.`, `Recipients’ orders within ${ATTRIBUTION_DAYS} days of sending, their revenue, and revenue per riyal of cost. Simulated in this demo.`)}</InfoHint></span>, align: 'end', cell: (c) => <Result c={c} /> },
   ];
 
   return (
@@ -55,6 +56,7 @@ export default function Campaigns({ route, empty, canSend }: { route: Route; emp
                   <div className="flex items-center justify-between gap-2"><span className="font-semibold text-fg">{c.kind === 'cart' ? tx('استرجاع سلال', 'Cart recovery') : tx('رسالة جماعية', 'Broadcast')}</span><Badge tone={O_TONE[campaignOutcome(c)]}>{outcome(campaignOutcome(c))}</Badge></div>
                   <p className="text-xs text-muted"><Ref>{c.id}</Ref> · {channelName(c.channel, tx)} · {c.when[lang]}</p>
                   <p className="text-[13px] text-fg tabular-nums">{tx(`سُلّم ${c.handed} · فشل ${c.failed} · لم يُرسل ${c.notSent}`, `Handed ${c.handed} · failed ${c.failed} · not sent ${c.notSent}`)}</p>
+                  <div className="flex items-center justify-between gap-2 text-[13px]"><span className="text-muted">{tx('التكلفة', 'Cost')} <Money v={c.cost} /></span><Result c={c} /></div>
                 </div>
               )} />
           </div>
@@ -65,20 +67,35 @@ export default function Campaigns({ route, empty, canSend }: { route: Route; emp
   );
 }
 
+function Result({ c }: { c: CampaignRecord }) {
+  const tx = useTx();
+  if (!c.result) return <span className="text-xs text-muted">{tx('لا نتيجة بعد', 'No result yet')}</span>;
+  const roc = returnOnCost(c);
+  return (
+    <span className="block text-end text-[13px]">
+      <span className="block tabular-nums text-fg">{tx(`${c.result.orders} طلب`, `${c.result.orders} orders`)} · <Money v={c.result.revenue} /></span>
+      {roc !== null && <span className="block text-xs text-muted">{tx(`${roc} ر.س لكل 1 ر.س تكلفة`, `SAR ${roc} per SAR 1 spent`)}</span>}
+    </span>
+  );
+}
+
 function Composer() {
   const tx = useTx();
+  const { lang } = useLang();
   const orders = ordersStore.use();
   const plan = settingsStore.use().plan;
   const active = sendStore.use();
-  const customers = useMemo(customerFixtures, []);
-  const [aud, setAud] = useState<BroadcastAudience>('all');
+  const customers = customersStore.use();
+  const saved = segmentsStore.use();
+  const [aud, setAud] = useState<string>('all');
   const [ch, setCh] = useState<MsgChannel>('email');
   const [text, setText] = useState(() => tx('وصلت تشكيلة الخريف الجديدة. تسوّقها الآن.', 'Our new autumn collection has arrived. Shop it now.'));
   const [review, setReview] = useState<SendSpec | null>(null);
-  const audName = (a: BroadcastAudience) => tx(...AUD[a]);
+  const audName = (a: string) => (a in AUD ? tx(...AUD[a as BroadcastAudience]) : saved.find((x) => `seg:${x.id}` === a)?.name[lang] ?? a);
+  const audOk = (a: string) => (a in AUD ? audienceAllowed(a as BroadcastAudience, plan) : entitled(plan, 'segments'));
   const planName = (p: string) => ({ basic: tx('الأساسية', 'Basic'), plus: tx('بلس', 'Plus'), pro: tx('برو', 'Pro'), special: tx('خاصة', 'Special') } as Record<string, string>)[p];
   const allowedAll = audienceAllowed('all', plan);
-  const a = broadcastAudience(customers, orders, aud, ch);
+  const a = useMemo(() => broadcastAudience(customers, orders, aud, ch, saved), [customers, orders, aud, ch, saved]);
   const mErr = messageError(text, ch);
   const busy = !!active;
 
@@ -93,8 +110,9 @@ function Composer() {
           <div className="space-y-4">
             <Field label={<span className="inline-flex items-center gap-1">{tx('الجمهور', 'Audience')}<InfoHint>{tx('الشرائح حسب سجل الطلبات تحتاج باقة برو. هذا حد في الباقة، منفصل عن صلاحيات دورك.', 'Segments by order history need the Pro plan. This is a plan limit, separate from your role’s permissions.')}</InfoHint></span>}>
               {(p) => (
-                <Select {...p} value={aud} disabled={busy} onChange={(e) => setAud(e.target.value as BroadcastAudience)}>
+                <Select {...p} value={aud} disabled={busy} onChange={(e) => setAud(e.target.value)}>
                   {BROADCAST_AUDIENCES.map((x) => <option key={x} value={x} disabled={!audienceAllowed(x, plan)}>{audName(x)}{!audienceAllowed(x, plan) ? ` · ${tx('باقة', 'plan')} ${planName(audienceMinPlan(x))}` : ''}</option>)}
+                  {saved.length > 0 && <optgroup label={tx('شرائحك المحفوظة', 'Your saved segments')}>{saved.map((x) => <option key={x.id} value={`seg:${x.id}`} disabled={!audOk(`seg:${x.id}`)}>{x.name[lang]}{!audOk(`seg:${x.id}`) ? ` · ${tx('باقة', 'plan')} ${planName('pro')}` : ''}</option>)}</optgroup>}
                 </Select>
               )}
             </Field>
@@ -114,10 +132,12 @@ function Composer() {
             <ul className="space-y-1.5 text-[13px]">
               <li className="flex justify-between"><span className="text-muted">{tx('خارج الشريحة', 'Outside the segment')}</span><span className="tabular-nums">{a.excluded.notInSegment}</span></li>
               <li className="flex justify-between"><span className="text-muted">{tx('لا موافقة على القناة', 'No consent for the channel')}</span><span className="tabular-nums">{a.excluded.noConsent}</span></li>
+              {a.excluded.blocked > 0 && <li className="flex justify-between"><span className="text-muted">{tx('عملاء محظورون', 'Blocked customers')}</span><span className="tabular-nums">{a.excluded.blocked}</span></li>}
               <li className="flex justify-between border-t border-border pt-2"><span className="flex items-center gap-1.5 font-semibold">{tx('التكلفة التقديرية', 'Estimated cost')}<Badge tone="amber">{tx('سعر اختبار', 'Test rate')}</Badge></span><Money v={estimateCost(a.eligible.length, ch)} className="font-bold" /></li>
             </ul>
             <div className="flex flex-wrap items-center gap-3">
-              <Button disabled={busy || !a.eligible.length || !!mErr} onClick={() => setReview({ kind: 'broadcast', channel: ch, ids: a.eligible.map((c) => c.id), excluded: a.excludedTotal, text, audience: { ar: AUD[aud][0], en: AUD[aud][1] }, fails: broadcastFails })}>
+              <Button disabled={busy || !a.eligible.length || !!mErr} onClick={() => setReview({ kind: 'broadcast', channel: ch, ids: a.eligible.map((c) => c.id), excluded: a.excludedTotal, text, audience: aud in AUD ? { ar: AUD[aud as BroadcastAudience][0], en: AUD[aud as BroadcastAudience][1] } : saved.find((x) => `seg:${x.id}` === aud)?.name ?? { ar: aud, en: aud }, fails: broadcastFails,
+                finish: (handed) => ({ recipients: handed, result: simulateBroadcastResult(handed, customersStore.get(), ordersStore.get()) }) })}>
                 <Send className="size-4" aria-hidden="true" />{tx('راجع ثم أرسل', 'Review and send')}
               </Button>
               <Simulated />

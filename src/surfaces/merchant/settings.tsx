@@ -7,9 +7,10 @@ import { STAFF_LIMIT, entitled } from './finance';
 import { MATRIX_ACTIONS, MATRIX_PAGES, ROLES, can, canSee, canSeeSettings, type Action, type Page, type Role, type SettingsCat } from './perms';
 import { settingsStore, teamStore, testStore } from './stores';
 import {
-  NOTIFY_EVENTS, seatsUsed, validEmail, validHost, validSlug,
+  NOTIFY_EVENTS, normPolicy, seatsUsed, validEmail, validHost, validSlug,
   type Notify, type NotifyEvent, type PolicyId, type ProviderState, type StoreDetails, type Zone,
 } from './workspace';
+import { savePolicy } from '../dashboard/settings/model';
 import { ActionLocked, Icon, KV, Money, NoAccess, ROLE_NAMES, mhref, mreplace, useL, useTx, type IconName } from './kit';
 
 type Cat = { id: SettingsCat; icon: IconName; ar: string; en: string; dAr: string; dEn: string; keys: string };
@@ -368,11 +369,11 @@ function Domains() {
 function Policies() {
   const tx = useTx();
   const s = settingsStore.use();
-  const [texts, setTexts] = useState<Record<PolicyId, string>>(() => Object.fromEntries(s.policies.map((p) => [p.id, p.text])) as Record<PolicyId, string>);
+  const [texts, setTexts] = useState<Record<PolicyId, string>>(() => Object.fromEntries(s.policies.map((p) => [p.id, normPolicy(p).text.ar])) as Record<PolicyId, string>);
   const [pub, setPub] = useState<PolicyId | null>(null);
   const name: Record<PolicyId, string> = { returns: tx('سياسة الاسترجاع', 'Return policy'), shipping: tx('سياسة الشحن', 'Shipping policy'), privacy: tx('سياسة الخصوصية', 'Privacy policy'), terms: tx('الشروط والأحكام', 'Terms and conditions') };
   const st = { missing: tx('غير موجودة', 'Missing'), draft: tx('مسودة', 'Draft'), published: tx('منشورة', 'Published') };
-  const save = (id: PolicyId, state: 'draft' | 'published') => settingsStore.set((x) => ({ ...x, policies: x.policies.map((p) => (p.id === id ? { ...p, text: texts[id], state } : p)) }));
+  const save = (id: PolicyId, state: 'draft' | 'published') => settingsStore.set((x) => ({ ...x, policies: savePolicy(x.policies, id, { ar: texts[id], en: texts[id] }, state === 'published') }));
   return (
     <>
       <Alert tone="info">{tx('النصوص من كتابتك. «لك» لا تقدّم استشارة قانونية ولا تضمن الامتثال.', 'The text is yours. LAK does not give legal advice or guarantee compliance.')}</Alert>
@@ -381,7 +382,7 @@ function Policies() {
           <h2 id={`po-${p.id}`}>{name[p.id]} <Badge tone={p.state === 'published' ? 'success' : p.state === 'draft' ? 'neutral' : 'warning'}>{st[p.state]}</Badge></h2>
           <Field id={`pt-${p.id}`} label={tx('النص', 'Text')}><textarea id={`pt-${p.id}`} className="input" value={texts[p.id]} onChange={(e) => setTexts({ ...texts, [p.id]: e.target.value })} /></Field>
           <div className="actions">
-            <button type="button" className="btn" disabled={texts[p.id] === p.text && p.state !== 'missing'} onClick={() => save(p.id, 'draft')}>{tx('احفظ مسودة', 'Save draft')}</button>
+            <button type="button" className="btn" disabled={texts[p.id] === normPolicy(p).text.ar && p.state !== 'missing'} onClick={() => save(p.id, 'draft')}>{tx('احفظ مسودة', 'Save draft')}</button>
             <button type="button" className="btn primary" disabled={texts[p.id].trim().length < 20} onClick={() => setPub(p.id)}>{tx('انشر', 'Publish')}</button>
           </div>
           {texts[p.id].trim().length < 20 && <p className="small muted">{tx('اكتب 20 حرفًا على الأقل للنشر.', 'Write at least 20 characters to publish.')}</p>}

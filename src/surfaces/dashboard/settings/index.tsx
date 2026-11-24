@@ -22,6 +22,7 @@ const PAGES: Record<CatId, React.LazyExoticComponent<() => JSX.Element>> = {
   policies: lazy(() => import('./policies')),
   notifications: lazy(() => import('./notifications')),
   language: lazy(() => import('./language')),
+  account: lazy(() => import('./account')),
 };
 
 export default function Settings({ route }: { route: Route }) {

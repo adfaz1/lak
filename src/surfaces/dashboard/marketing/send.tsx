@@ -8,11 +8,20 @@ import { createStore } from '../../../core/store';
 import { link } from '../../../core/router';
 import type { L } from '../../merchant/domain';
 import { TEST_RATE, estimateCost, type MsgChannel } from '../../merchant/growth';
-import { Badge, Button, Card, CardHeader, InfoHint, LinkButton, Money, cn, useTx } from '../../../ds/ui';
+import { Badge, Button, Card, CardHeader, InfoHint, LinkButton, Money, Ref, cn, useTx } from '../../../ds/ui';
 import { Modal, Simulated } from '../../../ds/kit';
-import { campaignsStore, isRunning, jobCost, jobResult, newJob, recordCampaign, stepJob, stopJob, type SendJob } from './model';
+import { logAction } from '../../merchant/stores';
+import { ATTRIBUTION_DAYS, TODAY, campaignsStore, isRunning, jobCost, jobResult, newJob, recordCampaign, stepJob, stopJob, type CampaignRecord, type SendJob } from './model';
 
-export interface SendSpec { kind: 'cart' | 'broadcast'; channel: MsgChannel; ids: string[]; excluded: number; audience: L; text: string; fails: (id: string) => boolean }
+export interface SendSpec {
+  kind: 'cart' | 'broadcast'; channel: MsgChannel; ids: string[]; excluded: number; audience: L; text: string; fails: (id: string) => boolean;
+  /** Discount code included in the message, with the most it can cost if every recipient uses it. */
+  discount?: { code: string; label: L; maxCost: number; isNew: boolean };
+  /** Runs when the merchant confirms (e.g. creates the one-use code before the message mentions it). */
+  onStart?: () => void;
+  /** Runs once when sending ends, with the ids handed to the provider; returns recipients and the (simulated) result. */
+  finish?: (handed: string[]) => Pick<CampaignRecord, 'recipients' | 'result'>;
+}
 interface Active { spec: SendSpec; job: SendJob; recorded: boolean }
 /** In memory only (holds a function); a reload ends the simulation, which never sent anything. */
 export const sendStore = createStore<Active | null>(() => null);
@@ -30,10 +39,14 @@ export function useSendRunner() {
     }
     if (!a.recorded) {
       const r = jobResult(a.job);
+      const handed = a.spec.ids.slice(0, a.job.done).filter((id) => !a.spec.fails(id));
+      const extra = a.spec.finish?.(handed) ?? {};
       campaignsStore.set((list) => recordCampaign(list, {
         kind: a.spec.kind, channel: a.spec.channel, audience: a.spec.audience, when: { ar: 'اليوم', en: 'Today' }, text: a.spec.text,
         total: r.total, handed: r.handed, failed: r.failed, notSent: r.notSent, stopped: a.job.stopped, cost: jobCost(a.job, a.spec.channel),
+        date: TODAY, at: Date.now(), coupon: a.spec.discount?.code, by: 'you', ...extra,
       }));
+      logAction('marketing', { ar: `أرسل ${a.spec.kind === 'cart' ? 'رسائل استرجاع سلال' : 'رسالة جماعية'}: ${r.handed} سُلّمت (محاكاة)`, en: `Sent ${a.spec.kind === 'cart' ? 'cart recovery messages' : 'a broadcast'}: ${r.handed} handed over (simulated)` });
       sendStore.set({ ...a, recorded: true });
     }
   }, [a]);
@@ -44,19 +57,24 @@ export const channelName = (ch: MsgChannel, tx: (a: string, e: string) => string
 /** Review before sending: who, who is left out, cost at the test rate, and what cannot be undone. */
 export function SendReview({ spec, onClose }: { spec: SendSpec; onClose: () => void }) {
   const tx = useTx();
+  const { lang } = useLang();
   const n = spec.ids.length;
-  const rows: [string, ReactNode][] = [
+  const rows: [ReactNode, ReactNode][] = [
     [tx('القناة', 'Channel'), channelName(spec.channel, tx)],
     [tx('المستلمون', 'Recipients'), tx(`${n} لديهم موافقة على هذه القناة`, `${n} with consent for this channel`)],
     [tx('مستبعدون', 'Excluded'), <bdi key="x" className="tabular-nums">{spec.excluded}</bdi>],
     [tx('سعر اختبار للرسالة', 'Test rate per message'), <Money key="r" v={TEST_RATE[spec.channel]} />],
+    ...(spec.discount ? [
+      [tx('الخصم في الرسالة', 'Discount in the message'), <span key="d" className="inline-flex items-center gap-1.5"><Ref>{spec.discount.code}</Ref><span className="font-normal text-muted">{spec.discount.label[lang]}</span></span>],
+      [<span key="k" className="inline-flex items-center gap-1">{tx('أقصى تكلفة للخصم', 'Most the discount can cost')}<InfoHint>{tx('إن أكمل كل مستلم سلته بالكود. يُحسم من الإيراد، لا يُدفع مقدمًا.', 'If every recipient completes their cart with the code. Taken from revenue, not paid upfront.')}</InfoHint></span>, <Money key="m" v={spec.discount.maxCost} />],
+    ] as [ReactNode, ReactNode][] : []),
   ];
   return (
     <Modal title={tx('مراجعة الإرسال', 'Review before sending')} onClose={onClose}
       footer={<><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button>
-        <Button onClick={() => { startSend(spec); onClose(); }}><Send className="size-4" aria-hidden="true" />{tx(`أرسل ${n} رسالة (محاكاة)`, `Send ${n} messages (simulated)`)}</Button></>}>
+        <Button onClick={() => { spec.onStart?.(); startSend(spec); onClose(); }}><Send className="size-4" aria-hidden="true" />{tx(`أرسل ${n} رسالة (محاكاة)`, `Send ${n} messages (simulated)`)}</Button></>}>
       <dl className="divide-y divide-border rounded-xl border border-border">
-        {rows.map(([k, v]) => <div key={k} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"><dt className="text-muted">{k}</dt><dd className="font-semibold text-fg">{v}</dd></div>)}
+        {rows.map(([k, v], i) => <div key={i} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm"><dt className="text-muted">{k}</dt><dd className="text-end font-semibold text-fg">{v}</dd></div>)}
         <div className="flex items-center justify-between gap-3 bg-surface-2/50 px-4 py-3 text-sm">
           <dt className="flex items-center gap-1.5 font-semibold text-fg">{tx('التكلفة التقديرية', 'Estimated cost')}<Badge tone="amber">{tx('سعر اختبار', 'Test rate')}</Badge></dt>
           <dd className="text-base font-bold"><Money v={estimateCost(n, spec.channel)} /></dd>
@@ -66,6 +84,8 @@ export function SendReview({ spec, onClose }: { spec: SendSpec; onClose: () => v
       <ul className="space-y-1.5 text-[13px] text-muted">
         <li>{tx('لا يمكن استرجاع رسالة بعد تسليمها للمزوّد.', 'A message cannot be recalled once handed to the provider.')}</li>
         <li>{tx('يمكنك إيقاف ما تبقى أثناء الإرسال.', 'You can stop the rest while sending.')}</li>
+        <li>{tx(`النتيجة: الطلبات والإيراد من المستلمين خلال ${ATTRIBUTION_DAYS} أيام تُسجَّل في سجل الحملات.`, `Result: orders and revenue from recipients within ${ATTRIBUTION_DAYS} days are recorded in the campaign history.`)}</li>
+        {spec.discount?.isNew && <li>{tx(`يُنشأ الكود ${spec.discount.code} نشطًا لمدة ${ATTRIBUTION_DAYS} أيام، مرة لكل عميل.`, `${spec.discount.code} is created active for ${ATTRIBUTION_DAYS} days, once per customer.`)}</li>}
       </ul>
       <Simulated />
     </Modal>
@@ -77,6 +97,7 @@ export function SendProgress() {
   const tx = useTx();
   const { lang } = useLang();
   const a = sendStore.use();
+  const last = campaignsStore.use()[0];
   if (!a) return null;
   const r = jobResult(a.job);
   const running = isRunning(a.job);
@@ -100,6 +121,15 @@ export function SendProgress() {
           <Stat label={tx('فشل', 'Failed')} v={r.failed} tone="text-red-700 dark:text-red-400" hint={tx('عنوان أو رقم غير صالح في بيانات الاختبار. لا يُعاد تلقائيًا.', 'Invalid address or number in the test data. Not retried automatically.')} />
           <Stat label={tx('لم يُرسل', 'Not sent')} v={r.notSent} tone="text-fg" />
         </dl>
+        {!running && a.recorded && last?.result && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
+            <span className="flex items-center gap-1 font-semibold text-fg">{tx('النتيجة التجارية', 'Business result')}<InfoHint>{tx(`طلبات المستلمين خلال ${ATTRIBUTION_DAYS} أيام من الرسالة. في هذه النسخة تُحاكى فورًا.`, `Recipients’ orders within ${ATTRIBUTION_DAYS} days of the message. Simulated instantly in this demo.`)}</InfoHint></span>
+            <span className="tabular-nums text-fg">{a.spec.kind === 'cart' ? tx(`${last.result.orders} سلة استُرجعت`, `${last.result.orders} carts recovered`) : tx(`${last.result.orders} طلب`, `${last.result.orders} orders`)}</span>
+            <span className="inline-flex items-center gap-1 text-fg">{tx('إيراد', 'Revenue')} <Money v={last.result.revenue} /></span>
+            {last.result.discount > 0 && <span className="inline-flex items-center gap-1 text-muted">{tx('خصم', 'Discount')} <Money v={last.result.discount} /></span>}
+            <Simulated />
+          </div>
+        )}
         {!running && (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-surface-2 px-4 py-3 text-sm">
             <span className="flex items-center gap-2 font-medium text-fg">

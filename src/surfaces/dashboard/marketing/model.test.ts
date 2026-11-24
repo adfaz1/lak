@@ -28,7 +28,7 @@ describe('coupon state', () => {
     expect(filterCoupons(all, { view: 'live', q: '', type: '' }).map((c) => c.code)).toEqual(['WELCOME10', 'SHIPFREE']);
     expect(filterCoupons(all, { view: 'all', q: 'ship', type: '' }).map((c) => c.code)).toEqual(['SHIPFREE']);
     expect(filterCoupons(all, { view: 'all', q: '', type: 'fixed' }).map((c) => c.code)).toEqual(['NOV50']);
-    expect(couponViewCounts(all)).toEqual({ all: 4, live: 2, scheduled: 0, drafts: 1, ended: 1 });
+    expect(couponViewCounts(all)).toEqual({ all: 5, live: 2, scheduled: 0, drafts: 2, ended: 1 });
   });
   it('reports usage as a share of the limit', () => {
     expect(usagePct(welcome)).toBeNull();

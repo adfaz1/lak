@@ -3,6 +3,8 @@
 import { seeded, total, type Channel, type L, type Order } from '../../merchant/domain';
 import { analyticsSeries, change, periods, summarize, type DayStat } from '../../merchant/growth';
 import { topProducts } from '../model/home';
+import { toCsv } from '../../merchant/catalog';
+import type { Range } from './range';
 
 export type Period = 7 | 30 | 90;
 export const PERIODS: Period[] = [7, 30, 90];
@@ -16,17 +18,19 @@ const DAY = 86400000;
 const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
 
 /**
- * Demo history long enough to compare two 90-day periods: 180 complete days ending yesterday.
- * The latest 56 days are exactly merchant/growth `analyticsSeries()` (what the home shows); older days are
- * generated the same way with a fixed seed, including a few days without visit data.
+ * Demo history long enough to compare a 90-day period with the same days last year: 460 complete days ending yesterday.
+ * The latest 56 days are exactly merchant/growth `analyticsSeries()` (what the home shows); older days are generated
+ * backwards from there with a fixed seed (so a shorter history is a suffix of a longer one), including a few days
+ * without visit data.
  */
-export function history(): DayStat[] {
+export const HISTORY_DAYS = 460;
+export function history(days: number = HISTORY_DAYS): DayStat[] {
   const recent = analyticsSeries();
-  const need = 180 - recent.length;
+  const need = Math.max(0, days - recent.length);
   const first = Date.parse(`${recent[0].date}T00:00:00Z`);
   const r = seeded(29);
   const older: DayStat[] = [];
-  for (let i = need; i >= 1; i--) {
+  for (let i = 1; i <= need; i++) {
     const t = first - i * DAY;
     const friday = new Date(t).getUTCDay() === 5;
     const orders = Math.round(10 + r() * 11 + (friday ? 5 : 0));
@@ -34,7 +38,7 @@ export function history(): DayStat[] {
     const missing = i % 37 === 0;
     older.push({ date: iso(t), orders, net, sessions: missing ? null : Math.round(orders * (55 + r() * 25)) });
   }
-  return [...older, ...recent];
+  return [...older.reverse(), ...recent];
 }
 
 export interface Figure { id: 'net' | 'orders' | 'aov' | 'conversion' | 'sessions'; value: number | null; prev: number | null; delta: number | null; unit: 'money' | 'count' | 'percent' }
@@ -113,3 +117,51 @@ export function topCities(orders: Order[], limit = 5): CityRow[] {
 }
 
 export const periodProducts = (orders: Order[], limit = 5) => topProducts(orders, limit);
+
+/* ---------- Any range (custom periods and year-over-year) ---------- */
+
+/** Days of the series inside a range; null when the series does not cover the whole range. */
+export function slice(series: DayStat[], r: Range | null): DayStat[] | null {
+  if (!r) return null;
+  const ds = series.filter((d) => d.date >= r.from && d.date <= r.to);
+  return ds.length === r.days ? ds : null;
+}
+
+/** Headline figures for a range and its comparison range. A comparison the history does not cover is withheld, not zero. */
+export function figuresFor(series: DayStat[], r: Range, c: Range | null) {
+  const cur = slice(series, r) ?? [];
+  const prev = slice(series, c);
+  const a = summarize(cur), b = prev ? summarize(prev) : null;
+  const visits = (d: DayStat[]) => (d.some((x) => x.sessions !== null) ? d.reduce((s, x) => s + (x.sessions ?? 0), 0) : null);
+  const va = cur.length ? visits(cur) : null, vb = prev ? visits(prev) : null;
+  const has = cur.length > 0;
+  const list: Figure[] = [
+    { id: 'net', value: has ? a.net : null, prev: b?.net ?? null, delta: b ? change(a.net, b.net) : null, unit: 'money' },
+    { id: 'orders', value: has ? a.orders : null, prev: b?.orders ?? null, delta: b ? change(a.orders, b.orders) : null, unit: 'count' },
+    { id: 'aov', value: has ? a.aov : null, prev: b?.aov ?? null, delta: b ? change(a.aov, b.aov) : null, unit: 'money' },
+    { id: 'conversion', value: has ? a.conversion : null, prev: b?.conversion ?? null, delta: b ? change(a.conversion, b.conversion) : null, unit: 'percent' },
+    { id: 'sessions', value: va, prev: vb, delta: b && a.sessionDays === b.sessionDays ? change(va, vb) : null, unit: 'count' },
+  ];
+  return {
+    list, comparable: !!prev, covered: cur.length === r.days,
+    coverage: { known: a.sessionDays, days: cur.length, missing: cur.filter((d) => d.sessions === null).map((d) => d.date) },
+  };
+}
+
+export interface RangeRow { date: string; orders: number; net: number; sessions: number | null; conversion: number | null; prev: DayStat | null }
+/** One row per day of the range, aligned with the matching day of the comparison range. Newest first. */
+export function rangeRows(series: DayStat[], r: Range, c: Range | null): RangeRow[] {
+  const cur = slice(series, r) ?? [];
+  const prev = slice(series, c);
+  return cur.map((d, i) => ({ date: d.date, orders: d.orders, net: d.net, sessions: d.sessions, conversion: conv(d), prev: prev ? prev[i] ?? null : null })).reverse();
+}
+export const rangePoints = (series: DayStat[], r: Range, metric: ChartMetric) =>
+  (slice(series, r) ?? []).map((d) => ({ key: d.date, value: metric === 'net' ? d.net : d.orders }));
+
+/** Day-by-day CSV of the overview, with the comparison day when there is one. */
+export function overviewCsv(rows: RangeRow[]): string {
+  return toCsv([
+    ['date', 'orders', 'net_sales_sar', 'visits', 'conversion_pct', 'comparison_date', 'comparison_orders', 'comparison_net_sar'],
+    ...rows.map((r) => [r.date, r.orders, (r.net / 100).toFixed(2), r.sessions ?? 'no data', r.conversion ?? '', r.prev?.date ?? '', r.prev?.orders ?? '', r.prev ? (r.prev.net / 100).toFixed(2) : '']),
+  ]);
+}

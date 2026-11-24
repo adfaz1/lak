@@ -2,7 +2,7 @@
 // New shared components (not in src/ds): Stepper, NoAccess, ReviewTools, useLeaveGuard, LeaveModal.
 import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Check, Lock, FlaskConical } from 'lucide-react';
+import { Check, Lock, FlaskConical, FolderTree, LayoutGrid, Layers } from 'lucide-react';
 import { link, navigate } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
 import { ROLES, type Role } from '../../merchant/perms';
@@ -137,3 +137,25 @@ export function downloadText(name: string, text: string, type = 'text/csv;charse
 }
 
 export const roleBadge = (tx: (a: string, e: string) => string) => <Badge tone="gray" icon={<Lock className="size-3" aria-hidden="true" />}>{tx('للقراءة فقط', 'Read-only')}</Badge>;
+
+/** Sub-navigation of the catalogue: products, categories, collections. */
+export function CatalogNav() {
+  const tx = useTx();
+  const here = location.hash.split('?')[0];
+  const items = [
+    { href: phref(), label: tx('المنتجات', 'Products'), icon: LayoutGrid, on: here === '#/dashboard/products' },
+    { href: phref('categories'), label: tx('الفئات', 'Categories'), icon: FolderTree, on: here.startsWith('#/dashboard/products/categories') },
+    { href: phref('collections'), label: tx('المجموعات', 'Collections'), icon: Layers, on: here.startsWith('#/dashboard/products/collections') },
+  ];
+  return (
+    <nav aria-label={tx('أقسام الكتالوج', 'Catalogue sections')} className="scrollbar-thin -mx-1 flex gap-1 overflow-x-auto px-1">
+      {items.map((i) => (
+        <a key={i.href} href={i.href} aria-current={i.on ? 'page' : undefined}
+          className={cn('inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-colors', i.on ? 'bg-fg text-bg' : 'bg-surface text-muted ring-1 ring-border hover:text-fg')}>
+          <i.icon className="size-4" aria-hidden="true" />{i.label}
+        </a>
+      ))}
+    </nav>
+  );
+}
+

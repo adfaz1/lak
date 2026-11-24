@@ -8,8 +8,9 @@ const series = history();
 const orders = allOrders();
 
 describe('history and periods', () => {
-  it('has 180 consecutive complete days ending yesterday', () => {
-    expect(series.length).toBe(180);
+  it('has 460 consecutive complete days ending yesterday (enough for a 90-day period vs last year)', () => {
+    expect(series.length).toBe(460);
+    expect(history(180)).toEqual(series.slice(-180));
     expect(series[series.length - 1].date).toBe('2026-11-23');
     for (let i = 1; i < series.length; i++) expect(Date.parse(series[i].date) - Date.parse(series[i - 1].date)).toBe(86400000);
   });
@@ -80,7 +81,7 @@ describe('daily rows and chart', () => {
   it('chart points follow the chosen metric in date order', () => {
     const p = chartPoints(series, 30, 'orders');
     expect(p.length).toBe(30);
-    expect(p[29]).toEqual({ key: '2026-11-23', value: series[179].orders });
+    expect(p[29]).toEqual({ key: '2026-11-23', value: series[series.length - 1].orders });
   });
 });
 

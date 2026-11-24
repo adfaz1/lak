@@ -1,10 +1,12 @@
-// Marketing & offers (`#/dashboard/marketing`): coupons, abandoned-cart recovery, campaigns.
-// Tabs live in the URL (`?tab=`); a coupon opens at `#/dashboard/marketing/coupons/<code|new>`.
-import { Plus } from 'lucide-react';
+// Marketing & offers (`#/dashboard/marketing`): coupons and automatic offers, abandoned-cart recovery, campaigns
+// (`?tab=`), and the loyalty programme, gift cards and reviews & questions as sub-routes
+// (`/marketing/loyalty`, `/marketing/gift-cards`, `/marketing/reviews`). An offer opens at
+// `#/dashboard/marketing/coupons/<code|new>` (`?auto=1` for a new automatic offer).
+import { Plus, Sparkles } from 'lucide-react';
 import { link, type Route } from '../../../core/router';
 import { canSee, can } from '../../merchant/perms';
-import { cartsStore, couponsStore } from '../../merchant/stores';
-import { audience } from '../../merchant/growth';
+import { cartsStore, couponsStore, giftCardsStore, reviewsStore } from '../../merchant/stores';
+import { audience, giftState } from '../../merchant/growth';
 import { Card, ErrorState, LinkButton, Skeleton, useTx } from '../../../ds/ui';
 import { PageHeader, Tabs } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -15,9 +17,13 @@ import Coupons from './coupons';
 import CouponEditor from './coupon-editor';
 import Carts from './carts';
 import Campaigns from './campaigns';
+import Loyalty from './loyalty';
+import GiftCards from './gift-cards';
+import Reviews from './reviews';
 
-export type Tab = 'coupons' | 'carts' | 'campaigns';
+export type Tab = 'coupons' | 'carts' | 'campaigns' | 'loyalty' | 'gift-cards' | 'reviews';
 export const mhref = (q?: Record<string, string | undefined>) => link('/dashboard/marketing', q);
+const SUB: Tab[] = ['loyalty', 'gift-cards', 'reviews'];
 
 export default function Marketing({ route }: { route: Route }) {
   const tx = useTx();
@@ -26,30 +32,41 @@ export default function Marketing({ route }: { route: Route }) {
   const coupons = couponsStore.use();
   const carts = cartsStore.use();
   const campaigns = campaignsStore.use();
+  const cards = giftCardsStore.use();
+  const reviews = reviewsStore.use();
   useSendRunner();
 
   if (!canSee(role, 'marketing')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('التسويق غير متاح لدورك', 'Marketing is not available for your role')} /></div>;
-  if (route.path[0] === 'coupons' && route.path[1]) return <CouponEditor key={route.path[1]} code={route.path[1]} />;
+  if (route.path[0] === 'coupons' && route.path[1]) return <CouponEditor key={route.path[1] + (route.query.get('auto') ?? '')} code={route.path[1]} auto={route.query.get('auto') === '1'} />;
 
   const q = route.query.get('tab');
-  const tab: Tab = q === 'carts' || q === 'campaigns' ? q : 'coupons';
+  const sub = SUB.find((x) => x === route.path[0]);
+  const tab: Tab = sub ?? (q === 'carts' || q === 'campaigns' ? q : 'coupons');
   const manage = can(role, 'marketing.manage');
   const send = can(role, 'marketing.send');
   const empty = state === 'empty';
   const cnt = (n: number) => (state === 'live' ? n : empty ? 0 : undefined);
+  const sublink = (t: Tab) => link(`/dashboard/marketing/${t}`);
 
-  const actions = tab === 'coupons' && manage ? <LinkButton href={link('/dashboard/marketing/coupons/new')}><Plus className="size-4" aria-hidden="true" />{tx('كوبون جديد', 'New coupon')}</LinkButton>
-    : tab === 'campaigns' && send && route.query.get('compose') !== '1' ? <LinkButton href={mhref({ tab: 'campaigns', compose: '1' })}><Plus className="size-4" aria-hidden="true" />{tx('رسالة جماعية', 'New broadcast')}</LinkButton>
-      : undefined;
+  const actions = tab === 'coupons' && manage ? (
+    <div className="flex flex-wrap gap-2">
+      <LinkButton variant="secondary" href={link('/dashboard/marketing/coupons/new', { auto: '1' })}><Sparkles className="size-4" aria-hidden="true" />{tx('عرض تلقائي', 'Automatic offer')}</LinkButton>
+      <LinkButton href={link('/dashboard/marketing/coupons/new')}><Plus className="size-4" aria-hidden="true" />{tx('كوبون جديد', 'New coupon')}</LinkButton>
+    </div>
+  ) : tab === 'campaigns' && send && route.query.get('compose') !== '1' ? <LinkButton href={mhref({ tab: 'campaigns', compose: '1' })}><Plus className="size-4" aria-hidden="true" />{tx('رسالة جماعية', 'New broadcast')}</LinkButton>
+    : undefined;
 
   const header = (
     <>
-      <PageHeader title={tx('التسويق والعروض', 'Marketing & offers')} description={tx('عروض ورسائل بمعاينة قبل أي أثر', 'Offers and messages, previewed before any effect')} actions={actions} />
+      <PageHeader title={tx('التسويق والعروض', 'Marketing & offers')} description={tx('عروض ورسائل وولاء، بمعاينة قبل أي أثر', 'Offers, messages and loyalty, previewed before any effect')} actions={actions} />
       <ReviewRole />
       <Tabs label={tx('أقسام التسويق', 'Marketing sections')} items={[
-        { href: mhref(), label: tx('الكوبونات', 'Coupons'), current: tab === 'coupons', count: cnt(coupons.length) },
+        { href: mhref(), label: tx('الكوبونات والعروض', 'Coupons & offers'), current: tab === 'coupons', count: cnt(coupons.length) },
         { href: mhref({ tab: 'carts' }), label: tx('السلال المتروكة', 'Abandoned carts'), current: tab === 'carts', count: cnt(audience(carts, 'email', 4).eligible.length) },
         { href: mhref({ tab: 'campaigns' }), label: tx('الحملات', 'Campaigns'), current: tab === 'campaigns', count: cnt(campaigns.length) },
+        { href: sublink('loyalty'), label: tx('الولاء', 'Loyalty'), current: tab === 'loyalty' },
+        { href: sublink('gift-cards'), label: tx('بطاقات الهدايا', 'Gift cards'), current: tab === 'gift-cards', count: cnt(cards.filter((g) => giftState(g) === 'active').length) },
+        { href: sublink('reviews'), label: tx('التقييمات والأسئلة', 'Reviews & questions'), current: tab === 'reviews', count: cnt(reviews.filter((r) => r.status === 'pending').length) },
       ]} />
     </>
   );
@@ -67,8 +84,11 @@ export default function Marketing({ route }: { route: Route }) {
     <div className="space-y-6">
       {header}
       {tab === 'coupons' && <Coupons route={route} empty={empty} canManage={manage} />}
-      {tab === 'carts' && <Carts empty={empty} canSend={send} />}
+      {tab === 'carts' && <Carts route={route} empty={empty} canSend={send} />}
       {tab === 'campaigns' && <Campaigns route={route} empty={empty} canSend={send} />}
+      {tab === 'loyalty' && <Loyalty route={route} empty={empty} canManage={manage} />}
+      {tab === 'gift-cards' && <GiftCards route={route} empty={empty} canManage={manage} />}
+      {tab === 'reviews' && <Reviews route={route} empty={empty} canManage={manage} />}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight } from 'lucide-react';
 import { Badge, cn } from '../../../ds/ui';
 import { settingsStore } from '../../merchant/stores';
-import type { PolicyId } from '../../merchant/workspace';
+import { livePolicyText, type PolicyId } from '../../merchant/workspace';
 import { Crumbs, H1, H3, PANEL, WRAP, to, useS } from '../kit';
 import { useConfig } from '../data';
 
@@ -14,7 +14,7 @@ export default function PolicyPage({ id }: { id: PolicyId }) {
   const policy = settingsStore.use().policies.find((p) => p.id === id);
   const name = (x: PolicyId) => ({ shipping: t.pShipping, returns: t.pReturns, privacy: t.pPrivacy, terms: t.pTerms })[x];
   const Arrow = lang === 'ar' ? ArrowLeft : ArrowRight;
-  const published = policy?.state === 'published' && policy.text.trim();
+  const published = livePolicyText(policy, lang);
   const facts: string[] = id === 'shipping'
     ? cfg.zones.map((z) => [t.zoneLine(l(z.name), l(z.cities), m(z.rate)), z.rateType === 'weight' && z.perKg ? t.perKg(m(z.perKg)) : '', z.freeOver !== null ? t.freeFromLine(m(z.freeOver)) : ''].filter(Boolean).join(' · '))
     : id === 'terms'
@@ -27,7 +27,7 @@ export default function PolicyPage({ id }: { id: PolicyId }) {
       <h1 className={H1}>{name(id)}</h1>
       <p className="mt-2"><Badge>{t.sampleText}</Badge></p>
       <div className="mt-8 space-y-5 text-[15px] leading-loose text-fg/90">
-        {published ? policy.text.split(/\n+/).map((p, i) => <p key={i} dir="auto">{p}</p>) : <p className="text-muted">{t.policyMissing}</p>}
+        {published ? published.split(/\n+/).map((p, i) => <p key={i} dir="auto">{p}</p>) : <p className="text-muted">{t.policyMissing}</p>}
       </div>
       {facts.length > 0 && (
         <section aria-labelledby="sf-pf-h" className={cn(PANEL, 'mt-8 space-y-3 p-5 sm:p-6')}>

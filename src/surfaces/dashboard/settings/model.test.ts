@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { notifyFixture, policyFixtures, providerFixtures, storeFixture, teamFixture, zoneFixtures, domainFixture, type Member } from '../../merchant/workspace';
+import { livePolicyText, normPolicy, notifyFixture, policyFixtures, providerFixtures, storeFixture, teamFixture, zoneFixtures, domainFixture, type Member } from '../../merchant/workspace';
 import { ROLES } from '../../merchant/perms';
 import {
   CATEGORIES, applyProvider, canOpen, canPublish, canSelfCancel, changeRole, checkDomain, codAllowed, checkoutFixture, decodeLog, dnsRecords,
   encodeLog, hostOk, invite, inviteError, inviteStatus, matrix, nextState, normalise, notifyError, parseCheckout, parseCod, parseZone,
   planForSeats, removeMember, rolesFor, savePolicy, searchCategories, seats, shippingQuote, slugError, validateStore, visibleAtCheckout,
-  withExpiry, zoneDraft,
+  withExpiry, zoneDraft, policyMissingLangs, policyHasDraft,
 } from './model';
 
 describe('settings index', () => {
@@ -160,11 +160,28 @@ describe('domains', () => {
 
 describe('policies and notifications', () => {
   it('publishes only with enough text; a draft edit keeps the published state honest', () => {
-    expect(canPublish('short')).toBe(false);
+    // Policies are bilingual now (owner request): {ar, en}, each store language needs its own text.
+    const both = { ar: 'نحفظ بياناتك لإتمام طلباتك فقط ولا نبيعها.', en: 'We keep your data for orders only.' };
+    expect(canPublish({ ar: 'قصير', en: 'short' })).toBe(false);
+    expect(canPublish({ ar: '', en: both.en }, { ar: false, en: true })).toBe(true);
+    expect(policyMissingLangs({ ar: '', en: both.en })).toEqual(['ar']);
     const list = policyFixtures();
-    expect(savePolicy(list, 'privacy', 'We keep your data for orders only.', false).find((p) => p.id === 'privacy')!.state).toBe('draft');
-    expect(savePolicy(list, 'privacy', 'We keep your data for orders only.', true).find((p) => p.id === 'privacy')!.state).toBe('published');
+    expect(savePolicy(list, 'privacy', both, false).find((p) => p.id === 'privacy')!.state).toBe('draft');
+    expect(savePolicy(list, 'privacy', both, true).find((p) => p.id === 'privacy')!.state).toBe('published');
     expect(savePolicy(list, 'returns', list[0].text, false)[0].state).toBe('published');
+  });
+  it('a draft edit never changes the live text shoppers read', () => {
+    const list = policyFixtures();
+    const edited = savePolicy(list, 'returns', { ar: 'نص جديد للاسترجاع خلال 30 يومًا من الاستلام.', en: 'New returns text: 30 days from delivery.' }, false)[0];
+    expect(edited.live).toEqual(list[0].live);
+    expect(livePolicyText(edited, 'en')).toMatch(/14 days/);
+    expect(policyHasDraft(edited)).toBe(true);
+    expect(livePolicyText(savePolicy(list, 'returns', edited.text, true)[0], 'en')).toMatch(/30 days/);
+  });
+  it('reads policies saved by the earlier one-text version', () => {
+    const old = { id: 'returns' as const, state: 'published' as const, text: 'Returns within 7 days.' };
+    expect(normPolicy(old).live).toEqual({ ar: 'Returns within 7 days.', en: 'Returns within 7 days.' });
+    expect(livePolicyText(undefined, 'ar')).toBe('');
   });
   it('keeps at least one channel for failed payments', () => {
     const n = notifyFixture();

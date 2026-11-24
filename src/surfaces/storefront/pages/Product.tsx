@@ -14,6 +14,7 @@ import { accountStore, cartStore, toggleWish } from '../state';
 import { useCatalog, useCategories, useConfig } from '../data';
 import { deliverableCities, standardFor } from '../bridge';
 import { ProductGrid } from './Listing';
+import { ProductReviews } from '../../dashboard/marketing/storefront-reviews';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
   const { t, l, lang, dl, m } = useS();
@@ -217,6 +218,8 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
           </div>
         </div>
       </div>
+
+      <ProductReviews productId={p.id} />
 
       {related.length > 0 && (
         <section aria-labelledby="sf-rel-h" className="pt-16 sm:pt-20">

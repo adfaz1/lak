@@ -4,10 +4,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Minus, Plus, FlaskConical } from 'lucide-react';
 import { link } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
-import { ordersStore } from '../../merchant/stores';
-import type { Channel, Ful, Ineligible, Order, Pay, Ship, View } from '../../merchant/domain';
+import { levelsStore, ordersStore, stockLogStore, teamStore, testStore } from '../../merchant/stores';
+import type { Channel, Ful, Order, Pay, Ship } from '../../merchant/domain';
+import { payView, type Actor, type PayView, type ReturnStage, type StockEffect } from '../../merchant/ops';
+import { applyStockEffects } from '../../merchant/inventory';
 import { Badge, buttonClass, cn, useTx, type Tone } from '../../../ds/ui';
-import { ageOf, type Sort } from './model';
+import { actorFor, ageOf, type ListView, type OpsIneligible, type PayMethodFilter, type Sort } from './model';
 
 /** Links inside this section. Always the rebuilt page, whatever the navigation registry says. */
 export const ohref = (path = '', query?: Record<string, string | undefined>) => link(`/dashboard/orders${path ? `/${path}` : ''}`, query);
@@ -15,26 +17,54 @@ export const ohref = (path = '', query?: Record<string, string | undefined>) => 
 /** Persist one changed order. */
 export const saveOrder = (next: Order) => ordersStore.set((all) => all.map((o) => (o.ref === next.ref ? next : o)));
 
+/** Apply order stock effects to the inventory, with stock-log lines naming the order. */
+export function applyEffects(effects: StockEffect[], who: Actor, ref: string, tag: string) {
+  if (!effects.length) return;
+  const r = applyStockEffects(levelsStore.get(), effects, who.name, ref, `${tag}-${ref}-${Date.now().toString(36)}`);
+  levelsStore.set(r.levels);
+  if (r.log.length) stockLogStore.set((lg) => [...r.log, ...lg]);
+}
+
+/** Who is acting now (the review role's team member). */
+export function useActor(): Actor {
+  const role = testStore.use().role;
+  const members = teamStore.use().members;
+  return actorFor(role, members);
+}
+export function useRoleLabel() {
+  const tx = useTx();
+  return (r: string) => ({ owner: tx('المالك', 'Owner'), fulfilment: tx('التجهيز', 'Fulfilment'), finance: tx('المالية', 'Finance'), marketing: tx('التسويق', 'Marketing'), system: tx('النظام', 'System'), customer: tx('العميل', 'Customer') } as Record<string, string>)[r] ?? r;
+}
+
 export function useLabels() {
   const tx = useTx();
   return {
-    view: (v: View) => ({ all: tx('الكل', 'All'), needs: tx('يحتاج تجهيزًا', 'To fulfil'), late: tx('متأخر', 'Late'), payfail: tx('تعثّر الدفع', 'Payment failed'), shipped: tx('شُحن', 'Shipped'), returns: tx('مرتجعات', 'Returns') })[v],
+    view: (v: ListView) => ({ all: tx('الكل', 'All'), needs: tx('يحتاج تجهيزًا', 'To fulfil'), late: tx('متأخر', 'Late'), payfail: tx('دفع لم يكتمل', 'Payment incomplete'), shipped: tx('شُحن', 'Shipped'), returns: tx('مرتجعات', 'Returns'), cancelled: tx('ملغاة', 'Cancelled') })[v],
+    payView: (p: PayView) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), verifying: tx('بانتظار التحقق', 'Pending verification'), cod_due: tx('دفع عند الاستلام', 'Cash on delivery'), cod_collected: tx('حُصّل عند الاستلام', 'COD collected'), link: tx('بانتظار الدفع', 'Awaiting payment'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
+    method: (m: PayMethodFilter) => ({ card: tx('بطاقة', 'Card'), applepay: 'Apple Pay', bnpl: tx('تقسيط', 'Buy now, pay later'), cod: tx('عند الاستلام', 'Cash on delivery'), manual: tx('يدوي', 'Manual') })[m],
+    stage: (s: ReturnStage) => ({ requested: tx('طلب جديد', 'Requested'), approved: tx('موافق عليه', 'Approved'), rejected: tx('مرفوض', 'Rejected'), received: tx('استُلم', 'Received'), inspected: tx('فُحص', 'Inspected'), refunded: tx('رُدّ المبلغ', 'Refunded'), exchanged: tx('استُبدل', 'Exchanged') })[s],
     channel: (c: Channel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app') })[c],
     pay: (p: Pay) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
     ful: (f: Ful) => ({ none: tx('لم يُجهَّز', 'Unfulfilled'), partial: tx('مجهّز جزئيًا', 'Partly fulfilled'), done: tx('مجهّز', 'Fulfilled') })[f],
     ship: (s: Ship) => ({ none: tx('لا شحنة', 'No shipment'), label: tx('صدر الملصق', 'Label issued'), transit: tx('في الطريق', 'In transit'), delivered: tx('تم التسليم', 'Delivered') })[s],
     sort: (s: Sort) => ({ new: tx('الأحدث أولًا', 'Newest first'), old: tx('الأقدم أولًا', 'Oldest first'), high: tx('الأعلى قيمة', 'Highest total'), low: tx('الأقل قيمة', 'Lowest total') })[s],
-    skip: (r: Ineligible) => ({ payNotConfirmed: tx('الدفع لم يكتمل', 'Payment not completed'), refunded: tx('مسترد كليًا أو جزئيًا', 'Refunded in full or in part'), alreadyFulfilled: tx('مجهّز بالكامل', 'Already fulfilled'), alreadyConfirmed: tx('مؤكد من قبل', 'Already confirmed') })[r],
+    skip: (r: OpsIneligible) => ({ payNotConfirmed: tx('الدفع لم يكتمل', 'Payment not completed'), refunded: tx('مسترد كليًا أو جزئيًا', 'Refunded in full or in part'), alreadyFulfilled: tx('مجهّز أو صدر ملصقه', 'Already fulfilled or labelled'), alreadyConfirmed: tx('مؤكد من قبل', 'Already confirmed'), cancelled: tx('ملغى', 'Cancelled'), needsLocation: tx('من أكثر من مستودع: جهّزه من صفحته', 'Ships from several warehouses: fulfil it from its page'), noLabel: tx('لا ملصق بعد', 'No label yet'), verifying: tx('الدفع بانتظار التحقق', 'Payment pending verification') })[r],
   };
 }
 
 export const PAY_TONE: Record<Pay, Tone> = { paid: 'green', failed: 'red', partially_refunded: 'amber', refunded: 'gray' };
+export const PAYVIEW_TONE: Record<PayView, Tone> = { paid: 'green', failed: 'red', verifying: 'amber', cod_due: 'sky', cod_collected: 'green', link: 'amber', partially_refunded: 'amber', refunded: 'gray' };
 export const FUL_TONE: Record<Ful, Tone> = { none: 'brand', partial: 'amber', done: 'green' };
 export const SHIP_TONE: Record<Ship, Tone> = { none: 'gray', label: 'sky', transit: 'sky', delivered: 'green' };
 
-export function PayBadge({ o }: { o: Order }) { const L = useLabels(); return <Badge tone={PAY_TONE[o.pay]}>{L.pay(o.pay)}</Badge>; }
+/** Payment as the merchant should read it: verification and cash on delivery are never shown as failed or paid. */
+export function PayBadge({ o }: { o: Order }) { const L = useLabels(); const v = payView(o); return <Badge tone={PAYVIEW_TONE[v]}>{L.payView(v)}</Badge>; }
 /** Fulfilment does not apply while payment failed: shown neutral, never as "to fulfil". */
-export function FulBadge({ o }: { o: Order }) { const L = useLabels(); return <Badge tone={o.pay === 'failed' ? 'gray' : FUL_TONE[o.ful]}>{L.ful(o.ful)}</Badge>; }
+export function FulBadge({ o }: { o: Order }) {
+  const L = useLabels(); const tx = useTx();
+  if (o.cancelled) return <Badge tone="gray">{tx('ملغى', 'Cancelled')}</Badge>;
+  return <Badge tone={o.pay === 'failed' ? 'gray' : FUL_TONE[o.ful]}>{L.ful(o.ful)}</Badge>;
+}
 export function ShipBadge({ o }: { o: Order }) { const L = useLabels(); return <Badge tone={SHIP_TONE[o.ship]}>{L.ship(o.ship)}</Badge>; }
 
 export function useAge() {

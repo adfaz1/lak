@@ -12,7 +12,9 @@ import { shopperView, type ShopperView } from '../dashboard/storefront/model';
 import { itemCount } from './domain';
 import { H1, WRAP, to, useS } from './kit';
 import { accountStore } from './state';
-import { useCart, useCategories, useConfig } from './data';
+import { useCart, useCategories, useConfig, useStoreContent } from './data';
+import { servedPage, socialLinks } from './bridge';
+import ContentPage, { useDocTitle } from './pages/Content';
 import { ReviewPanel, setSfState, useSfState } from './review';
 import { headingText, sectionOf, storeCss } from './theme';
 import Home from './pages/Home';
@@ -48,6 +50,8 @@ export default function Storefront({ route }: { route: Route }) {
   }, []);
 
   const [a, b] = route.path;
+  const content = useStoreContent();
+  useDocTitle(route);
   const page = (() => {
     switch (a) {
       case undefined: return <Home />;
@@ -60,7 +64,7 @@ export default function Storefront({ route }: { route: Route }) {
       case 'track': return b ? <TrackPage key={b} reference={b} route={route} /> : <TrackLookup route={route} />;
       case 'account': return <AccountPage route={route} />;
       case 'returns': return <ReturnsPage key={b} reference={b ?? ''} route={route} />;
-      case 'page': return POLICY_IDS.includes(b as never) ? <PolicyPage id={b as never} /> : <NotFound />;
+      case 'page': return POLICY_IDS.includes(b as never) ? <PolicyPage id={b as never} /> : servedPage(content.pages, b) ? <ContentPage page={servedPage(content.pages, b)!} /> : <NotFound />;
       default: return <NotFound />;
     }
   })();
@@ -168,6 +172,10 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
   const acc = accountStore.use();
   const cats = useCategories();
   const cfg = useConfig();
+  const content = useStoreContent();
+  // The merchant's published header menu (Online store → Menus); categories when the menu is empty.
+  const menuLinks = content.header.length ? content.header
+    : [{ id: 'all', label: { ar: t.all, en: t.all }, path: '/c/all', url: null }, ...cats.map((c) => ({ id: c.id, label: c.name, path: `/c/${c.id}`, url: null }))];
   const n = itemCount(cart);
   const [menu, setMenu] = useState(false);
   const onSearch = route.path[0] === 'search';
@@ -203,8 +211,8 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
         <IconButton label={t.menu} onClick={() => setMenu(true)} className="-ms-2 text-fg lg:hidden"><Menu className="size-5" aria-hidden="true" /></IconButton>
         <a href={to()} className="text-[22px] font-bold tracking-tight text-fg max-lg:absolute max-lg:start-1/2 max-lg:-translate-x-1/2 max-lg:rtl:translate-x-1/2 sm:text-2xl">{l(cfg.name)}</a>
         <nav aria-label={t.cats} className="ms-10 hidden items-center gap-6 lg:flex">
-          {navLink(to('/c/all'), t.all, curCat === 'all')}
-          {cats.map((c) => navLink(to(`/c/${c.id}`), l(c.name), curCat === c.id))}
+          {menuLinks.map((x) => (x.url ? <a key={x.id} href={x.url} target="_blank" rel="noopener" className="inline-flex h-12 items-center whitespace-nowrap px-1 text-[14px] font-medium text-muted hover:text-fg">{l(x.label)}</a>
+            : navLink(to(x.path!), l(x.label), x.path === `/c/${curCat}` || (!!route.path[0] && x.path === `/${route.path.join('/')}`))))}
         </nav>
         <div className="ms-auto flex items-center gap-0.5">
           <form role="search" className="relative me-1 hidden xl:block" onSubmit={(e) => { e.preventDefault(); navigate(to('/search', { q: q.trim() || undefined })); }}>
@@ -228,7 +236,7 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
           <nav aria-label={t.cats}>
             <p className="mb-2 text-xs font-semibold text-subtle">{t.cats}</p>
             <ul className="divide-y divide-border">
-              {[{ href: to('/c/all'), label: t.all }, ...cats.map((c) => ({ href: to(`/c/${c.id}`), label: l(c.name) }))].map((x) => (
+              {menuLinks.map((x) => ({ href: x.url ?? to(x.path!), label: l(x.label) })).map((x) => (
                 <li key={x.href}><a href={x.href} className="flex h-12 items-center text-[15px] font-medium">{x.label}</a></li>
               ))}
             </ul>
@@ -248,10 +256,15 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
   );
 }
 
+const SOCIAL_NAME: Record<string, string> = { instagram: 'Instagram', x: 'X', tiktok: 'TikTok', snapchat: 'Snapchat', facebook: 'Facebook', linkedin: 'LinkedIn', youtube: 'YouTube' };
+
 function Footer() {
   const { t, l } = useS();
+  const tx = useTx();
   const cats = useCategories();
   const cfg = useConfig();
+  const content = useStoreContent();
+  const social = socialLinks(settingsStore.use().store.social);
   const col = 'space-y-2.5 text-sm';
   const a = 'text-muted hover:text-fg';
   return (
@@ -260,6 +273,11 @@ function Footer() {
         <div className="space-y-3">
           <p className="text-xl font-bold tracking-tight">{l(cfg.name)}</p>
           <p className="max-w-xs text-sm text-muted">{t.aboutBody(l(cfg.name))}</p>
+          {social.length > 0 && (
+            <ul className="flex flex-wrap gap-x-3 gap-y-1 text-xs" aria-label={tx('حساباتنا', 'Follow us')}>
+              {social.map((x) => <li key={x.id}><a href={x.url} target="_blank" rel="noopener" className="font-medium text-muted underline-offset-2 hover:text-fg hover:underline">{SOCIAL_NAME[x.id]}</a></li>)}
+            </ul>
+          )}
           <p className="text-xs text-muted">{t.vatNote}</p>
         </div>
         <nav aria-label={t.cats}>
@@ -269,8 +287,9 @@ function Footer() {
         <nav aria-label={t.care}>
           <h2 className="mb-3 text-[13px] font-semibold">{t.care}</h2>
           <ul className={col}>
-            <li><a href={to('/track')} className={a}>{t.track}</a></li>
-            <li><a href={to('/account')} className={a}>{t.account}</a></li>
+            {(content.footer.length ? content.footer : [{ id: 'track', label: { ar: t.track, en: t.track }, path: '/track', url: null }, { id: 'acc', label: { ar: t.account, en: t.account }, path: '/account', url: null }]).map((x) => (
+              <li key={x.id}><a href={x.url ?? to(x.path!)} {...(x.url ? { target: '_blank', rel: 'noopener' } : {})} className={a}>{l(x.label)}</a></li>
+            ))}
             <li className="text-xs leading-relaxed text-muted">{t.careHours}</li>
           </ul>
         </nav>

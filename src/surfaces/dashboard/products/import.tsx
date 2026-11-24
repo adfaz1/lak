@@ -1,30 +1,34 @@
 // CSV import wizard (`#/dashboard/products/import`): template → file → mapping → validation → conflicts → confirm →
 // background job → result and error report. Reuses the import rules in merchant/catalog.ts.
 // Wizard state lives in a session store so the job keeps running if the merchant leaves the page.
-import { useState, type ReactNode } from 'react';
-import { Download, FileSpreadsheet, CheckCircle2, AlertTriangle, Copy, Ban, RefreshCw, SkipForward, ArrowLeft } from 'lucide-react';
+import { useRef, useState, type ReactNode } from 'react';
+import { Download, FileSpreadsheet, CheckCircle2, AlertTriangle, Copy, Ban, RefreshCw, SkipForward, ArrowLeft, UploadCloud } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import {
   IMPORT_FIELDS, REQUIRED_FIELDS, TEMPLATE_HEADERS, errorReportRows, parseCsv, planImport, sampleFile, suggestMapping, takenSkus, toCsv, validateImport,
   validateMapping, type ConflictPolicy, type ImportField, type ImportPlan, type RowProblem,
 } from '../../merchant/catalog';
+import { LOCATIONS, LOC_IDS, type LocId } from '../../merchant/domain';
 import { can } from '../../merchant/perms';
-import { levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, levelsStore, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, ErrorState, InfoHint, LinkButton, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
-import { Alert, DataTable, Modal, PageHeader, Select, Simulated, type Column } from '../../../ds/kit';
+import { Alert, DataTable, Modal, PageHeader, Select, Switch, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
-import { applyImportBatch, importWork } from './model';
+import { applyImportBatchX, canStartImport, cellProblems, checkImportFile, extendImport, importWork, type CheckedRowX, type ImportFileProblem, type SaveRule } from './model';
 import { NoAccess, ReviewTools, Stepper, downloadText, phref, useRole } from './common';
 
-type FileKind = 'large' | 'small';
+type FileKind = 'large' | 'small' | 'device';
 interface Job { total: number; done: number; running: boolean; created: number; updated: number; plan: ImportPlan; file: FileKind }
-interface State { step: number; file: FileKind | null; headers: string[]; rows: string[][]; mapping: ImportField[]; policy: ConflictPolicy; job: Job | null }
-const init = (): State => ({ step: 0, file: null, headers: [], rows: [], mapping: [], policy: 'skip', job: null });
+interface State {
+  step: number; file: FileKind | null; fileName: string; headers: string[]; rows: string[][]; mapping: ImportField[]; policy: ConflictPolicy;
+  rule: SaveRule; loc: LocId; job: Job | null;
+}
+const init = (): State => ({ step: 0, file: null, fileName: '', headers: [], rows: [], mapping: [], policy: 'skip', rule: 'valid', loc: 'ryd', job: null });
 const importStore = createStore.key('dashboard.productsImport')<State>(init);
 let timer: ReturnType<typeof setInterval> | null = null;
 
-function startJob(plan: ImportPlan, file: FileKind) {
+function startJob(plan: ImportPlan, file: FileKind, loc: LocId) {
   const work = importWork(plan);
   importStore.set((s) => ({ ...s, step: 6, job: { total: work.length, done: 0, running: work.length > 0, created: 0, updated: 0, plan, file } }));
   if (timer) clearInterval(timer);
@@ -32,7 +36,7 @@ function startJob(plan: ImportPlan, file: FileKind) {
     const s = importStore.get();
     if (!s.job || !s.job.running) { if (timer) clearInterval(timer); timer = null; return; }
     const batch = work.slice(s.job.done, s.job.done + 50);
-    const r = applyImportBatch(productsStore.get(), levelsStore.get(), batch);
+    const r = applyImportBatchX(productsStore.get(), levelsStore.get(), batch as { kind: 'create' | 'update'; row: CheckedRowX }[], loc);
     productsStore.set(r.products);
     levelsStore.set(r.levels);
     const done = s.job.done + batch.length;
@@ -59,21 +63,25 @@ export default function ImportWizard() {
   const fieldName: Record<ImportField, string> = {
     name: tx('الاسم', 'Name'), sku: 'SKU', price: tx('السعر', 'Price'), compareAt: tx('السعر قبل الخصم', 'Compare-at price'),
     qty: tx('الكمية', 'Quantity'), status: tx('الحالة', 'Status'), ignore: tx('تجاهل العمود', 'Ignore column'),
+    nameAr: tx('الاسم بالعربية', 'Arabic name'), cost: tx('التكلفة', 'Cost'), category: tx('الفئة', 'Category'),
   };
   const problem = (c: RowProblem | 'duplicate' | 'exists') => ({
     nameMissing: tx('الاسم مفقود', 'Name missing'), skuMissing: tx('SKU مفقود', 'SKU missing'), price: tx('سعر غير صالح', 'Invalid price'),
     compareAt: tx('السعر قبل الخصم غير صالح أو ليس أعلى', 'Compare-at invalid or not higher'), qty: tx('كمية غير صالحة', 'Invalid quantity'),
-    status: tx('حالة غير معروفة', 'Unknown status'), duplicate: tx('مكرر في الملف؛ أُبقي السطر', 'Duplicate in file; kept line'), exists: tx('SKU موجود؛ تُخطّي', 'SKU exists; skipped'),
+    status: tx('حالة غير معروفة', 'Unknown status'), cost: tx('تكلفة غير صالحة', 'Invalid cost'), category: tx('فئة غير موجودة في متجرك', 'Category not in your store'), duplicate: tx('مكرر في الملف؛ أُبقي السطر', 'Duplicate in file; kept line'), exists: tx('SKU موجود؛ تُخطّي', 'SKU exists; skipped'),
   })[c];
 
   const existing = takenSkus(productsStore.get());
   const checking = s.step >= 3 && s.step < 6;
-  const plan = checking ? planImport(validateImport(s.rows, s.mapping, existing), s.policy) : s.job?.plan;
+  const checked = checking ? extendImport(s.rows, s.mapping, validateImport(s.rows, s.mapping, existing), categoriesStore.get()) : [];
+  const plan = checking ? planImport(checked, s.policy) : s.job?.plan;
   const mapCheck = validateMapping(s.mapping);
-  const choose = (file: FileKind) => {
+  const loc = LOC_IDS.includes(s.loc) ? s.loc : LOC_IDS[0];
+  const choose = (file: 'large' | 'small') => {
     const [headers, ...rows] = parseCsv(sampleFile(file, [...existing]));
-    set({ file, headers, rows, mapping: suggestMapping(headers), step: 2 });
+    set({ file, fileName: file === 'large' ? 'catalog-1000.csv' : 'new-arrivals.csv', headers, rows, mapping: suggestMapping(headers), step: 2 });
   };
+  const fromDevice = (name: string, headers: string[], rows: string[][]) => set({ file: 'device', fileName: name, headers, rows, mapping: suggestMapping(headers), step: 2 });
   const report = (p: ImportPlan) => downloadText('import-errors.csv', toCsv(errorReportRows(p, problem, lang === 'ar' ? ['السطر', 'SKU', 'الحقل', 'القيمة', 'المشكلة'] : ['line', 'sku', 'field', 'value', 'problem'])));
   const nav = (prev: number | null, next: { label: string; onClick: () => void; disabled?: boolean } | null) => (
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-5 py-4">
@@ -103,7 +111,9 @@ export default function ImportWizard() {
 
       {s.step === 1 && (
         <Card aria-labelledby="im-1">
-          <CardHeader id="im-1" title={<>{tx('اختر ملفًا', 'Choose a file')} <Simulated /></>} hint={tx('في هذه النسخة تختار ملف مثال جاهزًا؛ لا نقرأ ملفات من جهازك.', 'In this version you pick a ready sample file; no file is read from your device.')} />
+          <CardHeader id="im-1" title={tx('ارفع ملفك', 'Upload your file')} hint={tx('يُقرأ الملف في متصفحك فقط. لا يُرسل إلى أي خادم.', 'The file is read in your browser only. It is not sent to any server.')} />
+          <div className="px-5 pb-4"><FilePicker onRead={fromDevice} /></div>
+          <p className="px-5 pb-2 text-xs font-semibold text-muted">{tx('أو جرّب ملف مثال', 'Or try a sample file')}</p>
           <div className="grid grid-cols-1 gap-3 px-5 pb-5 sm:grid-cols-2">
             {([['large', 'catalog-1000.csv', tx('1000 سطر · أخطاء ومكرر وتعارض', '1000 rows · errors, duplicates, conflicts')], ['small', 'new-arrivals.csv', tx('5 أسطر · أحدها SKU موجود', '5 rows · one existing SKU')]] as const).map(([k, name, desc]) => (
               <button key={k} type="button" onClick={() => choose(k)} className={cn('flex items-center gap-3 rounded-xl border p-4 text-start transition-colors hover:border-brand-300 hover:bg-brand-500/5', s.file === k ? 'border-brand-400' : 'border-border')}>
@@ -119,7 +129,7 @@ export default function ImportWizard() {
       {s.step === 2 && (
         <Card aria-labelledby="im-2">
           <CardHeader id="im-2" title={tx('طابق الأعمدة بحقول المنتج', 'Match columns to product fields')} hint={tx('اقترحنا مطابقة من أسماء الأعمدة؛ راجعها.', 'We suggested a mapping from the column names; review it.')} />
-          <p className="px-5 text-sm text-muted">{tx(`قُرئ ${s.rows.length} سطرًا من`, `Read ${s.rows.length} rows from`)} <Ref>{s.file === 'large' ? 'catalog-1000.csv' : 'new-arrivals.csv'}</Ref> · {tx('لم يُستورد شيء بعد', 'nothing imported yet')}</p>
+          <p className="px-5 text-sm text-muted">{tx(`قُرئ ${s.rows.length} سطرًا من`, `Read ${s.rows.length} rows from`)} <Ref>{s.fileName}</Ref> · {tx('لم يُستورد شيء بعد', 'nothing imported yet')}</p>
           <ul className="grid grid-cols-1 gap-3 p-5 sm:grid-cols-2">
             {s.headers.map((h, i) => (
               <li key={`${h}-${i}`} className="rounded-xl border border-border p-3">
@@ -150,8 +160,19 @@ export default function ImportWizard() {
             { tone: 'red', icon: <Ban className="size-4" />, label: tx('غير صالح', 'Invalid'), n: plan.invalid.length },
           ]} />
           {plan.invalid.length + plan.duplicates.length > 0 && <ProblemTable plan={plan} problem={problem} />}
+          <CellGrid rows={checked} mapping={s.mapping} headers={s.headers} raw={s.rows} fieldName={fieldName} problem={problem} />
+          <fieldset className="mx-5 mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <legend className="mb-2 text-[13px] font-semibold text-fg">{tx('عند وجود أسطر غير صالحة', 'When some rows are invalid')}</legend>
+            {([['valid', tx('استورد الصالح وتخطَّ غير الصالح', 'Import valid rows, skip invalid ones'), tx('غير الصالح في تقرير الأخطاء.', 'Invalid rows go to the error report.')],
+              ['all', tx('لا تستورد شيئًا حتى يصح الملف كله', 'Import nothing until the whole file is valid'), tx('صحّح الملف وارفعه مرة أخرى.', 'Fix the file and upload it again.')]] as const).map(([v, title, desc]) => (
+              <label key={v} className={cn('flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors', s.rule === v ? 'border-brand-400 bg-brand-500/5' : 'border-border hover:border-brand-300')}>
+                <input type="radio" name="rule" className="mt-1 accent-brand-600" checked={s.rule === v} onChange={() => set({ rule: v })} />
+                <span><span className="block text-sm font-semibold text-fg">{title}</span><span className="block text-xs text-muted">{desc}</span></span>
+              </label>
+            ))}
+          </fieldset>
           <div className="flex flex-wrap items-center gap-3 px-5 pb-4">
-            <p className="flex-1 text-sm text-muted">{tx('الأسطر غير الصالحة لن تُستورد وتظهر في التقرير.', 'Invalid rows won’t be imported; they are in the report.')}</p>
+            <p className="flex-1 text-sm text-muted">{s.rule === 'valid' ? tx('الأسطر غير الصالحة لن تُستورد وتظهر في التقرير.', 'Invalid rows won’t be imported; they are in the report.') : plan.invalid.length ? tx(`${plan.invalid.length} أسطر غير صالحة: لن يبدأ الاستيراد.`, `${plan.invalid.length} invalid rows: the import won’t start.`) : tx('كل الأسطر صالحة.', 'Every row is valid.')}</p>
             <Button variant="secondary" size="sm" onClick={() => report(plan)}><Download className="size-4" aria-hidden="true" />{tx('تقرير الأخطاء', 'Error report')}</Button>
           </div>
           {nav(2, { label: tx('التالي: التعارض', 'Next: conflicts'), onClick: () => set({ step: 4 }) })}
@@ -164,7 +185,7 @@ export default function ImportWizard() {
           <fieldset className="grid grid-cols-1 gap-3 px-5 pb-5 sm:grid-cols-2">
             <legend className="sr-only">{tx('سياسة التعارض', 'Conflict policy')}</legend>
             {([['skip', <SkipForward key="s" className="size-5" />, tx('تخطَّ الموجود', 'Skip existing'), tx('لا تغيير على منتجاتك الحالية.', 'Your current products stay as they are.')],
-              ['update', <RefreshCw key="u" className="size-5" />, tx('حدّث السعر والحالة', 'Update price and status'), tx('الاسم والصور والمخزون لا تتغير.', 'Name, images and stock don’t change.')]] as const).map(([v, icon, title, desc]) => (
+              ['update', <RefreshCw key="u" className="size-5" />, tx('حدّث السعر والحالة', 'Update price and status'), tx('ومعهما التكلفة والفئة إن وُجدتا. الاسم والصور والمخزون لا تتغير.', 'Plus cost and category when in the file. Name, images and stock don’t change.')]] as const).map(([v, icon, title, desc]) => (
               <label key={v} className={cn('flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors', s.policy === v ? 'border-brand-400 bg-brand-500/5' : 'border-border hover:border-brand-300')}>
                 <input type="radio" name="policy" className="mt-1 accent-brand-600" checked={s.policy === v} onChange={() => set({ policy: v })} />
                 <span className="text-brand-600 dark:text-brand-300" aria-hidden="true">{icon}</span>
@@ -172,6 +193,13 @@ export default function ImportWizard() {
               </label>
             ))}
           </fieldset>
+          {s.mapping.includes('qty') && (
+            <div className="flex flex-wrap items-center gap-2 px-5 pb-5 text-sm">
+              <label htmlFor="im-loc" className="font-medium text-fg">{tx('الكمية تدخل في', 'Quantities go to')}</label>
+              <Select id="im-loc" className="w-auto" value={loc} onChange={(e) => set({ loc: e.target.value })}>{LOC_IDS.map((l) => <option key={l} value={l}>{LOCATIONS[l][lang]}</option>)}</Select>
+              <InfoHint>{tx('للمنتجات الجديدة فقط. تعديل مخزون الموجود يتم من المخزون بسبب.', 'New products only. Existing stock changes go through Inventory with a reason.')}</InfoHint>
+            </div>
+          )}
           {nav(3, { label: tx('التالي: التأكيد', 'Next: confirm'), onClick: () => set({ step: 5 }) })}
         </Card>
       )}
@@ -185,7 +213,8 @@ export default function ImportWizard() {
             { tone: 'gray', icon: <SkipForward className="size-4" />, label: tx('سيُتخطى', 'Will be skipped'), n: plan.skipExisting.length + plan.duplicates.length },
             { tone: 'red', icon: <Ban className="size-4" />, label: tx('غير صالح', 'Invalid'), n: plan.invalid.length },
           ]} />
-          {nav(4, { label: tx('ابدأ الاستيراد', 'Start import'), onClick: () => setConfirm(true), disabled: plan.create.length + plan.update.length === 0 })}
+          {!canStartImport(plan, s.rule) && plan.invalid.length > 0 && s.rule === 'all' && <div className="px-5 pb-4"><Alert tone="bad" title={tx('اخترت «لا شيء حتى يصح الملف كله»', 'You chose “nothing until the whole file is valid”')} action={<Button size="sm" variant="secondary" onClick={() => set({ rule: 'valid' })}>{tx('استورد الصالح فقط', 'Import valid rows only')}</Button>}>{tx(`صحّح ${plan.invalid.length} أسطر أو غيّر القاعدة.`, `Fix ${plan.invalid.length} rows or change the rule.`)}</Alert></div>}
+          {nav(4, { label: tx('ابدأ الاستيراد', 'Start import'), onClick: () => setConfirm(true), disabled: !canStartImport(plan, s.rule) })}
         </Card>
       )}
 
@@ -195,10 +224,11 @@ export default function ImportWizard() {
       {confirm && plan && s.file && (
         <Modal title={tx('تأكيد الاستيراد', 'Confirm import')} onClose={() => setConfirm(false)}
           description={tx(`سيُكتب ${plan.create.length + plan.update.length} سطرًا في الكتالوج.`, `${plan.create.length + plan.update.length} rows will be written to your catalogue.`)}
-          footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { setConfirm(false); startJob(plan, s.file!); }}>{tx(`استورد ${plan.create.length + plan.update.length} سطرًا`, `Import ${plan.create.length + plan.update.length} rows`)}</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setConfirm(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { setConfirm(false); startJob(plan, s.file!, loc); }}>{tx(`استورد ${plan.create.length + plan.update.length} سطرًا`, `Import ${plan.create.length + plan.update.length} rows`)}</Button></>}>
           <ul className="space-y-1.5 text-sm text-muted">
             <li>{tx(`${plan.create.length} منتجًا جديدًا بحالة الملف (الافتراضي مسودة)`, `${plan.create.length} new products with the file’s status (draft by default)`)}</li>
-            <li>{tx(`${plan.update.length} منتجًا موجودًا: السعر والحالة فقط`, `${plan.update.length} existing products: price and status only`)}</li>
+            <li>{tx(`${plan.update.length} منتجًا موجودًا: السعر والحالة (والتكلفة والفئة إن وُجدتا)`, `${plan.update.length} existing products: price and status (and cost and category when given)`)}</li>
+            {plan.invalid.length > 0 && <li>{tx(`${plan.invalid.length} سطرًا غير صالح يُتخطى ويبقى في التقرير`, `${plan.invalid.length} invalid rows are skipped and stay in the report`)}</li>}
             <li>{tx('يعمل في الخلفية؛ يمكنك مغادرة الصفحة.', 'Runs in the background; you can leave the page.')}</li>
           </ul>
         </Modal>
@@ -271,5 +301,100 @@ function Result({ job, onReport, onNew }: { job: Job; onReport: () => void; onNe
         )}
       </div>
     </Card>
+  );
+}
+
+/** File input plus drop zone. Reads the merchant's own CSV with FileReader; nothing leaves the browser. */
+export function FilePicker({ onRead }: { onRead: (name: string, headers: string[], rows: string[][]) => void }) {
+  const tx = useTx();
+  const input = useRef<HTMLInputElement>(null);
+  const [over, setOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<{ name: string; problem: ImportFileProblem | 'read' } | null>(null);
+  const msg = (p: ImportFileProblem | 'read') => ({
+    type: tx('الملف ليس CSV. احفظه من Excel بصيغة CSV UTF-8.', 'Not a CSV file. Save it from Excel as “CSV UTF-8”.'),
+    size: tx('الملف أكبر من 5 ميغابايت. قسّمه إلى ملفين.', 'The file is over 5 MB. Split it into two files.'),
+    empty: tx('الملف فارغ.', 'The file is empty.'),
+    binary: tx('لا يمكن قراءة الملف كنص. قد يكون ملف Excel (xlsx) أُعيدت تسميته.', 'The file can’t be read as text. It may be an Excel (xlsx) file renamed.'),
+    oneColumn: tx('وجدنا عمودًا واحدًا فقط. تأكد أن الفاصل فاصلة.', 'Only one column found. Check the file uses commas.'),
+    noRows: tx('في الملف سطر العناوين فقط، بلا منتجات.', 'The file has a header row only, no products.'),
+    tooMany: tx('أكثر من 5000 سطر. قسّم الملف.', 'More than 5,000 rows. Split the file.'),
+    read: tx('تعذّرت قراءة الملف. جرّب مرة أخرى.', 'The file could not be read. Try again.'),
+  })[p];
+  const take = (f: File | undefined) => {
+    if (!f) return;
+    setErr(null);
+    const pre = checkImportFile(f.name, f.size, 'x,y\nx,y');
+    if (pre.problem === 'type' || pre.problem === 'size') { setErr({ name: f.name, problem: pre.problem }); return; }
+    setBusy(true);
+    const reader = new FileReader();
+    reader.onerror = () => { setBusy(false); setErr({ name: f.name, problem: 'read' }); };
+    reader.onload = () => {
+      setBusy(false);
+      const r = checkImportFile(f.name, f.size, typeof reader.result === 'string' ? reader.result : null);
+      if (r.problem) { setErr({ name: f.name, problem: r.problem }); return; }
+      onRead(f.name, r.headers, r.rows);
+    };
+    reader.readAsText(f, 'utf-8');
+  };
+  return (
+    <div className="space-y-3">
+      <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files[0]); }}
+        className={cn('flex flex-col items-center gap-3 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors', over ? 'border-brand-400 bg-brand-500/5' : 'border-border')}>
+        <span className="grid size-12 place-items-center rounded-xl bg-brand-500/10 text-brand-700 dark:text-brand-300"><UploadCloud className="size-6" aria-hidden="true" /></span>
+        <p className="text-sm font-semibold text-fg">{busy ? tx('جارٍ قراءة الملف…', 'Reading the file…') : tx('اسحب ملف CSV هنا', 'Drag a CSV file here')}</p>
+        <Button variant="secondary" onClick={() => input.current?.click()} disabled={busy}>{tx('اختر ملفًا من جهازك', 'Choose a file from your device')}</Button>
+        <p className="text-xs text-muted">{tx('CSV حتى 5 ميغابايت و5000 سطر', 'CSV up to 5 MB and 5,000 rows')}</p>
+        <input ref={input} type="file" accept=".csv,text/csv,.txt" className="sr-only" tabIndex={-1} aria-label={tx('ملف CSV', 'CSV file')} onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
+      </div>
+      {err && <Alert tone="bad" title={<bdi dir="ltr">{err.name}</bdi>}>{msg(err.problem)}</Alert>}
+    </div>
+  );
+}
+
+/** Every mapped cell of the first rows, invalid cells marked, with a switch to show only rows that have a problem. */
+function CellGrid({ rows, mapping, raw, fieldName, problem }: { rows: CheckedRowX[]; mapping: ImportField[]; headers: string[]; raw: string[][]; fieldName: Record<ImportField, string>; problem: (c: RowProblem | 'duplicate' | 'exists') => string }) {
+  const tx = useTx();
+  const [onlyBad, setOnlyBad] = useState(true);
+  const cols = mapping.map((f, i) => ({ f, i })).filter((c) => c.f !== 'ignore');
+  const list = rows.map((r, idx) => ({ r, idx })).filter(({ r }) => !onlyBad || r.problems.length > 0 || r.dupOf !== null);
+  const shown = list.slice(0, 50);
+  return (
+    <div className="mx-5 mb-4 overflow-hidden rounded-xl border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-surface-2/60 px-4 py-2">
+        <p className="text-xs font-semibold text-muted">{tx(`معاينة الخلايا · ${shown.length} من ${list.length}`, `Cell preview · ${shown.length} of ${list.length}`)}</p>
+        <label className="flex items-center gap-2 text-xs text-muted"><Switch checked={onlyBad} onChange={setOnlyBad} label={tx('الأسطر التي فيها مشكلة فقط', 'Rows with a problem only')} />{tx('فيها مشكلة فقط', 'Problems only')}</label>
+      </div>
+      {shown.length === 0 ? <p className="px-4 py-6 text-center text-sm text-muted">{tx('لا أسطر فيها مشكلة.', 'No rows with a problem.')}</p> : (
+        <div className="scrollbar-thin max-h-96 overflow-auto">
+          <table className="w-full min-w-[640px] text-[13px]" aria-label={tx('معاينة الخلايا', 'Cell preview')}>
+            <thead className="sticky top-0 bg-surface"><tr className="border-b border-border text-xs text-muted">
+              <th scope="col" className="px-3 py-2 text-start font-semibold">{tx('السطر', 'Line')}</th>
+              {cols.map((c) => <th key={c.i} scope="col" className="px-3 py-2 text-start font-semibold">{fieldName[c.f]}</th>)}
+            </tr></thead>
+            <tbody className="divide-y divide-border">
+              {shown.map(({ r, idx }) => {
+                const bad = cellProblems(r);
+                return (
+                  <tr key={r.line}>
+                    <th scope="row" className="px-3 py-2 text-start font-normal tabular-nums text-muted">{r.line}{r.dupOf !== null && <span className="ms-1"><Badge tone="amber" className="h-5 px-1.5 text-[10px]">{tx('مكرر', 'Dup')}</Badge></span>}</th>
+                    {cols.map((c) => {
+                      const code = bad[c.f] as RowProblem | undefined;
+                      const v = raw[idx]?.[c.i] ?? '';
+                      return (
+                        <td key={c.i} className={cn('max-w-48 px-3 py-2 align-top', code && 'bg-red-500/8')}>
+                          <span className={cn('block truncate', code ? 'font-semibold text-red-700 dark:text-red-300' : 'text-fg')}><bdi>{v || '—'}</bdi></span>
+                          {code && <span className="block text-[11px] text-red-700 dark:text-red-300">{problem(code)}</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }

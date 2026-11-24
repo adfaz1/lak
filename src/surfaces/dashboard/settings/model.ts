@@ -5,14 +5,14 @@ import { parseMoney } from '../../merchant/catalog';
 import { PLANS, STAFF_LIMIT, type Plan } from '../../merchant/finance';
 import { MATRIX_ACTIONS, MATRIX_PAGES, ROLES, can, canSee, canSeeSettings, type Action, type Page, type Role, type SettingsCat } from '../../merchant/perms';
 import {
-  NOTIFY_EVENTS, seatsUsed, validEmail, validHost, validSlug,
-  type DomainSettings, type Member, type Notify, type Policy, type PolicyId, type Provider, type ProviderState, type StoreDetails, type Zone,
+  NOTIFY_EVENTS, normPolicy, seatsUsed, validEmail, validHost, validSlug,
+  type DomainSettings, type Member, type Notify, type Policy, type PolicyId, type Provider, type ProviderState, type SocialId, type StoreDetails, type Zone,
 } from '../../merchant/workspace';
 
 /* ---------- Categories and search ---------- */
 
 /** Settings pages of the new dashboard. `checkout` extends the merchant categories (blueprint pp.15–16). */
-export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout';
+export type CatId = Exclude<SettingsCat, 'billing'> | 'checkout' | 'account';
 export interface Category { id: CatId; title: L; desc: L; keys: string }
 
 export const CATEGORIES: Category[] = [
@@ -24,6 +24,7 @@ export const CATEGORIES: Category[] = [
   { id: 'domains', title: { ar: 'النطاقات', en: 'Domains' }, desc: { ar: 'الرابط المجاني ونطاقك الخاص', en: 'Free link and your own domain' }, keys: 'domain dns cname txt slug link نطاق رابط' },
   { id: 'policies', title: { ar: 'السياسات', en: 'Policies' }, desc: { ar: 'الاسترجاع والشحن والخصوصية والشروط', en: 'Returns, shipping, privacy, terms' }, keys: 'returns privacy terms refund استرجاع خصوصية شروط' },
   { id: 'notifications', title: { ar: 'الإشعارات', en: 'Notifications' }, desc: { ar: 'تنبيهاتك لكل حدث بالبريد والرسائل', en: 'Your alerts per event, email and SMS' }, keys: 'alerts email sms تنبيه إشعار بريد رسائل' },
+  { id: 'account', title: { ar: 'حسابي', en: 'My account' }, desc: { ar: 'ملفك والأمان والأجهزة وتنبيهاتك', en: 'Your profile, security, devices and alerts' }, keys: 'profile account password 2fa two-factor sessions devices security ملف حساب كلمة مرور تحقق خطوتين جلسات أجهزة أمان' },
   { id: 'language', title: { ar: 'اللغة والمنطقة', en: 'Language & region' }, desc: { ar: 'لغة اللوحة ولغات المتجر والتوقيت', en: 'Admin language, store languages, time zone' }, keys: 'language currency timezone units لغة عملة توقيت وحدة' },
 ];
 
@@ -46,6 +47,7 @@ export function searchCategories(q: string, cats: Category[] = CATEGORIES): Cate
 
 /** Who may open a category. Checkout is a store setting and follows `settings.manage`. */
 export function canOpen(role: Role, cat: CatId): boolean {
+  if (cat === 'account') return true;
   return canSeeSettings(role, cat === 'checkout' ? 'store' : cat);
 }
 /** The roles that can open a category, to tell a refused member whom to ask. */
@@ -262,10 +264,25 @@ export const hostOk = (s: string) => validHost(normaliseHost(s));
 
 export const POLICY_MIN = 20;
 export const POLICY_IDS: PolicyId[] = ['returns', 'shipping', 'privacy', 'terms'];
-export const canPublish = (text: string) => text.trim().length >= POLICY_MIN;
-/** Saving a draft never unpublishes: the published text stays live until a new one is published. */
-export function savePolicy(list: Policy[], id: PolicyId, text: string, publish: boolean): Policy[] {
-  return list.map((p) => (p.id !== id ? p : { ...p, text, state: publish ? 'published' : p.state === 'published' && text === p.text ? 'published' : text.trim() ? 'draft' : 'missing' }));
+export type StoreLangs = { ar: boolean; en: boolean };
+/** Store languages still missing a publishable text (at least POLICY_MIN characters). */
+export const policyMissingLangs = (text: L, langs: StoreLangs = { ar: true, en: true }): ('ar' | 'en')[] =>
+  (['ar', 'en'] as const).filter((l) => langs[l] && text[l].trim().length < POLICY_MIN);
+/** Publishable when every enabled store language has a text of at least POLICY_MIN characters. */
+export const canPublish = (text: L, langs?: StoreLangs) => policyMissingLangs(text, langs).length === 0;
+/** The draft differs from what shoppers see (or nothing is published yet and something is written). */
+export const policyHasDraft = (p: Policy) => {
+  const n = normPolicy(p);
+  return n.live ? !same(n.text, n.live) : !!(n.text.ar.trim() || n.text.en.trim());
+};
+/** Saving a draft never touches the live text; publishing copies the draft to live. */
+export function savePolicy(list: Policy[], id: PolicyId, text: L, publish: boolean): Policy[] {
+  return list.map((raw) => {
+    if (raw.id !== id) return raw;
+    const p = normPolicy(raw);
+    if (publish) return { ...p, text, live: text, state: 'published' };
+    return { ...p, text, state: p.live ? 'published' : text.ar.trim() || text.en.trim() ? 'draft' : 'missing' };
+  });
 }
 
 /* ---------- Notifications ---------- */
@@ -337,3 +354,63 @@ export const PERM_LABEL: Partial<Record<Page | Action, L>> = {
   'theme.publish': { ar: 'نشر الثيم', en: 'Publish theme' }, 'apps.manage': { ar: 'ربط التطبيقات', en: 'Connect apps' }, 'team.manage': { ar: 'إدارة الفريق', en: 'Manage team' },
   'billing.manage': { ar: 'الفوترة', en: 'Billing' },
 };
+
+/* ---------- Social links (BP-P03-STP-019) ---------- */
+
+/** Expected host per platform, so an Instagram link is not saved under TikTok by mistake. */
+export const SOCIAL_HOST: Record<SocialId, RegExp> = {
+  instagram: /(^|\.)instagram\.com$/, x: /(^|\.)(x|twitter)\.com$/, tiktok: /(^|\.)tiktok\.com$/, snapchat: /(^|\.)snapchat\.com$/,
+  facebook: /(^|\.)(facebook|fb)\.com$/, linkedin: /(^|\.)linkedin\.com$/, youtube: /(^|\.)(youtube\.com|youtu\.be)$/,
+};
+/** Accepts "instagram.com/x", "https://…" or "@handle"; returns the https URL to store, or an error. */
+export function parseSocial(id: SocialId, raw: string): { ok: true; url: string } | { ok: false; error: 'format' | 'host' } {
+  const v = raw.trim();
+  if (!v) return { ok: true, url: '' };
+  const handle = /^@?([A-Za-z0-9_.-]{2,30})$/.exec(v);
+  const base: Record<SocialId, string> = { instagram: 'instagram.com/', x: 'x.com/', tiktok: 'tiktok.com/@', snapchat: 'snapchat.com/add/', facebook: 'facebook.com/', linkedin: 'linkedin.com/company/', youtube: 'youtube.com/@' };
+  const url = handle && !v.includes('.') ? `https://${base[id]}${handle[1]}` : /^https?:\/\//i.test(v) ? v.replace(/^http:/i, 'https:') : `https://${v}`;
+  let host: string;
+  try { host = new URL(url).hostname.replace(/^www\./, '').toLowerCase(); } catch { return { ok: false, error: 'format' }; }
+  if (!host.includes('.')) return { ok: false, error: 'format' };
+  return SOCIAL_HOST[id].test(host) ? { ok: true, url } : { ok: false, error: 'host' };
+}
+
+/* ---------- Custom roles (BP-P03-STF-002, Pro) ---------- */
+
+export interface CustomRole { id: string; name: L; base: Exclude<Role, 'owner'>; pages: Page[]; actions: Action[] }
+export const CUSTOM_ROLE_PLAN: Plan = 'pro';
+export const customRoleFixtures = (): CustomRole[] => [
+  { id: 'cr1', name: { ar: 'خدمة العملاء', en: 'Customer care' }, base: 'marketing', pages: ['orders', 'customers'], actions: ['customer.contact', 'customer.note', 'customer.message'] },
+];
+/** Start a custom role from a fixed role's permissions. */
+export function roleFrom(base: Exclude<Role, 'owner'>, id: string): CustomRole {
+  return { id, name: { ar: '', en: '' }, base, pages: MATRIX_PAGES.filter((p) => canSee(base, p)), actions: MATRIX_ACTIONS.filter((a) => can(base, a)) };
+}
+export type CustomRoleErrors = Partial<Record<'name' | 'pages' | 'billing', 'required' | 'taken' | 'needsFinance'>>;
+export function customRoleErrors(r: CustomRole, all: CustomRole[]): CustomRoleErrors {
+  const e: CustomRoleErrors = {};
+  const n = (s: string) => s.trim().toLowerCase();
+  if (!r.name.ar.trim() && !r.name.en.trim()) e.name = 'required';
+  else if (all.some((x) => x.id !== r.id && ((r.name.ar.trim() && n(x.name.ar) === n(r.name.ar)) || (r.name.en.trim() && n(x.name.en) === n(r.name.en))) )
+    || ROLES.some((x) => n(ROLE_LABEL[x].ar) === n(r.name.ar) || n(ROLE_LABEL[x].en) === n(r.name.en))) e.name = 'taken';
+  if (!r.pages.length) e.pages = 'required';
+  // An action is meaningless without the page it lives on.
+  if (r.actions.includes('billing.manage') && !r.pages.includes('finance')) e.billing = 'needsFinance';
+  return e;
+}
+/** Toggling a page off also removes the actions that belong to it. */
+const ACTION_PAGE: Partial<Record<Action, Page>> = {
+  'order.fulfil': 'orders', 'order.refund': 'orders', 'product.edit': 'products', 'inventory.adjust': 'inventory', 'customer.message': 'customers',
+  'marketing.send': 'marketing', 'theme.publish': 'storefront', 'apps.manage': 'apps', 'billing.manage': 'finance',
+};
+export function togglePerm(r: CustomRole, id: Page | Action, on: boolean): CustomRole {
+  if ((MATRIX_PAGES as string[]).includes(id)) {
+    const pages = on ? [...new Set([...r.pages, id as Page])] : r.pages.filter((p) => p !== id);
+    const actions = on ? r.actions : r.actions.filter((a) => ACTION_PAGE[a] !== id);
+    return { ...r, pages, actions };
+  }
+  const a = id as Action;
+  const page = ACTION_PAGE[a];
+  return { ...r, actions: on ? [...new Set([...r.actions, a])] : r.actions.filter((x) => x !== a), pages: on && page && !r.pages.includes(page) ? [...r.pages, page] : r.pages };
+}
+export const customAllows = (r: CustomRole, id: Page | Action) => (r.pages as string[]).includes(id) || (r.actions as string[]).includes(id);

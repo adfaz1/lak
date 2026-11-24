@@ -1,24 +1,28 @@
 // Products section (`#/dashboard/products`): list with filters, tabs, selection and bulk edit; editor and CSV import
 // live in their own files. View only: every rule comes from ./model and merchant/catalog.
 import { lazy, useMemo, useState } from 'react';
-import { Plus, Upload, Download, PackageOpen, SearchX, Pencil, Globe2, Smartphone, Store } from 'lucide-react';
+import { Plus, Upload, Download, PackageOpen, SearchX, Pencil, Globe2, Smartphone, Store, Layers } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { canSee, can } from '../../merchant/perms';
-import { levelsStore, productsStore } from '../../merchant/stores';
-import { applyBulkEdit, moneyInput, toCsv, type BulkRow, type Product, type ProductStatus } from '../../merchant/catalog';
+import { categoriesStore, levelsStore, productsStore } from '../../merchant/stores';
+import { applyBulkEdit, toCsv, type BulkRow, type Product, type ProductStatus } from '../../merchant/catalog';
 import type { Channel } from '../../merchant/domain';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
-import { Alert, BulkBar, DataTable, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Tabs, useToast, type Column } from '../../../ds/kit';
+import { Alert, BulkBar, Checkbox, DataTable, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Switch, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import {
-  STATUSES, activeChannels, bulkChanged, bulkCheck, bulkRowsFor, categoriesOf, categoryKey, filterProducts, listPhoto, lowSkuCount, paginate, priceRange,
-  readChannel, readTab, selectionScope, stockOf, tabCounts, type StatusTab,
+  DEFAULT_EXPORT, EXPORT_COLS, STATUSES, activeChannels, allTags, bulkChanged, bulkCheck, bulkRowsFor, categoryOptions, exportRows, filterProducts, listPhoto, lowSkuCount,
+  paginate, priceRange, readChannel, readTab, selectionScope, stockOf, tabCounts, type ExportCol, type StatusTab,
 } from './model';
+import { BulkOpModal, UndoBanner, rememberUndo, useUndo } from './bulk';
+import { CatalogNav } from './common';
 import { NoAccess, ReviewTools, STATUS_TONE, downloadText, phref, roleBadge, useNames, useRole } from './common';
 
 const Editor = lazy(() => import('./editor'));
 const ImportWizard = lazy(() => import('./import'));
+const Categories = lazy(() => import('./categories'));
+const Collections = lazy(() => import('./collections'));
 
 export default function Products({ route }: { route: Route }) {
   const tx = useTx();
@@ -26,6 +30,8 @@ export default function Products({ route }: { route: Route }) {
   const sub = route.path[0];
   if (!canSee(role, 'products')) return <NoAccess title={tx('لا تملك صلاحية المنتجات', 'You don’t have access to Products')}>{tx('اطلب من مالك المتجر إضافة صلاحية المنتجات لدورك.', 'Ask the store owner to add Products to your role.')}</NoAccess>;
   if (sub === 'import') return <ImportWizard />;
+  if (sub === 'categories') return <Categories />;
+  if (sub === 'collections') return <Collections id={route.path[1]} />;
   if (sub) return <Editor key={sub} id={sub} />;
   return <ProductList route={route} />;
 }
@@ -48,17 +54,23 @@ function ProductList({ route }: { route: Route }) {
   const tab = readTab(route.query.get('tab'));
   const category = route.query.get('cat') ?? '';
   const channel = readChannel(route.query.get('ch'));
-  const f = { q, tab, category, channel };
-  const query = { q: q || undefined, tab: tab === 'all' ? undefined : tab, cat: category || undefined, ch: channel || undefined };
+  const tag = route.query.get('tag') ?? '';
+  const f = { q, tab, category, channel, tag };
+  const query = { q: q || undefined, tab: tab === 'all' ? undefined : tab, cat: category || undefined, ch: channel || undefined, tag: tag || undefined };
   const go = (patch: Record<string, string | undefined>) => replace(phref('', { ...query, ...patch, page: undefined }));
 
-  const rows = useMemo(() => filterProducts(products, f), [products, q, tab, category, channel]); // eslint-disable-line react-hooks/exhaustive-deps
-  const counts = tabCounts(products, f);
-  const cats = categoriesOf(products);
+  const storeCats = categoriesStore.use();
+  const rows = useMemo(() => filterProducts(products, f, storeCats), [products, q, tab, category, channel, tag, storeCats]); // eslint-disable-line react-hooks/exhaustive-deps
+  const counts = tabCounts(products, f, storeCats);
+  const cats = categoryOptions(storeCats, products);
+  const tags = allTags(products);
+  const [ops, setOps] = useState(false);
+  const [exp, setExp] = useState(false);
+  const undo = useUndo();
   const pg = paginate(rows, route.query.get('page'));
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulk, setBulk] = useState<BulkRow[] | null>(null);
-  const filtered = !!(q || category || channel);
+  const filtered = !!(q || category || channel || tag);
 
   const pageIds = pg.rows.map((p) => p.id);
   const allIds = rows.map((p) => p.id);
@@ -66,17 +78,13 @@ function ProductList({ route }: { route: Route }) {
   const scope = selectionScope(visibleSel, pageIds, allIds);
   const onSelect = (id: string, on: boolean) => setSel((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n; });
 
-  const exportCsv = () => downloadText('products.csv', toCsv([
-    ['name_ar', 'name_en', 'sku', 'status', 'price', 'compare_at_price', 'available', 'category'],
-    ...rows.map((p) => [p.name.ar, p.name.en, p.sku, p.status, moneyInput(p.price), moneyInput(p.compareAt), stockOf(p, levels) ?? '', p.category.en]),
-  ]));
 
   const header = (
     <PageHeader title={tx('المنتجات', 'Products')}
       description={state === 'live' ? tx(`${all.length} منتجًا في الكتالوج`, `${all.length} products in your catalogue`) : undefined}
       meta={!canEdit ? roleBadge(tx) : undefined}
       actions={<>
-        {state === 'live' && products.length > 0 && <Button variant="secondary" onClick={exportCsv} disabled={!rows.length}><Download className="size-4" aria-hidden="true" />{tx('تصدير', 'Export')}</Button>}
+        {state === 'live' && products.length > 0 && <Button variant="secondary" onClick={() => setExp(true)} disabled={!rows.length}><Download className="size-4" aria-hidden="true" />{tx('تصدير', 'Export')}</Button>}
         {can(role, 'product.import') && <LinkButton variant="secondary" href={phref('import')}><Upload className="size-4" aria-hidden="true" />{tx('استيراد CSV', 'Import CSV')}</LinkButton>}
         {canEdit && <LinkButton href={phref('new')}><Plus className="size-4" aria-hidden="true" />{tx('أضف منتجًا', 'Add product')}</LinkButton>}
       </>} />
@@ -150,6 +158,8 @@ function ProductList({ route }: { route: Route }) {
   return (
     <div className="space-y-6">
       {header}
+      <CatalogNav />
+      <UndoBanner />
       <Card>
         <div className="px-4 pt-2 sm:px-5">
           <Tabs label={tx('حالة المنتج', 'Product status')} items={(['all', ...STATUSES] as StatusTab[]).map((t) => ({
@@ -164,12 +174,14 @@ function ProductList({ route }: { route: Route }) {
                 {scope === 'all' ? tx(`كل النتائج (${rows.length})`, `All ${rows.length} results`) : scope === 'page' ? tx('هذه الصفحة', 'on this page') : tx(`من ${rows.length} نتيجة`, `of ${rows.length} results`)}
                 {scope === 'page' && rows.length > pg.rows.length && <button type="button" className="font-semibold text-brand-700 hover:underline dark:text-brand-300" onClick={() => setSel(new Set(allIds))}>{tx(`حدّد كل النتائج (${rows.length})`, `Select all ${rows.length} results`)}</button>}
               </span>}>
-              <Button size="sm" onClick={startBulk}><Pencil className="size-3.5" aria-hidden="true" />{tx('عدّل السعر والحالة', 'Edit price & status')}</Button>
+              <Button size="sm" onClick={() => setOps(true)}><Layers className="size-3.5" aria-hidden="true" />{tx('تعديل جماعي', 'Bulk edit')}</Button>
+              <Button size="sm" variant="secondary" onClick={startBulk}><Pencil className="size-3.5" aria-hidden="true" />{tx('جدول السعر والحالة', 'Price & status table')}</Button>
             </BulkBar>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex w-full sm:w-auto sm:flex-1 sm:max-w-xs"><SearchInput value={q} onChange={(v) => go({ q: v || undefined })} placeholder={tx('ابحث بالاسم أو SKU', 'Search name or SKU')} /></div>
-              <FilterChip label={tx('الفئة', 'Category')} value={category} onChange={(v) => go({ cat: v || undefined })} options={cats.map((c) => ({ value: categoryKey(c), label: c[lang] }))} />
+              <FilterChip label={tx('الفئة', 'Category')} value={category} onChange={(v) => go({ cat: v || undefined })} options={cats.map((c) => ({ value: c.key, label: `${c.depth ? '— ' : ''}${c.name[lang]}` }))} />
+              {tags.length > 0 && <FilterChip label={tx('الوسم', 'Tag')} value={tag} onChange={(v) => go({ tag: v || undefined })} options={tags.map((t) => ({ value: t, label: t }))} />}
               <FilterChip label={tx('القناة', 'Channel')} value={channel} onChange={(v) => go({ ch: v || undefined })} options={(['online', 'market', 'app'] as Channel[]).map((c) => ({ value: c, label: names.channel(c) }))} />
               {filtered && <a href={phref('', { tab: query.tab })} className="px-2 text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('مسح التصفية', 'Clear filters')}</a>}
             </div>
@@ -201,7 +213,9 @@ function ProductList({ route }: { route: Route }) {
         )}
       </Card>
       <ReviewTools />
-      {bulk && <BulkModal rows={bulk} setRows={setBulk} onClose={() => setBulk(null)} onSaved={(n) => { setBulk(null); setSel(new Set()); toast({ tone: 'ok', text: tx(`حُفظت تعديلات ${n} منتجات`, `Saved changes to ${n} products`) }); }} />}
+      {bulk && <BulkModal rows={bulk} setRows={setBulk} onClose={() => setBulk(null)} onSaved={(n) => { setBulk(null); setSel(new Set()); toast({ tone: 'ok', text: tx(`حُفظت تعديلات ${n} منتجات`, `Saved changes to ${n} products`), action: { label: tx('تراجع', 'Undo'), run: undo } }); }} />}
+      {ops && <BulkOpModal ids={[...visibleSel]} onClose={() => setOps(false)} onDone={() => { setOps(false); setSel(new Set()); }} />}
+      {exp && <ExportModal rows={rows} onClose={() => setExp(false)} />}
     </div>
   );
 }
@@ -219,9 +233,11 @@ function BulkModal({ rows, setRows, onClose, onSaved }: { rows: BulkRow[]; setRo
   const save = () => {
     setTried(true);
     if (invalidRows) return;
-    const next = applyBulkEdit(productsStore.get(), rows.filter((r) => changed.includes(r.id)));
+    const before = productsStore.get();
+    const next = applyBulkEdit(before, rows.filter((r) => changed.includes(r.id)));
     if (!next) return;
     productsStore.set(next);
+    rememberUndo({ id: `BULK-T${Date.now().toString(36).slice(-5).toUpperCase()}`, field: 'price', levels: [], products: before.filter((p) => changed.includes(p.id)).map((p) => ({ before: p, afterVersion: p.version + 1 })) }, changed.length);
     onSaved(changed.length);
   };
   return (
@@ -279,5 +295,38 @@ function ListSkeleton() {
         ))}
       </div>
     </div>
+  );
+}
+
+function ExportModal({ rows, onClose }: { rows: Product[]; onClose: () => void }) {
+  const tx = useTx();
+  const levels = levelsStore.use();
+  const [cols, setCols] = useState<ExportCol[]>(DEFAULT_EXPORT);
+  const [perVariant, setPerVariant] = useState(false);
+  const label: Record<ExportCol, string> = {
+    name: tx('الاسم بالإنجليزية', 'English name'), nameAr: tx('الاسم بالعربية', 'Arabic name'), sku: 'SKU', variant: tx('المتغير', 'Variant'), status: tx('الحالة', 'Status'),
+    price: tx('السعر', 'Price'), compareAt: tx('السعر قبل الخصم', 'Compare-at'), cost: tx('التكلفة', 'Cost'), margin: tx('الهامش %', 'Margin %'), available: tx('المتاح', 'Available'),
+    category: tx('الفئة', 'Category'), channels: tx('القنوات', 'Channels'), tags: tx('الوسوم', 'Tags'),
+  };
+  const ordered = EXPORT_COLS.filter((c) => cols.includes(c));
+  const data = exportRows(rows, levels, ordered, perVariant);
+  const go = () => { downloadText('products.csv', toCsv(data)); onClose(); };
+  return (
+    <Modal title={tx('تصدير المنتجات', 'Export products')} onClose={onClose}
+      description={tx(`${rows.length} منتجًا من النتائج الحالية · ${data.length - 1} سطرًا`, `${rows.length} products from the current results · ${data.length - 1} rows`)}
+      footer={<><Button variant="secondary" onClick={onClose}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={go} disabled={!ordered.length}><Download className="size-4" aria-hidden="true" />{tx('نزّل CSV', 'Download CSV')}</Button></>}>
+      <fieldset>
+        <legend className="mb-2 flex items-center gap-1 text-[13px] font-semibold text-fg">{tx('الأعمدة', 'Columns')}<InfoHint>{tx('أسماء الأعمدة تطابق قالب الاستيراد، فيمكنك التعديل ثم الاستيراد.', 'Column names match the import template, so you can edit and import back.')}</InfoHint></legend>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {EXPORT_COLS.map((c) => (
+            <label key={c} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-2 text-[13px] text-fg">
+              <Checkbox checked={cols.includes(c)} label={label[c]} onChange={(on) => setCols((x) => (on ? [...x, c] : x.filter((y) => y !== c)))} />{label[c]}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <label className="flex items-center justify-between gap-3 rounded-xl bg-surface-2 px-3 py-2.5 text-sm font-medium text-fg">{tx('سطر لكل متغير', 'One row per variant')}<Switch checked={perVariant} onChange={setPerVariant} label={tx('سطر لكل متغير', 'One row per variant')} /></label>
+      {!ordered.length && <Alert tone="bad">{tx('اختر عمودًا واحدًا على الأقل.', 'Choose at least one column.')}</Alert>}
+    </Modal>
   );
 }

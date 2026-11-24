@@ -1,18 +1,21 @@
-// Create / edit a coupon: value, conditions, limits, schedule; live preview on a sample order and conflict check.
-// Unsaved input is kept for the session (navigating away does not lose it). Editing a live coupon is reviewed in a Modal.
-import { useEffect, useState, type ReactNode } from 'react';
-import { ArrowLeft, ReceiptText, SearchX } from 'lucide-react';
+// Create / edit an offer: a typed code or an automatic offer (no code), value (percent, amount, free shipping or
+// buy X get Y), items in scope, conditions, limits, schedule; live preview on a sample basket and conflict check.
+// Unsaved input is kept for the session (navigating away does not lose it). Editing a live offer is reviewed in a Modal.
+import { useState, type ReactNode } from 'react';
+import { ArrowLeft, ReceiptText, SearchX, Sparkles, Ticket } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import { link, navigate } from '../../../core/router';
 import { parseMoney } from '../../merchant/catalog';
 import { couponsStore, productsStore } from '../../merchant/stores';
+import { logAction } from '../../merchant/stores';
 import type { Coupon, CouponDraft, CouponError, CouponType } from '../../merchant/growth';
-import { Badge, Button, Card, CardHeader, EmptyState, LinkButton, Money, ProductImage, Ref, Segmented, cn, useTx } from '../../../ds/ui';
-import { Alert, Field, Input, Modal, PageHeader, SaveBar, useToast } from '../../../ds/kit';
+import { Badge, Button, Card, CardHeader, EmptyState, InfoHint, LinkButton, Money, ProductImage, Ref, Segmented, cn, useTx } from '../../../ds/ui';
+import { Alert, Checkbox, Field, Input, Modal, PageHeader, SaveBar, Select, useToast } from '../../../ds/kit';
 import { skuPhoto, productIdForSku } from '../model/media';
 import { can } from '../../merchant/perms';
-import { SAMPLES, buildCoupon, checkDraft, couponConflicts, couponDiff, couponState, draftFromCoupon, emptyDraft, previewOn, type CouponField } from './model';
+import { useUnsaved } from '../unsaved';
+import { SAMPLES, buildCoupon, checkDraft, couponConflicts, couponDiff, couponState, draftFromCoupon, emptyDraft, previewOffer, scopeOptions, type CouponField } from './model';
 import { useCouponText } from './coupons';
 import { Locked, useRole } from './access';
 
@@ -20,7 +23,7 @@ import { Locked, useRole } from './access';
 const draftsStore = createStore.key('dashboard.couponDrafts')<Record<string, CouponDraft>>(() => ({}));
 const LIST = link('/dashboard/marketing');
 
-export default function CouponEditor({ code }: { code: string }) {
+export default function CouponEditor({ code, auto }: { code: string; auto?: boolean }) {
   const tx = useTx();
   const { lang } = useLang();
   const ct = useCouponText();
@@ -31,20 +34,14 @@ export default function CouponEditor({ code }: { code: string }) {
   const drafts = draftsStore.use();
   const isNew = code === 'new';
   const base = isNew ? undefined : all.find((c) => c.code === code);
-  const initial = base ? draftFromCoupon(base) : emptyDraft();
+  const initial = base ? draftFromCoupon(base) : emptyDraft(undefined, !!auto);
   const d = drafts[code] ?? initial;
   const dirty = JSON.stringify(d) !== JSON.stringify(initial);
   const [tried, setTried] = useState(false);
   const [sampleId, setSampleId] = useState(SAMPLES[0].id);
   const [review, setReview] = useState(false);
   const canManage = can(role, 'marketing.manage');
-
-  useEffect(() => {
-    if (!dirty) return;
-    const on = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', on);
-    return () => window.removeEventListener('beforeunload', on);
-  }, [dirty]);
+  useUnsaved(dirty, { ar: 'تعديلات العرض', en: 'Offer edits' });
 
   if (!isNew && !base) return (
     <Card><EmptyState as="h1" icon={<SearchX className="size-6" aria-hidden="true" />} title={tx('لا يوجد كوبون بهذا الكود', 'No coupon with this code')}
@@ -57,7 +54,9 @@ export default function CouponEditor({ code }: { code: string }) {
   const nErr = Object.keys(errors).length;
   const coupon = nErr ? null : buildCoupon(d, parseMoney, base);
   const sample = SAMPLES.find((s) => s.id === sampleId) ?? SAMPLES[0];
-  const eff = coupon ? previewOn(coupon, sample) : null;
+  const eff = coupon ? previewOffer(coupon, sample, products) : null;
+  const scope = scopeOptions(products);
+  const isAuto = !!d.auto;
   const conflicts = coupon ? couponConflicts(coupon, all) : [];
   const live = base && ['active', 'scheduled'].includes(couponState(base));
   const changes = base && coupon ? couponDiff(base, coupon) : [];
@@ -66,12 +65,14 @@ export default function CouponEditor({ code }: { code: string }) {
     code: tx('من 4 إلى 16 حرفًا لاتينيًا كبيرًا أو رقمًا', '4–16 capital Latin letters or digits'), codeTaken: tx('الكود مستخدم', 'Code already in use'),
     value: tx('قيمة غير صالحة', 'Invalid value'), percent: tx('نسبة من 1 إلى 90', 'A percentage from 1 to 90'), money: tx('مبلغ غير صالح', 'Invalid amount'),
     limit: tx('عدد صحيح 1 أو أكثر', 'A whole number, 1 or more'), dates: tx('النهاية بعد البداية', 'End must be after start'),
+    scope: tx('اختر تصنيفًا أو منتجًا واحدًا على الأقل', 'Choose at least one category or product'), bogo: tx('اشترِ وخذ من 1 إلى 10، والخصم من 1 إلى 100%', 'Buy and get 1–10, discount 1–100%'),
   };
   const err = (k: string) => (tried && errors[k] ? msg[errors[k]] : null);
 
   const commit = () => {
     if (!coupon) return;
     couponsStore.set((cs) => (base ? cs.map((c) => (c.code === base.code ? coupon : c)) : [coupon, ...cs]));
+    logAction('marketing', base ? { ar: `عدّل العرض ${coupon.code}`, en: `Edited offer ${coupon.code}` } : { ar: `أنشأ العرض ${coupon.code} (مسودة)`, en: `Created offer ${coupon.code} (draft)` }, { target: coupon.code });
     discard();
     setReview(false);
     toast({ tone: 'ok', text: base ? tx(`حُفظ ${coupon.code}`, `${coupon.code} saved`) : tx(`حُفظ ${coupon.code} مسودة. فعّله من القائمة.`, `${coupon.code} saved as a draft. Activate it from the list.`) });
@@ -85,23 +86,27 @@ export default function CouponEditor({ code }: { code: string }) {
 
   const fieldName: Record<CouponField, string> = {
     type: tx('النوع', 'Type'), value: tx('القيمة', 'Value'), minSpend: tx('الحد الأدنى', 'Minimum'), limitTotal: tx('حد الاستخدام', 'Usage limit'),
-    limitPerCustomer: tx('لكل عميل', 'Per customer'), starts: tx('البداية', 'Start'), ends: tx('النهاية', 'End'),
+    limitPerCustomer: tx('لكل عميل', 'Per customer'), starts: tx('البداية', 'Start'), ends: tx('النهاية', 'End'), scope: tx('المنتجات المشمولة', 'Items in scope'), bogo: tx('اشترِ واحصل', 'Buy and get'),
   };
   const show = (c: Coupon, k: CouponField): ReactNode => {
+    if (k === 'scope') return c.scope ? `${c.scope.ids.length} ${c.scope.kind === 'category' ? tx('تصنيف', 'categories') : tx('منتج', 'products')}` : tx('كل المنتجات', 'All items');
+    if (k === 'bogo') return c.bogo ? tx(`اشترِ ${c.bogo.buy} وخذ ${c.bogo.get} بخصم ${c.bogo.pct}%`, `Buy ${c.bogo.buy}, get ${c.bogo.get} at ${c.bogo.pct}% off`) : tx('بلا', 'None');
     const v = c[k];
-    if (v === null || v === '') return tx('بلا', 'None');
+    if (v === null || v === '' || v === undefined) return tx('بلا', 'None');
     if (k === 'type') return ct.type(c.type);
     if (k === 'minSpend' || (k === 'value' && c.type === 'fixed')) return <Money v={v as number} />;
     if (k === 'value' && c.type === 'percent') return `${v}%`;
     return <Ref>{String(v)}</Ref>;
   };
   const block = eff?.block;
-  const blockText = block && ({ minSpend: tx('لا ينطبق: المنتجات أقل من الحد الأدنى', 'Does not apply: items below the minimum'), perCustomer: tx('لا ينطبق: العميل بلغ حده', 'Does not apply: customer reached their limit'), limit: tx('لا ينطبق: بلغ حد الاستخدام الكلي', 'Does not apply: total usage limit reached'), inactive: tx('لا ينطبق: خارج فترة الصلاحية', 'Does not apply: outside its dates') })[block];
+  const blockText = block && ({ minSpend: tx('لا ينطبق: المنتجات أقل من الحد الأدنى', 'Does not apply: items below the minimum'), perCustomer: tx('لا ينطبق: العميل بلغ حده', 'Does not apply: customer reached their limit'), limit: tx('لا ينطبق: بلغ حد الاستخدام الكلي', 'Does not apply: total usage limit reached'), inactive: tx('لا ينطبق: خارج فترة الصلاحية', 'Does not apply: outside its dates'), scope: tx('لا ينطبق: لا منتجات مشمولة في هذه السلة', 'Does not apply: no items in scope in this basket'), qty: tx('لا ينطبق: عدد القطع المشمولة أقل من المطلوب', 'Does not apply: not enough items in scope') })[block];
+  const types: CouponType[] = isAuto ? ['percent', 'fixed', 'freeShip', 'bogo'] : ['percent', 'fixed', 'freeShip'];
+  const toggleId = (id: string, on: boolean) => set({ scopeIds: on ? [...(d.scopeIds ?? []), id] : (d.scopeIds ?? []).filter((x) => x !== id) });
 
   return (
     <div className="space-y-6 pb-20">
       <PageHeader back={{ href: LIST, label: tx('الكوبونات', 'Coupons') }}
-        title={isNew ? tx('كوبون جديد', 'New coupon') : <Ref>{code}</Ref>}
+        title={isNew ? (isAuto ? tx('عرض تلقائي جديد', 'New automatic offer') : tx('كوبون جديد', 'New coupon')) : <Ref>{code}</Ref>}
         meta={base ? <><Badge tone={live ? 'green' : 'gray'}>{ct.state(couponState(base))}</Badge><span className="text-xs text-muted tabular-nums">{tx(`استُخدم ${base.used} مرة`, `Used ${base.used} times`)}</span></> : undefined} />
       {drafts[code] && dirty && <Alert tone="info" title={tx('استعدنا تعديلاتك غير المحفوظة', 'We kept your unsaved edits')} action={<Button variant="ghost" size="sm" onClick={discard}>{tx('تجاهلها', 'Discard')}</Button>} />}
       {!canManage && <Locked>{tx('دورك يعرض الكوبون فقط.', 'Your role can only view this coupon.')}</Locked>}
@@ -111,19 +116,60 @@ export default function CouponEditor({ code }: { code: string }) {
           <Card aria-labelledby="h-disc">
             <CardHeader id="h-disc" title={tx('الخصم', 'Discount')} />
             <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
-              <Field label={tx('الكود', 'Code')} error={err('code')} hint={isNew ? tx('يكتبه العميل عند الدفع', 'Typed by the customer at checkout') : tx('لا يتغير بعد الإنشاء', 'Fixed after creation')}>
+              <div className="space-y-1.5 sm:col-span-2">
+                <p className="flex items-center gap-1 text-[13px] font-semibold text-fg">{tx('كيف يحصل عليه العميل', 'How the customer gets it')}<InfoHint>{tx('الكوبون يكتبه العميل عند الدفع. العرض التلقائي يُطبَّق في السلة دون كود، ويُختار الأفضل للعميل إن انطبق أكثر من عرض. لا يجتمع عرضان في طلب.', 'A coupon is typed at checkout. An automatic offer applies in the bag with no code; if several apply, the best one for the customer wins. Two offers never stack.')}</InfoHint></p>
+                <Segmented label={tx('كيف يحصل عليه العميل', 'How the customer gets it')} value={isAuto ? 'auto' : 'code'}
+                  onChange={(v) => isNew && set({ auto: v === 'auto', ...(v === 'code' && d.type === 'bogo' ? { type: 'percent' as const, value: '10' } : {}) })}
+                  options={[{ value: 'code', label: tx('كود يكتبه العميل', 'Code the customer types') }, { value: 'auto', label: tx('تلقائي بلا كود', 'Automatic, no code') }]} />
+              </div>
+              <Field label={isAuto ? tx('اسم العرض (لاتيني)', 'Offer name (Latin)') : tx('الكود', 'Code')} error={err('code')} hint={!isNew ? tx('لا يتغير بعد الإنشاء', 'Fixed after creation') : isAuto ? tx('يظهر بجانب الخصم في السلة', 'Shown next to the discount in the bag') : tx('يكتبه العميل عند الدفع', 'Typed by the customer at checkout')}>
                 {(p) => <Input {...p} dir="ltr" value={d.code} disabled={!isNew} autoComplete="off" onChange={(e) => set({ code: e.target.value.toUpperCase().replace(/\s/g, '') })} />}
               </Field>
-              <div className="space-y-1.5">
-                <p className="text-[13px] font-semibold text-fg">{tx('النوع', 'Type')}</p>
-                <Segmented label={tx('النوع', 'Type')} value={d.type} onChange={(t: CouponType) => set({ type: t, value: t === 'percent' ? '10' : t === 'fixed' ? '50' : '' })}
-                  options={(['percent', 'fixed', 'freeShip'] as const).map((t) => ({ value: t, label: ct.type(t) }))} />
-              </div>
-              {d.type !== 'freeShip' && (
+              <Field label={tx('النوع', 'Type')}>
+                {(p) => <Select {...p} value={d.type} onChange={(e) => { const t = e.target.value as CouponType; set({ type: t, value: t === 'percent' ? '10' : t === 'fixed' ? '50' : '' }); }}>
+                  {types.map((t) => <option key={t} value={t}>{ct.type(t)}</option>)}
+                </Select>}
+              </Field>
+              {(d.type === 'percent' || d.type === 'fixed') && (
                 <Field label={d.type === 'percent' ? tx('النسبة %', 'Percent %') : tx('المبلغ (ر.س)', 'Amount (SAR)')} error={err('value')}>
                   {(p) => <Input {...p} dir="ltr" inputMode="decimal" value={d.value} onChange={(e) => set({ value: e.target.value })} />}
                 </Field>
               )}
+              {d.type === 'bogo' && (
+                <div className="grid grid-cols-3 gap-3 sm:col-span-2">
+                  <Field label={tx('اشترِ', 'Buy')} error={err('value')}>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={d.buy ?? ''} onChange={(e) => set({ buy: e.target.value })} />}</Field>
+                  <Field label={tx('واحصل على', 'Get')}>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={d.get ?? ''} onChange={(e) => set({ get: e.target.value })} />}</Field>
+                  <Field label={tx('بخصم %', 'At % off')} hint={tx('100 = مجانًا', '100 = free')}>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={d.getPct ?? ''} onChange={(e) => set({ getPct: e.target.value })} />}</Field>
+                </div>
+              )}
+            </div>
+          </Card>
+
+          <Card aria-labelledby="h-scope">
+            <CardHeader id="h-scope" title={tx('المنتجات المشمولة', 'Items in scope')} hint={tx('الخصم يُحسب على المنتجات المشمولة فقط. في «اشترِ واحصل» تُحسب القطع المشمولة من الأغلى للأرخص، والأرخص هي المخصومة.', 'The discount counts only items in scope. For buy-and-get, items in scope are ordered dearest first and the cheapest are discounted.')} />
+            <div className="space-y-4 px-5 pb-5">
+              <Segmented label={tx('المنتجات المشمولة', 'Items in scope')} value={d.scopeKind ?? 'all'} onChange={(k) => set({ scopeKind: k, scopeIds: [] })}
+                options={[{ value: 'all', label: tx('كل المنتجات', 'All items') }, { value: 'category', label: tx('تصنيفات', 'Categories') }, { value: 'product', label: tx('منتجات', 'Products') }]} />
+              {d.scopeKind === 'category' && (
+                <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {scope.categories.map((c) => (
+                    <li key={c.id}><label className={cn('flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 text-sm', d.scopeIds?.includes(c.id) ? 'border-brand-300 bg-brand-500/5' : 'border-border')}>
+                      <Checkbox label={c.name[lang]} checked={!!d.scopeIds?.includes(c.id)} onChange={(on) => toggleId(c.id, on)} /><span className="flex-1 text-fg">{c.name[lang]}</span><span className="text-xs text-muted tabular-nums">{c.count}</span>
+                    </label></li>
+                  ))}
+                </ul>
+              )}
+              {d.scopeKind === 'product' && (
+                <ul className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+                  {scope.products.map((x) => (
+                    <li key={x.id}><label className={cn('flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2 text-sm', d.scopeIds?.includes(x.id) ? 'border-brand-300 bg-brand-500/5' : 'border-border')}>
+                      <Checkbox label={x.name[lang]} checked={!!d.scopeIds?.includes(x.id)} onChange={(on) => toggleId(x.id, on)} />
+                      <ProductImage src={skuPhoto(x.sku)} alt={x.name[lang]} size={28} /><span className="min-w-0 flex-1 truncate text-fg">{x.name[lang]}</span>
+                    </label></li>
+                  ))}
+                </ul>
+              )}
+              {tried && errors.scope && <p className="text-xs font-medium text-red-600 dark:text-red-400">{msg.scope}</p>}
             </div>
           </Card>
 
@@ -169,7 +215,9 @@ export default function CouponEditor({ code }: { code: string }) {
                 <p className="rounded-xl bg-surface-2 px-4 py-6 text-center text-sm text-muted">{tx('أكمل الحقول لعرض الأثر', 'Complete the fields to see the effect')}</p>
               ) : (
                 <dl className="space-y-2 text-sm">
-                  <Line k={tx('المنتجات', 'Items')} v={<Money v={sample.subtotal} />} />
+                  <Line k={tx('المنتجات', 'Items')} v={<Money v={eff.subtotal} />} />
+                  {(d.scopeKind ?? 'all') !== 'all' && <Line k={tx('منها مشمول', 'Of which in scope')} v={<Money v={eff.eligible} />} />}
+                  {eff.freeUnits > 0 && <Line k={tx('قطع مخصومة', 'Discounted items')} v={<span className="tabular-nums">{eff.freeUnits}</span>} />}
                   <Line k={tx('الشحن', 'Shipping')} v={sample.shipping ? <Money v={sample.shipping} /> : tx('مجاني', 'Free')} />
                   <Line k={tx('الخصم', 'Discount')} v={<span className={cn(eff.discount + eff.shippingOff ? 'text-emerald-700 dark:text-emerald-400' : 'text-muted')}><Money v={eff.discount + eff.shippingOff} /></span>} />
                   <div className="flex items-center justify-between border-t border-border pt-2"><dt className="font-semibold text-fg">{tx('يدفع العميل', 'Customer pays')}</dt><dd className="text-lg font-bold text-fg"><Money v={eff.total} /></dd></div>
@@ -182,6 +230,14 @@ export default function CouponEditor({ code }: { code: string }) {
                 </Alert>
               )}
               {coupon && conflicts.length === 0 && <p className="flex items-center gap-1.5 text-xs text-muted"><ReceiptText className="size-3.5" aria-hidden="true" />{tx('لا تعارض مع كوبونات أخرى', 'No conflict with other coupons')}</p>}
+              {coupon && (
+                <div className="rounded-xl bg-surface-2 px-3 py-2.5 text-[13px] text-fg">
+                  <p className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-muted">{isAuto ? <Sparkles className="size-3.5" aria-hidden="true" /> : <Ticket className="size-3.5" aria-hidden="true" />}{tx('ما يراه العميل', 'What the customer sees')}</p>
+                  {isAuto
+                    ? tx(`سطر «خصم · ${coupon.code}» في السلة والدفع تلقائيًا عند تحقق الشروط.`, `A “Discount · ${coupon.code}” line in the bag and checkout, automatically when the conditions are met.`)
+                    : tx(`يكتب ${coupon.code} في خانة الكوبون عند الدفع.`, `Types ${coupon.code} in the coupon box at checkout.`)}
+                </div>
+              )}
             </div>
           </Card>
         </div>

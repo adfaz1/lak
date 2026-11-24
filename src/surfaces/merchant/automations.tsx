@@ -17,8 +17,8 @@ function useNames() {
   const tx = useTx();
   return {
     status: (s: AutoStatus) => ({ active: tx('نشطة', 'Active'), paused: tx('موقوفة', 'Paused'), draft: tx('مسودة', 'Draft') })[s],
-    trigger: (t: Trigger) => ({ cartAbandoned: tx('سلة متروكة', 'Cart abandoned'), lowStock: tx('مخزون منخفض', 'Low stock'), orderLate: tx('طلب متأخر في التجهيز', 'Order late to fulfil') })[t],
-    field: (f: CondField) => ({ cartValue: tx('قيمة السلة ≥ (ر.س)', 'Cart value ≥ (SAR)'), stockBelow: tx('المتاح ≤', 'Available ≤'), hoursLate: tx('ساعات التأخير ≥', 'Hours late ≥'), channel: tx('القناة =', 'Channel =') })[f],
+    trigger: (t: Trigger) => ({ cartAbandoned: tx('سلة متروكة', 'Cart abandoned'), lowStock: tx('مخزون منخفض', 'Low stock'), orderLate: tx('طلب متأخر في التجهيز', 'Order late to fulfil'), customerCreated: tx('عميل جديد', 'New customer'), orderDelivered: tx('تم تسليم الطلب', 'Order delivered'), backInStock: tx('عودة المخزون', 'Back in stock') })[t],
+    field: (f: CondField) => ({ cartValue: tx('قيمة السلة ≥ (ر.س)', 'Cart value ≥ (SAR)'), stockBelow: tx('المتاح ≤', 'Available ≤'), hoursLate: tx('ساعات التأخير ≥', 'Hours late ≥'), channel: tx('القناة =', 'Channel ='), orderTotal: tx('قيمة الطلب ≥ (ر.س)', 'Order total ≥ (SAR)'), subscribers: tx('المشتركون ≥', 'Subscribers ≥') })[f],
     action: (a: ActionKind) => ({ sendEmail: tx('أرسل بريدًا للعميل الموافق', 'Email the consenting customer'), sendSms: tx('أرسل رسالة نصية للعميل الموافق', 'SMS the consenting customer'), createTask: tx('أنشئ مهمة للفريق', 'Create a team task'), notifyStaff: tx('نبّه موظف التجهيز', 'Alert fulfilment staff') })[a],
     outcome: (o: RunOutcome) => ({ succeeded: tx('نجح', 'Succeeded'), failed: tx('فشل', 'Failed'), skipped: tx('تُخطّي', 'Skipped') })[o],
   };

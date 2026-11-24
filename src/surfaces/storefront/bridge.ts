@@ -5,13 +5,14 @@ import type { L } from '../../core/lang';
 import type { Product as MProduct } from '../merchant/catalog';
 import { LOC_IDS, nextOrderRef, total as mTotal, type LocId, type Order as MOrder, type Pay as MPay } from '../merchant/domain';
 import { available, type Level } from '../merchant/inventory';
-import type { Coupon as MCoupon } from '../merchant/growth';
-import type { Customer, Policy, Provider, StoreDetails, Zone } from '../merchant/workspace';
+import { bestAutoOffer, offerDiscount, type Coupon as MCoupon, type OfferLine } from '../merchant/growth';
+import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type SocialId, type StoreDetails, type Zone } from '../merchant/workspace';
+import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
 import type { Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
 import {
   CITIES, DAY, MERCHANT, cityById, computeTotals, isSettled, vatIn,
-  type CityId, type Coupon, type FulState, type Order, type PayMethod, type PayState, type Product, type ShipMethod, type ShipState, type Variant,
+  type CityId, type Coupon, type CouponResult, type FulState, type Order, type PayMethod, type PayState, type PricedLine, type Product, type ShipMethod, type ShipState, type Variant,
 } from './domain';
 
 /* ───────────── Catalogue ───────────── */
@@ -94,8 +95,9 @@ export const storeName = (s: Pick<StoreDetails, 'name'>): L =>
 
 /** Return window in days, read from the published returns policy ("within 14 days"); 14 when it does not say. */
 export function returnDaysFrom(policies: Policy[]): number {
-  const p = policies.find((x) => x.id === 'returns' && x.state === 'published');
-  const m = p?.text.match(/(\d{1,3})\s*-?\s*(?:days?|يوم|أيام)/i);
+  const p = policies.find((x) => x.id === 'returns');
+  const live = p ? normPolicy(p).live : null;
+  const m = live && `${live.en} ${live.ar}`.match(/(\d{1,3})\s*-?\s*(?:days?|يوم|أيام|يومًا|يوما)/i);
   return m ? Number(m[1]) : MERCHANT.returnDays;
 }
 
@@ -166,11 +168,39 @@ export const riyadhDate = (now: number) => new Date(now + RIYADH).toISOString().
 export function toStoreCoupon(c: MCoupon, usedByCustomer = 0): Coupon {
   const ends = c.ends ? dayStart(c.ends) + DAY - 1 : undefined;
   return {
-    code: c.code, kind: c.type, value: c.value, minSubtotal: c.minSpend || undefined, used: c.used,
+    code: c.code, kind: c.type === 'bogo' ? 'percent' : c.type, value: c.type === 'bogo' ? 0 : c.value, minSubtotal: c.minSpend || undefined, used: c.used,
     limit: c.limitTotal ?? undefined, perCustomer: c.limitPerCustomer ?? undefined, usedByCustomer,
     starts: dayStart(c.starts), expires: c.status === 'expired' ? Math.min(ends ?? Infinity, dayStart(c.starts)) : ends,
     paused: c.status === 'paused', hidden: c.status === 'draft',
   };
+}
+
+/* Offers beyond a plain code (dashboard «Coupons & offers»): items in scope, buy X get Y, and automatic offers. */
+
+/** Basket lines as the merchant's offer engine sees them (category = the product's English category name). */
+export const offerLines = (lines: PricedLine[], products: MProduct[]): OfferLine[] =>
+  lines.map((l) => ({ productId: l.productId, category: products.find((p) => p.id === l.productId)?.category.en ?? '', qty: l.qty, unit: l.unit }));
+
+/**
+ * A typed code's result with the merchant's scope applied: the discount counts only items in scope, and a basket
+ * with none of them gets the "for <category> only" answer. Plain codes are returned unchanged.
+ */
+export function scopedResult(res: CouponResult, coupons: MCoupon[], lines: PricedLine[], products: MProduct[]): CouponResult {
+  const mc = res.status === 'valid' ? coupons.find((c) => c.code === res.code) : undefined;
+  if (res.status !== 'valid' || !mc || (!mc.scope && mc.type !== 'bogo')) return res;
+  const d = offerDiscount(mc, offerLines(lines, products));
+  if (d.eligible === 0) {
+    const first = mc.scope?.kind === 'product' ? products.find((p) => mc.scope!.ids.includes(p.id))?.category : products.find((p) => mc.scope?.ids.includes(p.category.en))?.category;
+    return { status: 'not_eligible', code: res.code, reason: 'category', cat: first ? catSlug(first) : '' };
+  }
+  return mc.type === 'freeShip' ? res : { ...res, discount: Math.min(d.discount, d.eligible) };
+}
+
+/** The best automatic offer for the basket (no code typed), as a checkout result; undefined when none applies. */
+export function autoOfferResult(coupons: MCoupon[], lines: PricedLine[], products: MProduct[], now: number): CouponResult | undefined {
+  const best = bestAutoOffer(coupons, offerLines(lines, products), { shipping: 0 }, riyadhDate(now));
+  if (!best) return undefined;
+  return { status: 'valid', code: best.coupon.code, discount: best.r.discount, coupon: toStoreCoupon(best.coupon), freeShip: best.coupon.type === 'freeShip' };
 }
 
 /** Times a customer used a code on orders that were paid. */
@@ -222,7 +252,7 @@ export function reserve(levels: Level[], sku: string, qty: number): { levels: Le
       if (take > 0) { picks[l.loc] = take; left -= take; }
     }
   }
-  const taken = Object.values(picks).reduce((a, b) => a + (b ?? 0), 0);
+  const taken = Object.values(picks).reduce((a: number, b) => a + (b ?? 0), 0);
   return {
     levels: levels.map((l) => (l.sku === sku && picks[l.loc] ? { ...l, reserved: l.reserved + picks[l.loc]!, version: l.version + 1 } : l)),
     picks, short: qty - taken,
@@ -360,7 +390,32 @@ export function fromMerchant(m: MOrder, products: MProduct[], customer: Customer
 /** The coupon to advertise on the homepage: the first one the checkout would accept today (any basket permitting). */
 export function liveOffer(list: MCoupon[], now: number): MCoupon | undefined {
   return list.find((c) => {
+    // The banner says "use code X on everything": automatic and item-scoped offers do not fit that sentence.
+    if (c.auto || c.scope || c.type === 'bogo') return false;
     const s = toStoreCoupon(c);
     return !s.hidden && !s.paused && (s.starts ?? 0) <= now && (s.expires === undefined || now <= s.expires) && (s.limit === undefined || s.used < s.limit);
   });
 }
+
+/* ───────────── Pages, menus and SEO (dashboard/storefront/content.ts) ───────────── */
+
+/** Everything a menu link can point at, from the merchant's live catalogue, pages and policies. */
+export function linkContext(products: MProduct[], levels: Level[], pages: StorePage[], policies: Policy[]): LinkContext {
+  const store = toStoreProducts(products, levels);
+  return {
+    categories: categoriesOf(store).map((c) => ({ id: c.id, name: c.name })),
+    products: products.filter((p) => p.status !== 'archived').map((p) => ({ id: p.id, name: p.name, live: store.some((s) => s.id === p.id) })),
+    pages,
+    policies: policies.map((p) => ({ id: p.id, live: !!normPolicy(p).live })),
+  };
+}
+/** A served information page by its slug (published and not hidden), else undefined. */
+export const servedPage = (pages: StorePage[], slug: string | undefined) => pages.find((p) => p.slug === slug && isServed(p));
+/** Browser tab title for a store page: the page's own SEO title, else "<page> | <store SEO title or name>". */
+export function docTitle(seo: StoreSeo, storeName: L, lang: 'ar' | 'en', page?: string): string {
+  const site = seo.title[lang].trim() || storeName[lang];
+  return page ? `${page} | ${storeName[lang]}` : site;
+}
+/** Social links the merchant saved, in a fixed order, https only. */
+export const socialLinks = (s: Partial<Record<SocialId, string>> | undefined) =>
+  SOCIAL_IDS.flatMap((id) => (s?.[id] && /^https:\/\//i.test(s[id]!.trim()) ? [{ id, url: s[id]!.trim() }] : []));

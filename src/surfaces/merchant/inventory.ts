@@ -4,7 +4,7 @@
 //   reserved  = units held for paid orders not yet fulfilled
 //   available = on hand − reserved (what can still be sold)
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
-import { LOC_IDS, type LocId } from './domain';
+import { LOC_IDS, type L, type LocId, type Location } from './domain';
 
 export interface Level { sku: string; loc: LocId; onHand: number; reserved: number; incoming: number; version: number; threshold: number }
 export const available = (l: Level) => l.onHand - l.reserved;
@@ -158,3 +158,116 @@ export function coverage(availableUnits: number, h: History | undefined): Covera
 }
 
 export const lowStock = (levels: Level[]) => levels.filter((l) => available(l) <= l.threshold);
+
+/* ---------- Order stock effects (orders group: reserve, fulfil, cancel, return, exchange) ---------- */
+
+/**
+ * Apply order stock effects (deltas of reserved and on hand, from merchant/ops.ts). Reserved never goes below zero.
+ * Each on-hand change writes one stock-log line: shipped units as 'fulfilled', units back on the shelf as 'returned'.
+ */
+export function applyStockEffects(
+  levels: Level[], effects: { sku: string; loc: LocId; reserved: number; onHand: number }[], who: string, ref: string, idPrefix: string,
+): { levels: Level[]; log: StockLog[] } {
+  let next = levels;
+  const log: StockLog[] = [];
+  effects.forEach((e, i) => {
+    if (!e.sku || (!e.reserved && !e.onHand)) return;
+    const before = levelOf(next, e.sku, e.loc)?.onHand ?? 0;
+    next = withLevel(next, e.sku, e.loc, (l) => ({ ...l, onHand: Math.max(0, l.onHand + e.onHand), reserved: Math.max(0, l.reserved + e.reserved), version: l.version + 1 }));
+    const after = levelOf(next, e.sku, e.loc)!.onHand;
+    if (after !== before) log.push({ id: `${idPrefix}-${i}`, sku: e.sku, loc: e.loc, delta: after - before, before, after, reason: e.onHand < 0 ? 'fulfilled' : 'returned', who, ref });
+  });
+  return { levels: next, log };
+}
+
+/* ---------- Reorder thresholds and low-stock alerts ---------- */
+
+export const MAX_THRESHOLD = 9999;
+/** Set the reorder point for some SKU/location rows. Returns null when the value is not a whole number 0–9999. */
+export function setThresholds(levels: Level[], keys: { sku: string; loc: LocId }[], threshold: number): Level[] | null {
+  if (!Number.isInteger(threshold) || threshold < 0 || threshold > MAX_THRESHOLD) return null;
+  const want = new Set(keys.map((k) => `${k.sku}@${k.loc}`));
+  return levels.map((l) => (want.has(`${l.sku}@${l.loc}`) && l.threshold !== threshold ? { ...l, threshold, version: l.version + 1 } : l));
+}
+
+export interface StockAlertEntry {
+  id: string; sku: string; loc: LocId;
+  /** Available units and threshold when the alert was raised. */
+  available: number; threshold: number;
+  when: 'earlier' | 'now';
+  /** Epoch ms, for alerts raised in this session. */
+  at?: number;
+  /** Sent = delivered to the merchant's alert channel (simulated); resolved = stock went back above the threshold. */
+  status: 'sent' | 'resolved';
+}
+
+/**
+ * Keep alerts in step with levels: one alert per SKU and location each time it drops to its threshold (never a second
+ * one while the first is open), and an open alert is resolved once available is above the threshold again.
+ */
+export function syncStockAlerts(levels: Level[], alerts: StockAlertEntry[], when: 'earlier' | 'now' = 'now', now?: number): { alerts: StockAlertEntry[]; raised: StockAlertEntry[]; resolved: number } {
+  const low = new Map(lowStock(levels).map((l) => [`${l.sku}@${l.loc}`, l]));
+  let resolved = 0;
+  const next = alerts.map((a) => {
+    if (a.status !== 'sent' || low.has(`${a.sku}@${a.loc}`)) return a;
+    resolved++;
+    return { ...a, status: 'resolved' as const };
+  });
+  const open = new Set(next.filter((a) => a.status === 'sent').map((a) => `${a.sku}@${a.loc}`));
+  let n = alerts.reduce((m, a) => Math.max(m, Number(a.id.replace(/\D/g, '')) || 0), 500);
+  const raised: StockAlertEntry[] = [];
+  for (const [k, l] of low) {
+    if (open.has(k)) continue;
+    raised.push({ id: `ALR-${++n}`, sku: l.sku, loc: l.loc, available: available(l), threshold: l.threshold, when, at: now, status: 'sent' });
+  }
+  return { alerts: [...raised, ...next], raised, resolved };
+}
+
+/* ---------- Locations: usage, validation and disabling ---------- */
+
+export interface LocUsage { onHand: number; reserved: number; incoming: number; skus: number; openTransfers: number }
+export function locationUsage(loc: LocId, levels: Level[], transfers: Transfer[]): LocUsage {
+  const mine = levels.filter((l) => l.loc === loc);
+  return {
+    onHand: mine.reduce((s, l) => s + l.onHand, 0), reserved: mine.reduce((s, l) => s + l.reserved, 0), incoming: mine.reduce((s, l) => s + l.incoming, 0),
+    skus: mine.filter((l) => l.onHand > 0).length,
+    openTransfers: transfers.filter((t) => (t.from === loc || t.to === loc) && (t.status === 'draft' || t.status === 'sent' || t.status === 'partial')).length,
+  };
+}
+
+export type DisableBlock = 'default' | 'stock' | 'reserved' | 'incoming' | 'transfers' | 'lastShipping';
+/** Why a location cannot be disabled now (empty = it can). Stock must be moved out and open transfers finished first. */
+export function disableBlocks(loc: Location, all: Location[], levels: Level[], transfers: Transfer[]): DisableBlock[] {
+  const u = locationUsage(loc.id, levels, transfers);
+  const out: DisableBlock[] = [];
+  if (loc.isDefault) out.push('default');
+  if (u.onHand > 0) out.push('stock');
+  if (u.reserved > 0) out.push('reserved');
+  if (u.incoming > 0) out.push('incoming');
+  if (u.openTransfers > 0) out.push('transfers');
+  if (loc.ships && !all.some((x) => x.id !== loc.id && x.active && x.ships)) out.push('lastShipping');
+  return out;
+}
+
+export type LocationError = 'required' | 'taken';
+export function validateLocation(l: Pick<Location, 'id' | 'name' | 'city'>, all: Location[]): Partial<Record<'nameAr' | 'nameEn' | 'cityAr' | 'cityEn', LocationError>> {
+  const e: Partial<Record<'nameAr' | 'nameEn' | 'cityAr' | 'cityEn', LocationError>> = {};
+  const others = all.filter((x) => x.id !== l.id);
+  if (!l.name.ar.trim()) e.nameAr = 'required';
+  else if (others.some((x) => x.name.ar.trim() === l.name.ar.trim())) e.nameAr = 'taken';
+  if (!l.name.en.trim()) e.nameEn = 'required';
+  else if (others.some((x) => x.name.en.trim().toLowerCase() === l.name.en.trim().toLowerCase())) e.nameEn = 'taken';
+  if (!l.city.ar.trim()) e.cityAr = 'required';
+  if (!l.city.en.trim()) e.cityEn = 'required';
+  return e;
+}
+
+/** A short, stable id from the English city or name ("Dammam branch" → "dammam"); never reuses an existing id. */
+export function newLocationId(name: L, all: Location[]): LocId {
+  const base = (name.en.trim().toLowerCase().match(/[a-z0-9]+/g) ?? ['loc'])[0].slice(0, 12) || 'loc';
+  const ids = new Set(all.map((l) => l.id));
+  if (!ids.has(base)) return base;
+  let i = 2;
+  while (ids.has(`${base}${i}`)) i++;
+  return `${base}${i}`;
+}

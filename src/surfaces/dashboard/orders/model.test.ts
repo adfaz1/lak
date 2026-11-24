@@ -99,9 +99,9 @@ describe('next action and states', () => {
     expect(nextAction(late).reason).toBe('late');
     expect(exceptions(late)).toContain('late');
   });
-  it('needs nothing once shipped or delivered', () => {
-    expect(nextAction(byRef('10478'))).toMatchObject({ kind: 'none', reason: 'labelIssued' });
-    expect(nextAction(byRef('10477')).reason).toBe('inTransit');
+  it('after a label the next step is "handed to carrier", then "delivered", then nothing', () => {
+    expect(nextAction(byRef('10478'))).toMatchObject({ kind: 'ship', reason: 'labelIssued' });
+    expect(nextAction(byRef('10477'))).toMatchObject({ kind: 'deliver', reason: 'inTransit' });
     expect(nextAction(byRef('10476')).reason).toBe('delivered');
   });
   it('formats age as hours or days', () => {

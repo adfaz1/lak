@@ -2,7 +2,7 @@
 import { useMemo, useState } from 'react';
 import { Check, Minus, UserPlus, Users, History, Mail } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { settingsStore, teamStore, testStore } from '../../merchant/stores';
+import { logAction, settingsStore, teamStore, testStore } from '../../merchant/stores';
 import { ROLES, type Role } from '../../merchant/perms';
 import type { Member } from '../../merchant/workspace';
 import { Avatar, Badge, Button, InfoHint, cn, useTx } from '../../../ds/ui';
@@ -10,10 +10,12 @@ import { Alert, DataTable, Field, Input, Modal, Select, Simulated, useToast, typ
 import { useDashState } from '../review';
 import { sectionHref } from '../pages';
 import {
-  INVITE_DAYS, PERM_LABEL, ROLE_LABEL, changeRole, decodeLog, encodeLog, invite, inviteError, inviteStatus, matrix, planForSeats, removeMember,
+  INVITE_DAYS, PERM_LABEL, ROLE_LABEL, changeRole, customAllows, type CustomRole, encodeLog, invite, inviteError, inviteStatus, matrix, planForSeats, removeMember,
   resend, roleDiff, seats, withExpiry, type LogEvent,
 } from './model';
-import { inviteDatesStore } from './stores';
+import { customRolesStore, inviteDatesStore } from './stores';
+import { ActivityLog, MemberDrawer } from './activity';
+import { CustomRoles, RoleCustomBadge } from './roles';
 import { Section } from './common';
 
 const PLAN_LABEL = { basic: 'Basic', plus: 'Plus', pro: 'Pro', special: 'Special' } as const;
@@ -35,8 +37,19 @@ export default function TeamPage() {
   const [inviting, setInviting] = useState(false);
   const [roleChange, setRoleChange] = useState<{ m: Member; to: Role } | null>(null);
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [activity, setActivity] = useState<Member | null>(null);
+  const customRoles = customRolesStore.use();
 
-  const log = (e: LogEvent) => teamStore.set((x) => ({ ...x, log: [{ who: tx('أنت', 'You'), what: encodeLog(e) }, ...x.log] }));
+  // Team changes go to the account activity log (merchant/audit.ts) and, for older screens, the team log.
+  const log = (e: LogEvent) => {
+    teamStore.set((x) => ({ ...x, log: [{ who: tx('أنت', 'You'), what: encodeLog(e) }, ...x.log] }));
+    const r = (x: Role) => ROLE_LABEL[x];
+    const what = e.k === 'invite' ? { ar: `دعا ${e.email} بدور ${r(e.role).ar}`, en: `Invited ${e.email} as ${r(e.role).en}` }
+      : e.k === 'role' ? { ar: `غيّر دور ${e.name} من ${r(e.from).ar} إلى ${r(e.to).ar}`, en: `Changed ${e.name} from ${r(e.from).en} to ${r(e.to).en}` }
+        : e.k === 'remove' ? { ar: `أزال ${e.name} من الفريق`, en: `Removed ${e.name} from the team` }
+          : e.k === 'revoke' ? { ar: `ألغى دعوة ${e.email}`, en: `Revoked the invite for ${e.email}` } : { ar: `أعاد إرسال دعوة ${e.email}`, en: `Re-sent the invite to ${e.email}` };
+    logAction('team', what, { target: 'email' in e ? e.email : e.name, ...(e.k === 'role' ? { before: e.from, after: e.to } : {}) });
+  };
   const at = () => new Date().toISOString();
   const status = (m: Member) => {
     if (m.status === 'active') return <Badge tone="green">{tx('نشط', 'Active')}</Badge>;
@@ -57,7 +70,7 @@ export default function TeamPage() {
     ) },
     { key: 'role', header: tx('الدور', 'Role'), cell: (m) => <RoleCell m={m} onChange={(to) => setRoleChange({ m, to })} /> },
     { key: 'status', header: tx('الحالة', 'Status'), cell: status, hideBelow: 'lg' },
-    { key: 'act', header: <span className="sr-only">{tx('إجراءات', 'Actions')}</span>, align: 'end', cell: (m) => <Actions m={m} onResend={() => doResend(m)} onRemove={() => setRemoving(m)} /> },
+    { key: 'act', header: <span className="sr-only">{tx('إجراءات', 'Actions')}</span>, align: 'end', cell: (m) => <span className="inline-flex items-center gap-1">{m.status === 'active' && <Button variant="ghost" size="sm" onClick={() => setActivity(m)}><History className="size-4" aria-hidden="true" />{tx('النشاط', 'Activity')}</Button>}<Actions m={m} onResend={() => doResend(m)} onRemove={() => setRemoving(m)} /></span> },
   ];
 
   return (
@@ -84,24 +97,21 @@ export default function TeamPage() {
             <div className="space-y-3">
               <div className="flex items-center gap-3"><Avatar name={m.name.replace(/[^\p{L}\s]/gu, '').trim()} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-fg">{m.name}</p><bdi dir="ltr" className="block truncate text-xs text-muted">{m.email}</bdi></div></div>
               <div className="flex flex-wrap items-center gap-2">{status(m)}</div>
-              <div className="flex flex-wrap items-center gap-2"><RoleCell m={m} onChange={(to) => setRoleChange({ m, to })} /><span className="ms-auto"><Actions m={m} onResend={() => doResend(m)} onRemove={() => setRemoving(m)} /></span></div>
+              <div className="flex flex-wrap items-center gap-2"><RoleCell m={m} onChange={(to) => setRoleChange({ m, to })} /><span className="ms-auto inline-flex flex-wrap items-center gap-1">{m.status === 'active' && <Button variant="ghost" size="sm" onClick={() => setActivity(m)}><History className="size-4" aria-hidden="true" />{tx('النشاط', 'Activity')}</Button>}<Actions m={m} onResend={() => doResend(m)} onRemove={() => setRemoving(m)} /></span></div>
             </div>
           )} />
       </Section>
 
       <Section id="pm-h" flush title={tx('الأدوار والصلاحيات', 'Roles and permissions')}
         hint={<InfoHint>{tx('الأدوار الأربعة ثابتة في هذه النسخة. في المنصة الفعلية يُفرض المنع على الخادم لكل صفحة ورابط مباشر وتصدير.', 'The four roles are fixed in this version. On the real platform the server enforces this for every page, deep link and export.')}</InfoHint>}>
-        <Matrix current={role} />
+        <Matrix current={role} custom={customRoles.roles} />
       </Section>
 
-      <Section id="lg-h" title={<><History className="size-4 text-muted" aria-hidden="true" />{tx('سجل نشاط الفريق', 'Team activity log')}</>}
-        hint={<InfoHint>{tx('تغييرات العضوية والأدوار في هذه الجلسة. سجل كل إجراء لكل موظف يحتاج الخادم.', 'Membership and role changes in this session. A per-member log of every action needs the server.')}</InfoHint>}>
-        {team.log.length === 0 ? <p className="text-sm text-muted">{tx('لا نشاط بعد في هذه الجلسة.', 'No activity in this session yet.')}</p> : (
-          <ol className="divide-y divide-border">
-            {team.log.slice(0, 20).map((e, i) => <LogRow key={i} who={e.who} what={e.what} />)}
-          </ol>
-        )}
-      </Section>
+      <CustomRoles members={members} plan={plan} />
+
+      <ActivityLog members={all} />
+
+      {activity && <MemberDrawer member={activity} onClose={() => setActivity(null)} />}
 
       {inviting && <InviteModal members={all} plan={plan} onClose={() => setInviting(false)} onDone={(email, r) => {
         const id = `u${Date.now()}`;
@@ -137,6 +147,7 @@ export default function TeamPage() {
           footer={<><Button variant="secondary" onClick={() => setRemoving(null)}>{tx('إلغاء', 'Cancel')}</Button><Button variant="danger" onClick={() => {
             teamStore.set((x) => ({ ...x, members: removeMember(x.members, removing.id) }));
             log(removing.status === 'active' ? { k: 'remove', name: removing.name, at: at() } : { k: 'revoke', email: removing.email, at: at() });
+            customRolesStore.set((c) => { const a = { ...c.assigned }; delete a[removing.id]; return { ...c, assigned: a }; });
             setRemoving(null);
           }}>{removing.status === 'active' ? tx('أزل العضو', 'Remove member') : tx('ألغِ الدعوة', 'Revoke invite')}</Button></>} />
       )}
@@ -148,10 +159,10 @@ function RoleCell({ m, onChange }: { m: Member; onChange: (r: Role) => void }) {
   const tx = useTx();
   const { lang } = useLang();
   if (m.role === 'owner') return <Badge tone="brand">{ROLE_LABEL.owner[lang]}</Badge>;
-  return (
+  return (<span className="inline-flex flex-wrap items-center gap-1.5">
     <Select aria-label={tx(`دور ${m.name}`, `Role for ${m.name}`)} className="h-9 w-auto min-w-36" value={m.role} onChange={(e) => onChange(e.target.value as Role)}>
       {ROLES.filter((r) => r !== 'owner').map((r) => <option key={r} value={r}>{ROLE_LABEL[r][lang]}</option>)}
-    </Select>
+    </Select><RoleCustomBadge memberId={m.id} /></span>
   );
 }
 
@@ -191,7 +202,7 @@ function InviteModal({ members, plan, onClose, onDone }: { members: Member[]; pl
   );
 }
 
-function Matrix({ current }: { current: Role }) {
+function Matrix({ current, custom }: { current: Role; custom: CustomRole[] }) {
   const tx = useTx();
   const { lang } = useLang();
   const rows = matrix();
@@ -199,43 +210,25 @@ function Matrix({ current }: { current: Role }) {
   const no = <><Minus className="mx-auto size-4 text-subtle" aria-hidden="true" /><span className="sr-only">{tx('غير مسموح', 'Not allowed')}</span></>;
   const group = (kind: 'page' | 'action', title: string) => (
     <>
-      <tr><th colSpan={5} scope="colgroup" className="bg-surface-2/60 px-4 py-2 text-start text-xs font-semibold text-muted">{title}</th></tr>
+      <tr><th colSpan={5 + custom.length} scope="colgroup" className="bg-surface-2/60 px-4 py-2 text-start text-xs font-semibold text-muted">{title}</th></tr>
       {rows.filter((r) => r.kind === kind).map((r) => (
         <tr key={r.id} className="border-t border-border">
           <th scope="row" className="px-4 py-2.5 text-start text-[13px] font-medium text-fg">{PERM_LABEL[r.id]?.[lang]}</th>
           {ROLES.map((ro) => <td key={ro} className={cn('px-4 py-2.5 text-center', ro === current && 'bg-brand-500/5')}>{r.allowed[ro] ? yes : no}</td>)}
+          {custom.map((c) => <td key={c.id} className="bg-sky-500/5 px-4 py-2.5 text-center">{customAllows(c, r.id) ? yes : no}</td>)}
         </tr>
       ))}
     </>
   );
   return (
     <div className="scrollbar-thin relative overflow-x-auto">
-      <table className="w-full min-w-[520px] text-sm">
+      <table className="w-full min-w-[520px] text-sm" style={{ minWidth: 520 + custom.length * 96 }}>
         <caption className="sr-only">{tx('مصفوفة الصلاحيات حسب الدور', 'Permissions by role')}</caption>
         <thead><tr className="text-xs text-muted"><th scope="col" className="px-4 py-2 text-start font-semibold">{tx('الصلاحية', 'Permission')}</th>
-          {ROLES.map((r) => <th key={r} scope="col" className={cn('w-24 px-4 py-2 text-center font-semibold', r === current && 'text-brand-700 dark:text-brand-300')}>{ROLE_LABEL[r][lang]}</th>)}</tr></thead>
+          {ROLES.map((r) => <th key={r} scope="col" className={cn('w-24 px-4 py-2 text-center font-semibold', r === current && 'text-brand-700 dark:text-brand-300')}>{ROLE_LABEL[r][lang]}</th>)}
+          {custom.map((c) => <th key={c.id} scope="col" className="w-24 bg-sky-500/5 px-4 py-2 text-center font-semibold text-sky-700 dark:text-sky-300">{c.name[lang] || c.name.ar || c.name.en}<span className="block text-[10px] font-normal">{tx('مخصص', 'Custom')}</span></th>)}</tr></thead>
         <tbody>{group('page', tx('يرى الصفحة', 'Can open'))}{group('action', tx('يستطيع', 'Can do'))}</tbody>
       </table>
     </div>
-  );
-}
-
-function LogRow({ who, what }: { who: string; what: string }) {
-  const tx = useTx();
-  const { lang } = useLang();
-  const e = decodeLog(what);
-  const r = (x: Role) => ROLE_LABEL[x][lang];
-  const text = !e ? what
-    : e.k === 'invite' ? tx(`دعا ${e.email} بدور ${r(e.role)}`, `Invited ${e.email} as ${r(e.role)}`)
-      : e.k === 'role' ? tx(`غيّر دور ${e.name} من ${r(e.from)} إلى ${r(e.to)}`, `Changed ${e.name} from ${r(e.from)} to ${r(e.to)}`)
-        : e.k === 'remove' ? tx(`أزال ${e.name}`, `Removed ${e.name}`)
-          : e.k === 'revoke' ? tx(`ألغى دعوة ${e.email}`, `Revoked the invite for ${e.email}`)
-            : tx(`أعاد إرسال دعوة ${e.email}`, `Re-sent the invite to ${e.email}`);
-  const when = e ? new Date(e.at).toLocaleString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-  return (
-    <li className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-2.5 text-sm">
-      <span className="font-semibold text-fg">{who}</span><span className="min-w-0 flex-1 text-muted">{text}</span>
-      {when && <time dateTime={e!.at} className="text-xs text-subtle tabular-nums">{when}</time>}
-    </li>
   );
 }

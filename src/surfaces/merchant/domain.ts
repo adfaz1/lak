@@ -10,13 +10,71 @@ export type Ship = 'none' | 'label' | 'transit' | 'delivered';
 export type View = 'all' | 'needs' | 'late' | 'payfail' | 'shipped' | 'returns';
 export type Channel = 'online' | 'market' | 'app';
 export type CarrierId = 'a' | 'b';
-export type LocId = 'ryd' | 'jed';
+/** A stock location id. Locations are data (see `Location`); 'ryd' and 'jed' are the two fixture warehouses. */
+export type LocId = string;
 
-export const LOCATIONS: Record<LocId, L> = {
-  ryd: { ar: 'مستودع الرياض', en: 'Riyadh warehouse' },
-  jed: { ar: 'مستودع جدة', en: 'Jeddah warehouse' },
-};
-export const LOC_IDS: LocId[] = ['ryd', 'jed'];
+/* ---------- Locations (warehouses and branches) as data ---------- */
+
+export type LocKind = 'warehouse' | 'branch';
+export type LocDisableReason = 'closed' | 'moved' | 'seasonal' | 'other';
+export interface Location {
+  id: LocId;
+  name: L;
+  kind: LocKind;
+  city: L;
+  address: string;
+  /** Orders can be shipped from here. */
+  ships: boolean;
+  /** Customers can collect orders here. */
+  pickup: boolean;
+  active: boolean;
+  /** The default fulfilment location (used when an order has a single location). Cannot be disabled. */
+  isDefault?: boolean;
+  disabled?: { reason: LocDisableReason; note: string; by: string };
+  version: number;
+}
+
+export function locationFixtures(): Location[] {
+  return [
+    { id: 'ryd', name: { ar: 'مستودع الرياض', en: 'Riyadh warehouse' }, kind: 'warehouse', city: { ar: 'الرياض', en: 'Riyadh' }, address: 'Al Sulay, 2nd Industrial City', ships: true, pickup: false, active: true, isDefault: true, version: 1 },
+    { id: 'jed', name: { ar: 'مستودع جدة', en: 'Jeddah warehouse' }, kind: 'warehouse', city: { ar: 'جدة', en: 'Jeddah' }, address: 'Al Khumrah, Logistics Zone', ships: true, pickup: false, active: true, version: 1 },
+  ];
+}
+
+let locSource: () => Location[] = (() => { const fx = locationFixtures(); return () => fx; })();
+/** Point the live registry at the session's location store (called once by merchant/stores.ts). */
+export function bindLocations(get: () => Location[]): void { locSource = get; }
+/** Every known location, including disabled ones (history and old orders still name them). */
+export const allLocations = (): Location[] => locSource();
+/** Active location ids, in order. */
+export const activeLocIds = (): LocId[] => locSource().filter((l) => l.active).map((l) => l.id);
+const fallbackName = (id: string): L => ({ ar: id, en: id });
+
+/**
+ * Live name lookup `LOCATIONS[id][lang]`, kept for existing screens. Reads the location store at access time, so a
+ * location added in the session is named everywhere; an unknown id falls back to the id itself instead of crashing.
+ */
+export const LOCATIONS: Record<LocId, L> = new Proxy({} as Record<LocId, L>, {
+  get: (_t, k) => (typeof k === 'string' ? locSource().find((l) => l.id === k)?.name ?? fallbackName(k) : undefined),
+  has: (_t, k) => typeof k === 'string' && locSource().some((l) => l.id === k),
+  ownKeys: () => locSource().map((l) => l.id),
+  getOwnPropertyDescriptor: (_t, k) => {
+    const loc = typeof k === 'string' ? locSource().find((l) => l.id === k) : undefined;
+    return loc ? { value: loc.name, enumerable: true, configurable: true, writable: false } : undefined;
+  },
+});
+
+/** Live list of ACTIVE location ids (an array view over the location store), kept for existing screens. */
+export const LOC_IDS: LocId[] = new Proxy([] as LocId[], {
+  get: (_t, k) => {
+    const ids = activeLocIds();
+    const v = Reflect.get(ids, k);
+    return typeof v === 'function' ? v.bind(ids) : v;
+  },
+  has: (_t, k) => Reflect.has(activeLocIds(), k),
+  ownKeys: () => Reflect.ownKeys(activeLocIds()),
+  getOwnPropertyDescriptor: (_t, k) => Reflect.getOwnPropertyDescriptor(activeLocIds(), k),
+});
 
 export type LogKind =
   | 'created' | 'payFailed' | 'labelIssued' | 'labelFailed' | 'confirmed' | 'slipPrinted'
@@ -31,10 +89,27 @@ export interface LogEntry {
   loc?: LocId;
   amount?: number;
   units?: number;
+  /** Who did it (staff name, "customer" or "system") and their role, and when (epoch ms). See merchant/ops.ts. */
+  actor?: string;
+  role?: string;
+  at?: number;
 }
 
-export interface Item { name: L; qty: number; unit: number; sku: string; stock?: Partial<Record<LocId, number>> }
-export interface Fulfilment { ref: string; loc: LocId; qty: number[] }
+export interface Item {
+  name: L; qty: number; unit: number; sku: string; stock?: Partial<Record<LocId, number>>;
+  /** Units held for this line per location (reserved when the order was paid or created by hand). */
+  reserved?: Partial<Record<LocId, number>>;
+  /** Variant label (size/colour) when the line is a variant. */
+  variant?: L;
+}
+export interface Fulfilment {
+  ref: string; loc: LocId; qty: number[];
+  /** Per-parcel shipment state; absent = the order's `ship`. */
+  ship?: Ship;
+  carrier?: CarrierId;
+  /** Carrier tracking number when it differs from the label reference. */
+  tracking?: string;
+}
 export type RefundStatus = 'pending' | 'confirmed' | 'failed';
 export interface Refund { id: string; amount: number; qty: number[]; shipping: number; restock: number[]; loc: LocId; reason: string; status: RefundStatus }
 
@@ -65,6 +140,23 @@ export interface Order {
   payment?: { method: 'card' | 'applepay' | 'bnpl' | 'cod'; state: 'paid' | 'declined' | 'verifying' | 'cod_due' | 'cod_collected' };
   /** Epoch ms when the order was placed in this session (online-store orders). */
   placedAt?: number;
+  /* Operations (group 1, merchant/ops.ts). All optional: fixture orders may have none of them. */
+  contact?: { phone?: string; email?: string };
+  address?: { name?: string; line: string; city: L; notes?: string };
+  customerNote?: string;
+  gift?: { message?: string; to?: string };
+  notes?: { id: string; text: string; by: string; at: number }[];
+  tags?: string[];
+  assignee?: string;
+  /** Set when the order is cancelled. A cancelled order keeps its lines, payments and log. */
+  cancelled?: { at: number; by: string; role: string; reason: string };
+  /** A shopper asked to cancel after the self-cancel window; the merchant approves or declines. */
+  cancelRequest?: { at: number; reason: string; state: 'open' | 'declined' };
+  /** Actions that are not in `LogKind` (kept apart so older screens keep compiling). */
+  activity?: import('./ops').Activity[];
+  returns?: import('./ops').OrderReturn[];
+  /** Created by hand in the dashboard; how it was or will be paid. */
+  manual?: { pay: 'cash' | 'transfer' | 'link' | 'cod' };
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {
@@ -183,17 +275,17 @@ export const nextOrderRef = (orders: { ref: string }[]): string => String(orders
 export const vatIncluded = (o: Order) => Math.round((total(o) * 15) / 115);
 export const units = (o: Order) => o.items.reduce((sum, i) => sum + i.qty, 0);
 export const isToday = (o: Order) => o.hoursAgo < 12;
-export const canFulfil = (o: Order) => o.pay === 'paid' && o.ship === 'none';
+export const canFulfil = (o: Order) => o.pay === 'paid' && o.ship === 'none' && !o.cancelled;
 /** Lines whose stock sits in more than one warehouse use the partial, per-location fulfilment flow. */
 export const isMultiLocation = (o: Order) => o.items.some((i) => i.stock && Object.keys(i.stock).length > 1);
 
 export const VIEWS: Record<View, (o: Order) => boolean> = {
   all: () => true,
-  needs: (o) => o.pay === 'paid' && o.ful !== 'done',
-  late: (o) => o.pay === 'paid' && o.ful !== 'done' && o.hoursAgo > 24,
-  payfail: (o) => o.pay === 'failed',
+  needs: (o) => o.pay === 'paid' && o.ful !== 'done' && !o.cancelled,
+  late: (o) => o.pay === 'paid' && o.ful !== 'done' && o.hoursAgo > 24 && !o.cancelled,
+  payfail: (o) => o.pay === 'failed' && !o.cancelled,
   shipped: (o) => o.ship !== 'none',
-  returns: (o) => o.refunds.length > 0,
+  returns: (o) => o.refunds.length > 0 || (o.returns?.length ?? 0) > 0,
 };
 export const VIEW_IDS = Object.keys(VIEWS) as View[];
 
@@ -283,7 +375,7 @@ export function runBulk(all: Order[], refs: string[], action: BulkAction, fails:
 
 export const fulfilledQty = (o: Order, idx: number) => o.fulfilments.reduce((s, f) => s + (f.qty[idx] ?? 0), 0);
 export const remainingQty = (o: Order, idx: number) => o.items[idx].qty - fulfilledQty(o, idx);
-export const canFulfilPartial = (o: Order) => o.pay === 'paid' && o.ful !== 'done';
+export const canFulfilPartial = (o: Order) => o.pay === 'paid' && o.ful !== 'done' && !o.cancelled;
 export const nextFulfilmentRef = (o: Order) => `SIM-${o.ref}-${o.fulfilments.length + 1}`;
 
 export type PickError = 'negative' | 'exceedsRemaining' | 'exceedsStock';

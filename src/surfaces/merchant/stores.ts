@@ -1,14 +1,18 @@
 // Module-level fixture stores for the merchant workspace. The global "Reset data" button resets them all.
 // Simulated state only: not a ledger, not a permission system.
 import { createStore } from '../../core/store';
-import { allOrders } from './domain';
-import { productFixtures, skusOf, type ProductDraft } from './catalog';
-import { initialLevels, transferFixtures, type StockLog } from './inventory';
-import { financeFixtures, type Plan } from './finance';
-import { automationFixtures, cartFixtures, couponFixtures, runFixtures } from './growth';
+import { allOrders, bindLocations, locationFixtures, type Location } from './domain';
+import { categoryFixtures, collectionFixtures, productFixtures, skusOf, type Category, type Collection, type ProductDraft } from './catalog';
+import { initialLevels, syncStockAlerts, transferFixtures, type StockAlertEntry, type StockLog } from './inventory';
+import { financeFixtures, type BankDetails, type Plan } from './finance';
+import {
+  automationFixtures, cartFixtures, couponFixtures, runFixtures, giftFixtures, loyaltyFixture, reviewFixtures, reviewSettingsFixture, syncEarned,
+  type GiftCard, type PointsTxn, type Review,
+} from './growth';
+import { total } from './domain';
 import {
   appFixtures, domainFixture, notifyFixture, policyFixtures, providerFixtures, setupFixture, statusFixture, storeFixture, teamFixture,
-  themeFixture, zoneFixtures, customerFixtures, type Customer, type Member,
+  themeFixture, zoneFixtures, customerFixtures, segmentFixtures, type Customer, type Member, type SavedSegment,
 } from './workspace';
 import type { Role } from './perms';
 
@@ -38,6 +42,8 @@ export const settingsStore = createStore.key('merchant.settingsStore')(() => ({
   plan: 'plus' as Plan,
   planRequest: null as Plan | null,
   storeLangs: { ar: true, en: true },
+  /** Bank-transfer details shoppers pay into (BP-P03-PMT-002). Null until the merchant saves them. Older sessions may lack the key. */
+  bank: null as BankDetails | null,
 }));
 /** Customers: the fixtures plus anyone who orders from the online store with a new mobile/email. */
 export const customersStore = createStore.key('merchant.customersStore')<Customer[]>(customerFixtures);
@@ -54,3 +60,40 @@ export const draftsStore = createStore.key('merchant.draftsStore')<Record<string
 
 export interface TestState { role: Role; mode: 'active' | 'new'; failBulk: boolean; open: boolean }
 export const testStore = createStore.key('merchant.testStore')<TestState>(() => ({ role: 'owner', mode: 'active', failBulk: false, open: false }));
+
+/* ---------- Account activity log (merchant/audit.ts) ---------- */
+// Additive: one log for every action with an effect. Any section can call logAction(); the Team page shows it per member.
+import { auditFixtures, nextAuditId, type AuditArea, type AuditEntry } from './audit';
+import type { L as AuditL } from './domain';
+export const auditStore = createStore.key('merchant.auditStore')<AuditEntry[]>(() => auditFixtures());
+/** The person acting now: the previewed role's member (the owner for "owner"). Simulated identity. */
+export function currentActor(): AuditEntry['actor'] {
+  const role = testStore.get().role;
+  const m = teamStore.get().members.find((x) => x.role === role && x.status === 'active');
+  return m ? { id: m.id, name: m.name, role } : { id: `role:${role}`, name: role, role };
+}
+/** Record an action in the account activity log, attributed to the current actor, timestamped now. */
+export function logAction(area: AuditArea, what: AuditL, extra: { target?: string; before?: string; after?: string } = {}): void {
+  auditStore.set((list) => [{ id: nextAuditId(list), at: new Date().toISOString(), actor: currentActor(), area, what, ...extra }, ...list].slice(0, 500));
+}
+
+/* ---------- Catalogue structure and locations (products & inventory group) ---------- */
+/** Warehouses and branches. `LOCATIONS`/`LOC_IDS` in domain.ts read this store, so every screen names new locations. */
+export const locationsStore = createStore.key('merchant.locationsStore')<Location[]>(locationFixtures);
+bindLocations(() => locationsStore.get());
+export const categoriesStore = createStore.key('merchant.categoriesStore')<Category[]>(categoryFixtures);
+export const collectionsStore = createStore.key('merchant.collectionsStore')<Collection[]>(collectionFixtures);
+/** Low-stock alerts raised for a SKU at a location: one per crossing, resolved when stock is back above the threshold. */
+export const stockAlertsStore = createStore.key('merchant.stockAlertsStore')<StockAlertEntry[]>(() => syncStockAlerts(levelsStore.get(), [], 'earlier').alerts);
+
+/* Customers & growth: loyalty, gift cards, reviews, saved segments and the customer activity log. */
+export const loyaltyStore = createStore.key('merchant.loyaltyStore')(loyaltyFixture);
+/** Points ledger. Starts with the points earned on the fixture orders at the starting rules. */
+export const pointsStore = createStore.key('merchant.pointsStore')<PointsTxn[]>(() => syncEarned([], allOrders(), customerFixtures(), loyaltyFixture(), total as never));
+export const giftCardsStore = createStore.key('merchant.giftCardsStore')<GiftCard[]>(giftFixtures);
+export const reviewsStore = createStore.key('merchant.reviewsStore')<Review[]>(reviewFixtures);
+export const reviewSettingsStore = createStore.key('merchant.reviewSettingsStore')(reviewSettingsFixture);
+export const segmentsStore = createStore.key('merchant.segmentsStore')<SavedSegment[]>(segmentFixtures);
+/** Things done to a customer record (block, unblock, consent withdrawn, points adjusted, imported), newest first. */
+export interface CustomerEvent { id: string; kind: 'blocked' | 'unblocked' | 'consentWithdrawn' | 'points' | 'imported' | 'giftCard'; text: string; by: string; at: number }
+export const customerEventsStore = createStore.key('merchant.customerEventsStore')<Record<string, CustomerEvent[]>>(() => ({}));

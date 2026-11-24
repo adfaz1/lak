@@ -28,7 +28,7 @@ export default function TransferDetail({ id, query }: { id: string; query: URLSe
       <Card><EmptyState icon={<PackageSearch className="size-6" aria-hidden="true" />} title={tx('لا يوجد تحويل بهذا المرجع', 'No transfer with this reference')} action={<a className="text-sm font-semibold text-brand-700 hover:underline dark:text-brand-300" href={back.href}>{tx('كل التحويلات', 'All transfers')}</a>} /></Card>
     </div>
   );
-  return <Detail initial={stored ?? newTransfer(transfers, query.get('sku'), query.get('to'))} isNew={!stored} />;
+  return <Detail initial={stored ?? newTransfer(transfers, query.get('sku'), query.get('to'), levelsStore.get())} isNew={!stored} />;
 }
 
 function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
@@ -121,7 +121,7 @@ function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
             <div key={k} className="flex w-full items-end gap-3 sm:w-auto">
               {i === 1 && <ArrowLeft className="mb-3 hidden size-4 text-subtle sm:block ltr:rotate-180" aria-hidden="true" />}
               <Field label={k === 'from' ? tx('من', 'From') : tx('إلى', 'To')} className="w-full sm:w-48">
-                {(p) => <Select {...p} value={t[k]} disabled={!editable} onChange={(e) => edit({ [k]: e.target.value as LocId })}>{LOC_IDS.map((x) => <option key={x} value={x}>{LOCATIONS[x][lang]}</option>)}</Select>}
+                {(p) => <Select {...p} value={t[k]} disabled={!editable} onChange={(e) => edit({ [k]: e.target.value as LocId })}>{[...new Set([t[k], ...LOC_IDS])].map((x) => <option key={x} value={x}>{LOCATIONS[x][lang]}</option>)}</Select>}
               </Field>
             </div>
           ))}

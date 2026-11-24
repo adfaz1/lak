@@ -1,10 +1,13 @@
 /* Data hooks for pages. The catalogue, settings and order book are the merchant's live stores, mapped through
    bridge.ts; review mode can force the empty state. */
 import { useMemo } from 'react';
-import { couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { categoriesStore, couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { arrangeStoreCategories } from '../merchant/catalog';
 import { checkoutStore as checkoutSettingsStore } from '../dashboard/settings/stores';
 import type { Cart, Order, Product } from './domain';
-import { categoriesOf, fromMerchant, storeConfig, toStoreProducts, withMerchant, type Category, type StoreConfig } from './bridge';
+import { categoriesOf, fromMerchant, linkContext, storeConfig, toStoreProducts, withMerchant, type Category, type StoreConfig } from './bridge';
+import { contentStore } from '../dashboard/storefront/state';
+import { resolveMenu } from '../dashboard/storefront/content';
 import { cartStore, ordersStore } from './state';
 import { useSfState } from './review';
 
@@ -21,7 +24,9 @@ export function useCatalog(): Product[] {
 }
 export function useCategories(): Category[] {
   const products = useCatalog();
-  return useMemo(() => categoriesOf(products), [products]);
+  const cats = categoriesStore.use();
+  // Menu order and visibility come from the merchant's categories (dashboard → Products → Categories).
+  return useMemo(() => arrangeStoreCategories(categoriesOf(products), cats), [products, cats]);
 }
 /** Store name, payment methods, COD limits, return window and shipping zones from the merchant's settings. */
 export function useConfig(): StoreConfig {
@@ -57,4 +62,16 @@ export function useOrders(): Order[] {
     return [...seen, ...rest];
   }, [records, book, ps, customers]);
   return useSfState() === 'empty' ? NO_ORDERS : all;
+}
+
+/** The merchant's live header/footer menus (broken or unpublished links skipped), served pages and store SEO. */
+export function useStoreContent() {
+  const content = contentStore.use();
+  const ps = productsStore.use();
+  const lv = levelsStore.use();
+  const policies = settingsStore.use().policies;
+  return useMemo(() => {
+    const ctx = linkContext(ps, lv, content.pages, policies);
+    return { header: resolveMenu(content.menus.live.header, ctx), footer: resolveMenu(content.menus.live.footer, ctx), pages: content.pages, seo: content.seo };
+  }, [content, ps, lv, policies]);
 }

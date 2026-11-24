@@ -17,7 +17,7 @@ const store = toStoreProducts(mProducts, levels);
 
 describe('catalogue from the merchant', () => {
   it('lists only active products with the online channel on', () => {
-    expect(store.map((p) => p.id)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10']);
+    expect(store.map((p) => p.id)).toEqual(['p1', 'p2', 'p3', 'p4', 'p5', 'p6', 'p7', 'p8', 'p9', 'p10', 'p13', 'p14', 'p15', 'p16', 'p17', 'p18']);
     const offline = mProducts.map((p) => (p.id === 'p2' ? { ...p, channels: { ...p.channels, online: false } } : p));
     expect(toStoreProducts(offline, levels).some((p) => p.id === 'p2')).toBe(false);
   });
@@ -55,7 +55,10 @@ describe('settings', () => {
   });
   it('reads the return window from the published returns policy', () => {
     expect(returnDaysFrom(policyFixtures())).toBe(14);
-    expect(returnDaysFrom([{ id: 'returns', state: 'published', text: 'Returns within 30 days.' }])).toBe(30);
+    const t30 = { ar: 'الإرجاع خلال 30 يومًا.', en: 'Returns within 30 days.' };
+    expect(returnDaysFrom([{ id: 'returns', state: 'published', text: t30, live: t30 }])).toBe(30);
+    // A draft edit does not change the window shoppers are promised.
+    expect(returnDaysFrom([{ id: 'returns', state: 'published', text: t30, live: { ar: 'خلال 7 أيام', en: 'within 7 days' } }])).toBe(7);
   });
   it('prices standard delivery from the city zone, flat or by weight, with the zone free threshold', () => {
     const zones = zoneFixtures();

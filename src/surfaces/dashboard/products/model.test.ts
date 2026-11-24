@@ -16,7 +16,7 @@ describe('list', () => {
   const all = { q: '', tab: 'all' as const, category: '', channel: '' };
   it('filters by status tab, category, channel and search (name or any variant SKU)', () => {
     expect(filterProducts(products, { ...all, tab: 'draft' }).map((x) => x.id)).toEqual(['p11']);
-    expect(filterProducts(products, { ...all, category: 'bags' }).map((x) => x.id)).toEqual(['p4', 'p5']);
+    expect(filterProducts(products, { ...all, category: 'bags' }).map((x) => x.id)).toEqual(['p4', 'p5', 'p17']);
     expect(filterProducts(products, { ...all, channel: 'market' }).some((x) => x.id === 'p9')).toBe(false);
     expect(filterProducts(products, { ...all, q: 'abaya' }).map((x) => x.id)).toEqual(['p1']);
     expect(filterProducts(products, { ...all, q: 'thb-cot-whi' }).map((x) => x.id)).toEqual(['p7']);
@@ -115,7 +115,7 @@ describe('editor draft', () => {
     expect(makePrimary(['a', 'b', 'c'], 2)).toEqual(['c', 'a', 'b']);
   });
   it('numbers new products after the highest id', () => {
-    expect(nextProductId(products)).toBe('p13');
+    expect(nextProductId(products)).toBe('p19');
   });
 });
 

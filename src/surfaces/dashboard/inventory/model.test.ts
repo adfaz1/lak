@@ -16,7 +16,7 @@ describe('levels', () => {
     expect(info.get('OUD-100')!.variant).toEqual({ ar: '', en: '' });
   });
   it('filters by warehouse and search, and puts the emptiest first on the low view', () => {
-    const r = levelRows(levels, info, { q: 'oud', loc: '' });
+    const r = levelRows(levels, info, { q: 'oud-100', loc: '' });
     expect(r.map((x) => x.key)).toEqual(['OUD-100@ryd', 'OUD-100@jed']);
     expect(r[0].available).toBe(3);
     expect(levelRows(levels, info, { q: '', loc: 'jed' }).every((x) => x.loc === 'jed')).toBe(true);

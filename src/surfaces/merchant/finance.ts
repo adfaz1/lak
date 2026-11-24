@@ -18,7 +18,18 @@ export interface Tx {
   note?: L;
 }
 export type PayoutStatus = 'paid' | 'in_transit' | 'scheduled';
-export interface Payout { id: string; from: string; to: string; date: string; status: PayoutStatus; account: string; amount: number | null }
+export interface Payout {
+  id: string; from: string; to: string; date: string; status: PayoutStatus; account: string; amount: number | null;
+  /** The bank returned the transfer (e.g. account closed). The money goes back to "available" until the payout is retried. */
+  problem?: { reason: L; day: string };
+  /** Earlier attempts of this payout, newest last (set when a returned payout is retried). */
+  attempts?: { day: string; result: 'returned' }[];
+}
+/**
+ * Funds the provider keeps back from a sale (e.g. a customer dispute). The sale stays "pending" until the hold ends,
+ * so a held amount is always part of the pending figure, never of available.
+ */
+export interface Hold { id: string; txId: string; orderRef: string; amount: number; reason: L; since: string; releaseBy: string; state: 'held' | 'evidence_sent' | 'released' }
 
 const CARD: L = { ar: 'مزود دفع تجريبي', en: 'Test payment provider' };
 /** Test fee: 2.2% + SAR 1.00 per sale. Illustrative only. */
@@ -26,7 +37,7 @@ export const testFee = (amount: number) => Math.round((amount * 22) / 1000) + 10
 
 const day = (d: number) => `2026-11-${String(d).padStart(2, '0')}`;
 
-export function financeFixtures(orders: Order[] = allOrders()): { txs: Tx[]; payouts: Payout[] } {
+export function financeFixtures(orders: Order[] = allOrders()): { txs: Tx[]; payouts: Payout[]; holds: Hold[] } {
   const settled = orders.filter((o) => o.settled && o.pay === 'paid').slice(0, 36);
   const groups: { id: string; from: number; to: number; date: number; status: PayoutStatus; list: Order[] }[] = [
     { id: 'PO-2611-01', from: 1, to: 7, date: 9, status: 'paid', list: settled.slice(24, 36) },
@@ -58,11 +69,19 @@ export function financeFixtures(orders: Order[] = allOrders()): { txs: Tx[]; pay
   for (const o of orders.filter((x) => x.pay === 'paid' && x.hoursAgo < 12)) {
     txs.push({ id: id(), type: 'sale', orderRef: o.ref, provider: CARD, amount: total(o), status: 'pending', saleDay: day(24) });
   }
+  // A sale the provider is holding while a customer dispute is reviewed (test data).
+  const holds: Hold[] = [];
+  const disputed = orders.find((o) => o.pay === 'paid' && !o.settled && o.hoursAgo >= 24 && !['10478', '10477', '10476'].includes(o.ref));
+  if (disputed) {
+    const txId = id();
+    txs.push({ id: txId, type: 'sale', orderRef: disputed.ref, provider: CARD, amount: total(disputed), status: 'pending', saleDay: day(24 - Math.floor(disputed.hoursAgo / 24)) });
+    holds.push({ id: 'HLD-301', txId, orderRef: disputed.ref, amount: total(disputed), reason: { ar: 'اعتراض من حامل البطاقة (تجريبي)', en: 'Cardholder dispute (test)' }, since: day(23), releaseBy: day(30), state: 'held' });
+  }
   const payouts: Payout[] = groups.map((g) => ({ id: g.id, from: day(g.from), to: day(g.to), date: day(g.date), status: g.status, account: '•••• 4821', amount: null }));
   payouts.push({ id: 'PO-2611-04', from: day(22), to: day(28), date: day(30), status: 'scheduled', account: '•••• 4821', amount: null });
   // Paid and in-transit payouts carry the amount the bank transfer was made for.
   for (const p of payouts) if (p.status !== 'scheduled') p.amount = reconcile(p, txs).net;
-  return { txs, payouts: payouts.reverse() };
+  return { txs, payouts: payouts.reverse(), holds };
 }
 
 /** collected − fees − refunds ± adjustments = net. Each figure comes from the payout's own transactions, counted once. */
@@ -127,4 +146,56 @@ export const STAFF_LIMIT: Record<Plan, number | null> = { basic: 1, plus: 3, pro
 export const entitled = (plan: Plan, f: Feature) => PLANS.indexOf(plan) >= PLANS.indexOf(FEATURE_MIN[f]);
 export function planDiff(from: Plan, to: Plan) {
   return { gained: FEATURES.filter((f) => !entitled(from, f) && entitled(to, f)), lost: FEATURES.filter((f) => entitled(from, f) && !entitled(to, f)) };
+}
+
+/* ---------- Bank account for bank-transfer payments (BP-P03-PMT-002) ---------- */
+
+export interface BankDetails { bank: string; beneficiary: string; iban: string }
+/** Saudi banks by the two-digit code inside the IBAN (positions 5–6). Names only help the merchant spot a typo. */
+export const SA_BANKS: Record<string, L> = {
+  '10': { ar: 'البنك الأهلي السعودي', en: 'Saudi National Bank' },
+  '80': { ar: 'مصرف الراجحي', en: 'Al Rajhi Bank' },
+  '20': { ar: 'بنك الرياض', en: 'Riyad Bank' },
+  '45': { ar: 'البنك السعودي الأول', en: 'Saudi Awwal Bank' },
+  '55': { ar: 'البنك السعودي الفرنسي', en: 'Banque Saudi Fransi' },
+  '05': { ar: 'مصرف الإنماء', en: 'Alinma Bank' },
+  '15': { ar: 'بنك البلاد', en: 'Bank Albilad' },
+  '30': { ar: 'البنك العربي الوطني', en: 'Arab National Bank' },
+  '60': { ar: 'بنك الجزيرة', en: 'Bank AlJazira' },
+  '65': { ar: 'البنك السعودي للاستثمار', en: 'Saudi Investment Bank' },
+};
+/** Upper-case, Arabic-Indic digits to Latin, spaces and dashes removed. */
+export function normaliseIban(s: string): string {
+  return s.replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d))).replace(/[\s-]/g, '').toUpperCase();
+}
+export type IbanError = 'empty' | 'country' | 'length' | 'chars' | 'checksum';
+/** Saudi IBAN: "SA", 2 check digits, 2-digit bank code, 18 account characters (24 in all), ISO 13616 mod-97 check. */
+export function checkIban(input: string): { ok: true; iban: string; bank: L | null } | { ok: false; error: IbanError } {
+  const s = normaliseIban(input);
+  if (!s) return { ok: false, error: 'empty' };
+  if (!s.startsWith('SA')) return { ok: false, error: 'country' };
+  if (!/^[A-Z0-9]+$/.test(s)) return { ok: false, error: 'chars' };
+  if (s.length !== 24) return { ok: false, error: 'length' };
+  if (!/^SA\d{4}[A-Z0-9]{18}$/.test(s)) return { ok: false, error: 'chars' };
+  const moved = s.slice(4) + s.slice(0, 4);
+  let rem = 0;
+  for (const ch of moved) {
+    const v = /\d/.test(ch) ? ch : String(ch.charCodeAt(0) - 55);
+    for (const d of v) rem = (rem * 10 + Number(d)) % 97;
+  }
+  if (rem !== 1) return { ok: false, error: 'checksum' };
+  return { ok: true, iban: s, bank: SA_BANKS[s.slice(4, 6)] ?? null };
+}
+/** "SA03 8000 0000 6080 1016 7519" — groups of four for reading back. */
+export const formatIban = (iban: string) => normaliseIban(iban).replace(/(.{4})/g, '$1 ').trim();
+/** Shown to shoppers and on statements: only the last four characters. */
+export const maskIban = (iban: string) => `•••• ${normaliseIban(iban).slice(-4)}`;
+export type BeneficiaryError = 'empty' | 'short' | 'chars';
+/** Beneficiary as registered with the bank: letters (Arabic or Latin), spaces, dots, dashes, ampersands; 3–70 characters. */
+export function checkBeneficiary(s: string): BeneficiaryError | null {
+  const t = s.trim().replace(/\s+/g, ' ');
+  if (!t) return 'empty';
+  if (t.length < 3 || t.length > 70) return 'short';
+  if (!/^[\p{L}\p{M} .&'-]+$/u.test(t)) return 'chars';
+  return null;
 }

@@ -2,7 +2,7 @@
 // review-only tools (role preview, failing save) and the no-permission state.
 import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
-import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical } from 'lucide-react';
+import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical, UserCircle } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, navigate } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
@@ -15,7 +15,7 @@ import { CATEGORIES, ROLE_LABEL, canOpen, rolesFor, type CatId } from './model';
 import { settingsSimStore } from './stores';
 
 export const ICON: Record<CatId, ComponentType<{ className?: string }>> = {
-  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages,
+  store: Store, team: Users, payments: CreditCard, shipping: Truck, checkout: ShoppingCart, domains: Globe2, policies: FileText, notifications: Bell, language: Languages, account: UserCircle,
 };
 export const settingsHref = (cat?: string, q?: Record<string, string | undefined>) => link(`/dashboard/settings${cat ? `/${cat}` : ''}`, q);
 

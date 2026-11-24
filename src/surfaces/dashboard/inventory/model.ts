@@ -4,10 +4,10 @@
 //   reserved  = units held for paid orders not yet fulfilled
 //   available = on hand − reserved (what can still be sold)
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
-import { LOC_IDS, type L, type LocId } from '../../merchant/domain';
+import { LOC_IDS, allLocations, type L, type LocId } from '../../merchant/domain';
 import { normaliseDigits, skusOf, variantText, type Product } from '../../merchant/catalog';
 import {
-  available, coverage, levelOf, lowStock, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
+  MAX_THRESHOLD, available, coverage, levelOf, lowStock, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
 } from '../../merchant/inventory';
 
 export interface SkuInfo { productId: string | undefined; name: L; variant: L }
@@ -25,9 +25,11 @@ export const infoFor = (m: Map<string, SkuInfo>, sku: string): SkuInfo => m.get(
 
 export type Tab = 'levels' | 'low' | 'transfers' | 'log';
 export const readTab = (v: string | null): Tab => (v === 'low' || v === 'transfers' || v === 'log' ? v : 'levels');
-export const readLoc = (v: string | null): LocId | '' => (v === 'ryd' || v === 'jed' ? v : '');
+/** A location id from the address when it names a known location (active or not), else ''. */
+export const readLoc = (v: string | null): LocId | '' => (v && allLocations().some((l) => l.id === v) ? v : '');
 
-export interface LevelRow extends Level { key: string; available: number; low: boolean; info: SkuInfo }
+/** `unstocked`: the SKU has no record at this active location yet (e.g. a new branch); shown so it can be stocked. */
+export interface LevelRow extends Level { key: string; available: number; low: boolean; info: SkuInfo; unstocked?: boolean }
 export const levelKey = (l: Pick<Level, 'sku' | 'loc'>) => `${l.sku}@${l.loc}`;
 
 const matches = (q: string, sku: string, i: SkuInfo) => {
@@ -37,10 +39,17 @@ const matches = (q: string, sku: string, i: SkuInfo) => {
 
 /** Levels per SKU and warehouse, filtered by search and warehouse; low rows only on the low-stock view. */
 export function levelRows(levels: Level[], info: Map<string, SkuInfo>, f: { q: string; loc: LocId | ''; lowOnly?: boolean }): LevelRow[] {
-  return levels
-    .map((l) => ({ ...l, key: levelKey(l), available: available(l), low: available(l) <= l.threshold, info: infoFor(info, l.sku) }))
+  const have = new Set(levels.map(levelKey));
+  const skus = [...new Set(levels.map((l) => l.sku))];
+  // Active locations without a record for a tracked SKU (a branch added in this session) get an empty, unstocked row.
+  const unstocked: LevelRow[] = f.lowOnly ? [] : LOC_IDS.flatMap((loc) => skus.filter((sku) => !have.has(`${sku}@${loc}`)).map((sku) => ({
+    sku, loc, onHand: 0, reserved: 0, incoming: 0, version: 0, threshold: 0, key: `${sku}@${loc}`, available: 0, low: false, info: infoFor(info, sku), unstocked: true,
+  })));
+  const order = (loc: LocId) => { const i = LOC_IDS.indexOf(loc); return i < 0 ? 99 : i; };
+  return [...levels
+    .map((l) => ({ ...l, key: levelKey(l), available: available(l), low: available(l) <= l.threshold, info: infoFor(info, l.sku) })), ...unstocked]
     .filter((r) => (!f.loc || r.loc === f.loc) && (!f.lowOnly || r.low) && matches(f.q, r.sku, r.info))
-    .sort((a, b) => (f.lowOnly ? a.available - b.available : 0) || a.sku.localeCompare(b.sku) || LOC_IDS.indexOf(a.loc) - LOC_IDS.indexOf(b.loc));
+    .sort((a, b) => (f.lowOnly ? a.available - b.available : 0) || a.sku.localeCompare(b.sku) || order(a.loc) - order(b.loc));
 }
 
 /** Days of cover for a low row, from sales across all warehouses (never estimated without 14 days of history). */
@@ -89,10 +98,17 @@ export const isOpen = (t: Transfer) => t.status === 'draft' || t.status === 'sen
 export function nextTransferId(ts: Transfer[]): string {
   return `TR-${Math.max(1002, ...ts.map((t) => Number(t.id.slice(3)) || 0)) + 1}`;
 }
-/** A new draft, optionally prefilled from a low-stock row: ship to the low warehouse from the other one. */
-export function newTransfer(ts: Transfer[], sku?: string | null, to?: string | null): Transfer {
-  const dest: LocId = to === 'jed' ? 'jed' : 'ryd';
-  return { id: nextTransferId(ts), from: dest === 'ryd' ? 'jed' : 'ryd', to: dest, status: 'draft', note: '', discrepancy: [], lines: sku ? [{ sku, qty: 1, received: 0 }] : [] };
+/**
+ * A new draft between any two active locations, optionally prefilled from a low-stock row: ship to the low location
+ * from the location with the most available units of that SKU (or the first other location).
+ */
+export function newTransfer(ts: Transfer[], sku?: string | null, to?: string | null, levels: Level[] = []): Transfer {
+  const ids = [...LOC_IDS];
+  const dest: LocId = to && ids.includes(to) ? to : ids[0] ?? 'ryd';
+  const others = ids.filter((l) => l !== dest);
+  const best = sku ? [...others].sort((a, b) => (levelOf(levels, sku, b) ? available(levelOf(levels, sku, b)!) : -1) - (levelOf(levels, sku, a) ? available(levelOf(levels, sku, a)!) : -1))[0] : undefined;
+  const from = best ?? others[0] ?? dest;
+  return { id: nextTransferId(ts), from, to: dest, status: 'draft', note: '', discrepancy: [], lines: sku ? [{ sku, qty: 1, received: 0 }] : [] };
 }
 
 /** Steps for the transfer stepper; partial receipt and discrepancy show on the third/fourth step. */
@@ -139,5 +155,82 @@ export function discrepancyLog(t: Transfer, levels: Level[], who: string): Stock
   return t.discrepancy.map((d, i) => {
     const lv = levelOf(levels, d.sku, t.to);
     return { id: `${t.id}-D${i + 1}`, sku: d.sku, loc: t.to, delta: 0, before: lv?.onHand ?? 0, after: lv?.onHand ?? 0, reason: 'discrepancy' as const, who, ref: t.id, note: t.note };
+  });
+}
+
+/* ---------- Reorder points ---------- */
+
+/** "10", "١٠" → whole number 0–9999; null otherwise. */
+export function parseThreshold(input: string): number | null {
+  const n = parseDelta(input);
+  return n !== null && n >= 0 && n <= MAX_THRESHOLD ? n : null;
+}
+/** What a new reorder point would do to the chosen rows: how many become low, how many stop being low. */
+export function thresholdPreview(rows: Pick<Level, 'onHand' | 'reserved' | 'threshold'>[], threshold: number | null) {
+  if (threshold === null) return { becomeLow: 0, leaveLow: 0, unchanged: rows.length };
+  let becomeLow = 0, leaveLow = 0;
+  for (const r of rows) {
+    const a = r.onHand - r.reserved;
+    const was = a <= r.threshold, will = a <= threshold;
+    if (!was && will) becomeLow++; else if (was && !will) leaveLow++;
+  }
+  return { becomeLow, leaveLow, unchanged: rows.length - becomeLow - leaveLow };
+}
+
+/* ---------- Locations screen ---------- */
+
+export interface LocationRow { id: LocId; skus: number; onHand: number; reserved: number; incoming: number; low: number; openTransfers: number }
+/** Stock summary per location for the locations screen (including disabled ones, which hold nothing). */
+export function locationRows(levels: Level[], transfers: Transfer[]): Map<LocId, LocationRow> {
+  const m = new Map<LocId, LocationRow>();
+  for (const l of allLocations()) m.set(l.id, { id: l.id, skus: 0, onHand: 0, reserved: 0, incoming: 0, low: 0, openTransfers: 0 });
+  for (const l of levels) {
+    const r = m.get(l.loc);
+    if (!r) continue;
+    if (l.onHand > 0) r.skus++;
+    r.onHand += l.onHand; r.reserved += l.reserved; r.incoming += l.incoming;
+    if (available(l) <= l.threshold) r.low++;
+  }
+  for (const t of transfers) if (isOpen(t)) for (const id of new Set([t.from, t.to])) { const r = m.get(id); if (r) r.openTransfers++; }
+  return m;
+}
+
+/* ---------- Inventory export ---------- */
+
+/** Levels as CSV rows (one per SKU and location); headers match the count import. */
+export function levelsCsv(rows: LevelRow[], locName: (id: LocId) => string): (string | number)[][] {
+  return [['sku', 'product', 'variant', 'location_id', 'location', 'on_hand', 'reserved', 'available', 'incoming', 'reorder_point'],
+    ...rows.filter((r) => !r.unstocked).map((r) => [r.sku, r.info.name.en, r.info.variant.en, r.loc, locName(r.loc), r.onHand, r.reserved, r.available, r.incoming, r.threshold])];
+}
+
+/* ---------- Count import (inventory CSV) ---------- */
+
+export type CountProblem = 'sku' | 'loc' | 'qty' | 'dup';
+export interface CountRow { line: number; sku: string; loc: LocId; counted: number | null; before: number; delta: number; problem: CountProblem | null; raw: string }
+/**
+ * Read a count file (sku, location_id, counted on hand). Every line gets the difference against what the system holds
+ * now; unknown SKUs or locations, bad quantities and repeated SKU+location lines are problems and are never written.
+ */
+export function checkCount(rows: string[][], headers: string[], levels: Level[], known: Set<string>): CountRow[] {
+  const h = headers.map((x) => x.trim().toLowerCase());
+  const ci = (names: string[]) => h.findIndex((x) => names.includes(x));
+  const iSku = ci(['sku']), iLoc = ci(['location_id', 'location', 'loc']), iQty = ci(['on_hand', 'counted', 'quantity', 'qty', 'count']);
+  const locIds = new Set(LOC_IDS as string[]);
+  const byName = new Map(allLocations().flatMap((l) => [[l.name.en.toLowerCase(), l.id], [l.name.ar, l.id]] as [string, LocId][]));
+  const seen = new Set<string>();
+  return rows.map((r, i) => {
+    const sku = (r[iSku] ?? '').trim().toUpperCase();
+    const rawLoc = (r[iLoc] ?? '').trim();
+    const loc = locIds.has(rawLoc) ? rawLoc : byName.get(rawLoc.toLowerCase()) ?? byName.get(rawLoc) ?? rawLoc;
+    const raw = (r[iQty] ?? '').trim();
+    const n = raw ? parseDelta(raw) : null;
+    const before = levelOf(levels, sku, loc)?.onHand ?? 0;
+    let problem: CountProblem | null = null;
+    if (!sku || !known.has(sku)) problem = 'sku';
+    else if (!locIds.has(loc)) problem = 'loc';
+    else if (n === null || n < 0) problem = 'qty';
+    else if (seen.has(`${sku}@${loc}`)) problem = 'dup';
+    if (!problem) seen.add(`${sku}@${loc}`);
+    return { line: i + 2, sku, loc, counted: n, before, delta: problem || n === null ? 0 : n - before, problem, raw };
   });
 }

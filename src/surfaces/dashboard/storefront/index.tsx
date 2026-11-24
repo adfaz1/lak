@@ -6,9 +6,13 @@ import {
   ShoppingBag, Smartphone, Sparkles, Tag, Upload,
 } from 'lucide-react';
 import { useLang } from '../../../core/lang';
-import { link } from '../../../core/router';
+import { link, type Route } from '../../../core/router';
+import { StoreTabs, SubNotFound } from './nav';
+import PagesPage from './pages';
+import MenusPage from './menus';
+import SeoPage from './seo';
 import { can, canSee } from '../../merchant/perms';
-import { productsStore, settingsStore, themeStore } from '../../merchant/stores';
+import { logAction, productsStore, settingsStore, themeStore } from '../../merchant/stores';
 import type { SectionKind, StoreStatus } from '../../merchant/workspace';
 import { Badge, Button, Card, CardHeader, ErrorState, IconButton, LinkButton, Segmented, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, Simulated, Switch, Textarea, useToast } from '../../../ds/kit';
@@ -26,7 +30,16 @@ const K_ICON: Record<SectionKind, ReactNode> = {
 };
 const C_TONE: Record<string, Tone> = { moved: 'sky', shown: 'green', hidden: 'gray', edited: 'brand' };
 
-export default function Storefront() {
+export default function StorefrontSection({ route }: { route: Route }) {
+  const sub = route.path[0];
+  if (sub === 'pages') return <PagesPage route={route} />;
+  if (sub === 'menus') return <MenusPage />;
+  if (sub === 'seo') return <SeoPage route={route} />;
+  if (sub) return <SubNotFound />;
+  return <ThemePage />;
+}
+
+function ThemePage() {
   const tx = useTx();
   const { lang } = useLang();
   const toast = useToast();
@@ -57,6 +70,7 @@ export default function Storefront() {
           <LinkButton variant="secondary" href={link('/store')}><Eye className="size-4" aria-hidden="true" />{tx('معاينة المتجر', 'Preview store')}</LinkButton>
           {canPublish && <Button disabled={!!block} onClick={() => setReview(true)}><Upload className="size-4" aria-hidden="true" />{tx('راجع وانشر', 'Review and publish')}</Button>}
         </>} />
+      <StoreTabs current="theme" />
       <ReviewRole />
     </>
   );
@@ -178,7 +192,7 @@ export default function Storefront() {
 
       {review && (
         <Modal size="lg" title={tx(`نشر الإصدار ${nv}`, `Publish version ${nv}`)} description={tx('يرى العملاء التغييرات فور النشر.', 'Shoppers see the changes as soon as you publish.')} onClose={() => setReview(false)}
-          footer={<><Button variant="secondary" onClick={() => setReview(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { const prev = theme.published.version; themeStore.set((t) => publish(t, note)); setReview(false); setNote(''); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv}`, `Version ${nv} published`), action: { label: tx(`ارجع إلى ${prev}`, `Roll back to ${prev}`), run: () => themeStore.set((t) => rollbackTheme(t, prev)) } }); }}><Upload className="size-4" aria-hidden="true" />{tx('انشر للعملاء', 'Publish to shoppers')}</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setReview(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { const prev = theme.published.version; themeStore.set((t) => publish(t, note)); logAction('store', { ar: `نشر الإصدار ${nv} من ثيم المتجر`, en: `Published store theme version ${nv}` }, { target: `v${nv}`, before: `v${prev}`, after: `v${nv}` }); setReview(false); setNote(''); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv}`, `Version ${nv} published`), action: { label: tx(`ارجع إلى ${prev}`, `Roll back to ${prev}`), run: () => themeStore.set((t) => rollbackTheme(t, prev)) } }); }}><Upload className="size-4" aria-hidden="true" />{tx('انشر للعملاء', 'Publish to shoppers')}</Button></>}>
           <div className="flex flex-wrap items-center gap-2 text-sm"><Badge tone="gray">{tx(`الحالي: ${theme.published.version}`, `Live: ${theme.published.version}`)}</Badge><span className="text-subtle" aria-hidden="true">{tx('←', '→')}</span><Badge tone="brand">{tx(`الجديد: ${nv}`, `New: ${nv}`)}</Badge></div>
           <ul className="divide-y divide-border rounded-xl border border-border">
             {changes.map((c) => { const s = theme.draft.find((x) => x.id === c.id)!; return (
@@ -192,7 +206,7 @@ export default function Storefront() {
       )}
       {rollback !== null && (
         <Modal title={tx(`الرجوع إلى الإصدار ${rollback}`, `Roll back to version ${rollback}`)} onClose={() => setRollback(null)}
-          footer={<><Button variant="secondary" onClick={() => setRollback(null)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { themeStore.set((t) => rollbackTheme(t, rollback)); setRollback(null); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv} (نسخة من ${rollback})`, `Version ${nv} published (copy of ${rollback})`) }); }}>{tx('ارجع وانشر', 'Roll back and publish')}</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setRollback(null)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { themeStore.set((t) => rollbackTheme(t, rollback)); logAction('store', { ar: `أرجع الثيم إلى الإصدار ${rollback} (نُشر كإصدار ${nv})`, en: `Rolled the theme back to version ${rollback} (published as ${nv})` }, { target: `v${nv}` }); setRollback(null); toast({ tone: 'ok', text: tx(`نُشر الإصدار ${nv} (نسخة من ${rollback})`, `Version ${nv} published (copy of ${rollback})`) }); }}>{tx('ارجع وانشر', 'Roll back and publish')}</Button></>}>
           <ul className="space-y-1.5 text-sm text-fg">
             <li>{tx(`تُنشر نسخة من الإصدار ${rollback} كإصدار جديد ${nv}.`, `A copy of version ${rollback} is published as new version ${nv}.`)}</li>
             {changes.length > 0 && <li className="font-medium text-amber-800 dark:text-amber-300">{tx(`تعديلات المسودة الحالية (${changes.length}) تُستبدل.`, `Current draft edits (${changes.length}) are replaced.`)}</li>}
@@ -218,6 +232,7 @@ function StatusModal({ k, st, onClose }: { k: StatusKey; st: StoreStatus; onClos
     const next = toggleStatus(st, k, msg);
     if (!next) return;
     settingsStore.set((x) => ({ ...x, status: next }));
+    logAction('store', { ar: `${T[k].title[0]}`, en: `${T[k].title[1]}` }, { before: turningOn ? 'off' : 'on', after: turningOn ? 'on' : 'off' });
     toast({ tone: 'ok', text: tx('حُدّثت حالة المتجر', 'Store status updated') });
     onClose();
   };
