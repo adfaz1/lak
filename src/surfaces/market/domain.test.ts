@@ -99,3 +99,14 @@ describe('listing eligibility (merchant side)', () => {
     expect(Object.values(sum).reduce((a, b) => a + b, 0)).toBe(items.length);
   });
 });
+
+describe('product photos', () => {
+  it('maps only existing products to licensed photos that exist', async () => {
+    const { PHOTO } = await import('./fixtures');
+    const { productPhoto } = await import('../dashboard/model/media');
+    for (const [id, photo] of Object.entries(PHOTO)) {
+      expect(PRODUCTS.some((p) => p.id === id)).toBe(true);
+      expect(productPhoto(photo)).toBeDefined();
+    }
+  });
+});

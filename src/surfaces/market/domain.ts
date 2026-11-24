@@ -224,7 +224,8 @@ export type Review = 'approved' | 'pending' | 'rejected' | 'none';
 export interface ListingItem {
   id: string;
   name: L;
-  cat: CatId | ExcludedCat;
+  /** A marketplace category or one of EXCLUDED; merchant catalogues may use their own category keys. */
+  cat: CatId | ExcludedCat | (string & {});
   stock: number;
   images: number;
   descLength: number;

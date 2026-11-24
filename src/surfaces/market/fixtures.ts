@@ -66,7 +66,17 @@ export const PRODUCTS: Product[] = [
     desc: { ar: 'سماعات بلوتوث مع علبة شحن، ضمان سنة من البائع.', en: 'Bluetooth earbuds with charging case; one-year seller warranty.' } },
   { id: 'p12', seller: 'raqmi', name: { ar: 'كابل USB-C مضفر 2م', en: 'Braided USB-C cable 2m' }, brand: 'Sawt', cat: 'tech', price: 4900, stock: 60, art: 'cable', tone: '#3e6c9e',
     desc: { ar: 'كابل شحن سريع بطول مترين.', en: 'Two-metre fast-charging cable.' } },
+  { id: 'p13', seller: 'sadu', name: { ar: 'دلّة عربية مع فناجين', en: 'Arabic dallah with cups' }, brand: 'Sadu House', cat: 'home', price: 21000, stock: 7, art: 'gift', tone: '#b08a4a',
+    desc: { ar: 'دلّة ضيافة عربية مع فناجين صغيرة.', en: 'Arabic serving dallah with small cups.' } },
+  { id: 'p14', seller: 'oud', name: { ar: 'مبخرة نحاسية', en: 'Brass incense burner' }, brand: 'Dar Al Raihan', cat: 'perfume', price: 11500, stock: 11, art: 'candle', tone: '#a77b3c',
+    desc: { ar: 'مبخرة من النحاس للبخور والعود.', en: 'Brass burner for incense and oud chips.' } },
 ];
+
+/**
+ * Licensed photos (src/surfaces/dashboard/model/media.ts) that show exactly this product's kind of item.
+ * Every other product renders the neutral placeholder; no photo is reused for a different product.
+ */
+export const PHOTO: Record<string, string> = { p6: 'p3', p13: 'p6', p14: 'p9' };
 
 export function initialOrders(): Order[] {
   return [
