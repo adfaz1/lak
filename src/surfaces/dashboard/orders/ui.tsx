@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, Minus, Plus, FlaskConical } from 'lucide-react';
 import { link } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
-import { levelsStore, ordersStore, stockLogStore, teamStore, testStore } from '../../merchant/stores';
+import { levelsStore, logAction, ordersStore, stockLogStore, teamStore, testStore } from '../../merchant/stores';
 import type { Channel, Ful, Order, Pay, Ship } from '../../merchant/domain';
 import { payView, type Actor, type PayView, type ReturnStage, type StockEffect } from '../../merchant/ops';
 import { applyStockEffects } from '../../merchant/inventory';
@@ -15,7 +15,35 @@ import { actorFor, ageOf, type ListView, type OpsIneligible, type PayMethodFilte
 export const ohref = (path = '', query?: Record<string, string | undefined>) => link(`/dashboard/orders${path ? `/${path}` : ''}`, query);
 
 /** Persist one changed order. */
-export const saveOrder = (next: Order) => ordersStore.set((all) => all.map((o) => (o.ref === next.ref ? next : o)));
+export const saveOrder = (next: Order) => {
+  const prev = ordersStore.get().find((o) => o.ref === next.ref);
+  ordersStore.set((all) => all.map((o) => (o.ref === next.ref ? next : o)));
+  auditOrder(prev, next);
+};
+
+/** Each new line of an order's log also goes to the account activity log (Settings → Team), with who and when. */
+export function auditOrder(prev: Order | undefined, next: Order) {
+  const fromLog = next.log.slice(prev?.log.length ?? 0).map((e) => [e.kind, e.ref ?? e.amount ?? e.units] as const);
+  const fromAct = (next.activity ?? []).slice(prev?.activity?.length ?? 0).filter((a) => a.actor !== 'customer').map((a) => [a.kind, a.ref ?? a.text ?? a.amount ?? a.units] as const);
+  for (const [k, d] of [...fromLog, ...fromAct]) {
+    const t = AUDIT_TEXT[k];
+    if (!t) continue;
+    logAction('orders', { ar: `${t[0]} · #${next.ref}`, en: `${t[1]} · #${next.ref}` }, { target: next.ref, after: d === undefined ? undefined : String(d) });
+  }
+}
+const AUDIT_TEXT: Record<string, [string, string]> = {
+  created: ['الطلب مدفوع/أُنشئ', 'Order paid or created'], confirmed: ['أُكّد الطلب', 'Order confirmed'], confirmUndone: ['تراجع عن التأكيد', 'Confirmation undone'],
+  labelIssued: ['صدر ملصق', 'Label issued'], labelFailed: ['فشل إصدار ملصق', 'Label failed'], partialFulfilled: ['جُهّز وصدر ملصق', 'Fulfilled, label issued'],
+  refundRequested: ['طُلب استرداد', 'Refund requested'], refundConfirmed: ['أُكّد استرداد', 'Refund confirmed'], refundFailed: ['رُفض استرداد', 'Refund declined'],
+  restocked: ['أُعيد للمخزون', 'Restocked'], slipPrinted: ['طُبعت قائمة تعبئة', 'Packing slip printed'], manualCreated: ['طلب يدوي', 'Manual order'],
+  cancelled: ['أُلغي الطلب', 'Order cancelled'], cancelDeclined: ['رُفض طلب إلغاء', 'Cancel request declined'], labelVoided: ['أُلغي ملصق', 'Label voided'],
+  shipped: ['سُلّم للناقل', 'Handed to carrier'], delivered: ['سُلّم للعميل', 'Delivered'], codCollected: ['حُصّل عند الاستلام', 'COD collected'],
+  noteAdded: ['ملاحظة داخلية', 'Internal note'], messageCopied: ['نُسخت رسالة للعميل', 'Customer message copied'], invoicePrinted: ['طُبعت فاتورة', 'Invoice printed'],
+  labelPrinted: ['طُبع ملصق', 'Label printed'], tagAdded: ['أُضيف وسم', 'Tag added'], tagRemoved: ['حُذف وسم', 'Tag removed'], assigned: ['تغيّر المسؤول', 'Assignee changed'],
+  returnRequested: ['فُتح مرتجع', 'Return opened'], returnApproved: ['وُوفق على مرتجع', 'Return approved'], returnRejected: ['رُفض مرتجع', 'Return rejected'],
+  returnReceived: ['استُلم مرتجع', 'Return received'], returnInspected: ['فُحص مرتجع', 'Return inspected'], returnRefunded: ['رُدّ مبلغ مرتجع', 'Return refunded'],
+  exchangeReserved: ['حُجز بديل', 'Replacement held'], exchangeShipped: ['شُحن بديل', 'Replacement shipped'], transferConfirmed: ['أُكّد التحويل البنكي', 'Bank transfer confirmed'],
+};
 
 /** Apply order stock effects to the inventory, with stock-log lines naming the order. */
 export function applyEffects(effects: StockEffect[], who: Actor, ref: string, tag: string) {

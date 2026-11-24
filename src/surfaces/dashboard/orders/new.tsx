@@ -12,7 +12,7 @@ import { Badge, Button, Card, CardHeader, EmptyState, IconButton, InfoHint, Mone
 import { skuPhoto } from '../model/media';
 import { useUnsaved } from '../unsaved';
 import { createManual, emptyManual, manualQuote, orderPerms, skuOptions, type DraftError, type ManualDraft, type ManualPay } from './model';
-import { Row, ohref, useActor } from './ui';
+import { Row, auditOrder, ohref, useActor } from './ui';
 
 
 export const manualDraftStore = createStore.key('dashboard.orders.manualDraft')<ManualDraft>(emptyManual);
@@ -62,6 +62,7 @@ export default function NewOrder() {
     customersStore.set(r.customers);
     levelsStore.set(r.levels);
     ordersStore.set((all) => [r.order!, ...all]);
+    auditOrder(undefined, r.order);
     manualDraftStore.set(emptyManual());
     setReview(false);
     toast({ tone: 'ok', text: tx(`أُنشئ الطلب #${r.order.ref} وحُجز المخزون`, `Order #${r.order.ref} created; stock held`) });

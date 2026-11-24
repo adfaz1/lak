@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useLang } from '../../../core/lang';
 import { LOCATIONS } from '../../merchant/domain';
 import { setThresholds, syncStockAlerts, type Level } from '../../merchant/inventory';
-import { levelsStore, stockAlertsStore } from '../../merchant/stores';
+import { levelsStore, logAction, stockAlertsStore } from '../../merchant/stores';
 import { Button, InfoHint, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, Simulated, useToast } from '../../../ds/kit';
 import { parseThreshold, thresholdPreview, type SkuInfo } from './model';
@@ -25,6 +25,7 @@ export function ThresholdModal({ rows, info, onClose, onSaved }: { rows: Level[]
     const next = setThresholds(levelsStore.get(), rows, n);
     if (!next) return;
     levelsStore.set(next);
+    logAction('inventory', { ar: `غيّر حد إعادة الطلب إلى ${n}`, en: `Set reorder point to ${n}` }, { target: one ? `${one.sku} · ${LOCATIONS[one.loc].en}` : `${rows.length} rows`, before: one ? String(one.threshold) : undefined, after: String(n) });
     const r = syncStockAlerts(next, stockAlertsStore.get(), 'now', Date.now());
     stockAlertsStore.set(r.alerts);
     toast({ tone: 'ok', text: r.raised.length

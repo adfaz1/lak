@@ -4,7 +4,8 @@ import { AlarmClock, Ban, CheckCheck, Download, FileText, Hourglass, Lock, Packa
 import { useLang } from '../../../core/lang';
 import { link, replace, navigate, type Route } from '../../../core/router';
 import { formatInt } from '../../../core/format';
-import { ordersStore, teamStore, testStore } from '../../merchant/stores';
+import { logAction, ordersStore, teamStore, testStore } from '../../merchant/stores';
+const BULK_AR: Record<string, string> = { confirm: 'تأكيد', labels: 'إصدار ملصقات', shipped: 'شُحن', invoices: 'فواتير', slips: 'قوائم تعبئة', export: 'تصدير CSV' };
 import { LOCATIONS, LOC_IDS, total, type Order } from '../../merchant/domain';
 import { openReturns, payView } from '../../merchant/ops';
 import { BulkBar, DataTable, Drawer, FilterChip, Input, PageHeader, Pagination, SearchInput, Select, Field, Tabs, useToast, type Column } from '../../../ds/kit';
@@ -96,8 +97,9 @@ export default function OrdersList({ route }: { route: Route }) {
     setBulk(null);
     if (!o) return;
     clear();
+    if (o.ok.length && o.action !== 'invoices' && o.action !== 'slips') logAction('orders', { ar: `إجراء جماعي: ${BULK_AR[o.action]} (${o.ok.length} طلب)`, en: `Bulk: ${o.action} (${o.ok.length} orders)` }, { target: o.ok.slice(0, 10).join(',') + (o.ok.length > 10 ? '…' : '') });
     if (o.action === 'confirm' && o.ok.length) {
-      toast({ tone: 'ok', text: tx(`أُكّد ${formatInt(o.ok.length)} طلبًا`, `${formatInt(o.ok.length)} orders confirmed`), action: { label: tx('تراجع', 'Undo'), run: () => ordersStore.set((a) => undoConfirm(a, o.ok, who, Date.now())) } });
+      toast({ tone: 'ok', text: tx(`أُكّد ${formatInt(o.ok.length)} طلبًا`, `${formatInt(o.ok.length)} orders confirmed`), action: { label: tx('تراجع', 'Undo'), run: () => { ordersStore.set((a) => undoConfirm(a, o.ok, who, Date.now())); logAction('orders', { ar: `تراجع عن تأكيد ${o.ok.length} طلب`, en: `Undid confirmation of ${o.ok.length} orders` }); } } });
     } else if (o.action === 'export' && o.ok.length) toast({ tone: 'ok', text: tx(`نُزّل ملف فيه ${formatInt(o.ok.length)} طلبًا`, `Downloaded a file with ${formatInt(o.ok.length)} orders`) });
     else if ((o.action === 'labels' || o.action === 'shipped') && o.ok.length) toast({ tone: 'ok', text: o.action === 'labels' ? tx(`صدر ${formatInt(o.ok.length)} ملصقًا`, `${formatInt(o.ok.length)} labels issued`) : tx(`سُجّل ${formatInt(o.ok.length)} كمشحون`, `${formatInt(o.ok.length)} marked shipped`) });
   };

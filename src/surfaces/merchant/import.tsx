@@ -54,10 +54,11 @@ export function ImportWizard() {
   const fieldName: Record<ImportField, string> = {
     name: tx('الاسم', 'Name'), sku: 'SKU', price: tx('السعر', 'Price'), compareAt: tx('السعر قبل الخصم', 'Compare-at price'),
     qty: tx('الكمية', 'Quantity'), status: tx('الحالة', 'Status'), ignore: tx('تجاهل العمود', 'Ignore column'),
+    nameAr: tx('الاسم بالعربية', 'Arabic name'), cost: tx('التكلفة', 'Cost'), category: tx('الفئة', 'Category'),
   };
   const problem = (c: RowProblem | 'duplicate' | 'exists') => ({
     nameMissing: tx('الاسم مفقود', 'Name missing'), skuMissing: tx('SKU مفقود', 'SKU missing'), price: tx('سعر غير صالح', 'Invalid price'),
-    compareAt: tx('السعر قبل الخصم غير صالح أو ليس أعلى من السعر', 'Compare-at invalid or not above price'), qty: tx('كمية غير صالحة', 'Invalid quantity'),
+    compareAt: tx('السعر قبل الخصم غير صالح أو ليس أعلى من السعر', 'Compare-at invalid or not above price'), qty: tx('كمية غير صالحة', 'Invalid quantity'), cost: tx('تكلفة غير صالحة', 'Invalid cost'), category: tx('فئة غير معروفة', 'Unknown category'),
     status: tx('حالة غير معروفة', 'Unknown status'), duplicate: tx('مكرر في الملف؛ أُبقي السطر', 'Duplicate in file; kept line'), exists: tx('SKU موجود ومُتخطّى حسب السياسة', 'SKU exists; skipped by policy'),
   })[c];
   if (!can(role, 'product.import')) return <><a className="back" href={mhref('products')}>{tx('العودة إلى المنتجات', 'Back to products')}</a><ActionLocked>{tx('دورك لا يشمل استيراد المنتجات.', 'Your role does not include importing products.')}</ActionLocked></>;

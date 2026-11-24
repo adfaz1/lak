@@ -21,11 +21,11 @@ import { canRefundOrder, contactOf, customerOrderCount, lineViews, moneyBreakdow
 import { FulBadge, Menu, MenuButtonLabel, MenuItem, MenuNote, PayBadge, ReviewOnly, Row, ShipBadge, SHIP_TONE, ohref, saveOrder, useActor, useAge, useLabels, useRoleLabel } from './ui';
 import { FulfilModal } from './fulfil';
 import { ContactModal, RefundModal } from './refund';
-import { CancelModal, DeclineCancelModal, OpenReturnModal, ShipModal } from './ops-modals';
+import { CancelModal, DeclineCancelModal, OpenReturnModal, ShipModal, TransferModal } from './ops-modals';
 import { printHref } from './print-link';
 import { rhref } from './returns-link';
 
-type Dialog = 'fulfil' | 'refund' | 'contact' | 'cancel' | 'decline' | 'ship' | 'deliver' | 'return' | null;
+type Dialog = 'fulfil' | 'refund' | 'contact' | 'cancel' | 'decline' | 'ship' | 'deliver' | 'return' | 'transfer' | null;
 
 export default function OrderDetail({ refId, route }: { refId: string; route: Route }) {
   const tx = useTx();
@@ -70,17 +70,17 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
   const lines = lineViews(o);
   const multi = lines.some((l) => l.stock.length > 0);
   const canCancel = perms.fulfil && (m.refundable === 0 || perms.refund);
-  const allowed = next.kind === 'contact' ? perms.contact : next.kind === 'none' ? false : next.kind === 'cancelRequest' ? canCancel : next.kind === 'returns' ? perms.fulfil || perms.refund : perms.fulfil;
+  const allowed = next.kind === 'contact' ? perms.contact : next.kind === 'none' ? false : next.kind === 'cancelRequest' ? canCancel : next.kind === 'transfer' ? perms.refund || perms.fulfil : next.kind === 'returns' ? perms.fulfil || perms.refund : perms.fulfil;
   const primaryLabel: Record<Next['kind'], string> = {
     contact: tx('تواصل مع العميل', 'Contact customer'), fulfilRest: tx('جهّز المتبقي', 'Fulfil remaining'), fulfil: tx('جهّز الطلب', 'Fulfil order'),
     ship: tx('سُلّم للناقل', 'Mark as shipped'), deliver: tx('سُلّم للعميل', 'Mark as delivered'), cancelRequest: tx('راجع طلب الإلغاء', 'Review cancel request'),
-    returns: tx('تابع المرتجع', 'Handle the return'), none: '',
+    returns: tx('تابع المرتجع', 'Handle the return'), transfer: tx('أكّد استلام التحويل', 'Confirm transfer received'), none: '',
   };
-  const PrimaryIcon = next.kind === 'contact' ? MessageSquare : next.kind === 'ship' || next.kind === 'deliver' ? Truck : next.kind === 'cancelRequest' ? Ban : next.kind === 'returns' ? RotateCcw : PackageCheck;
+  const PrimaryIcon = next.kind === 'transfer' ? CreditCard : next.kind === 'contact' ? MessageSquare : next.kind === 'ship' || next.kind === 'deliver' ? Truck : next.kind === 'cancelRequest' ? Ban : next.kind === 'returns' ? RotateCcw : PackageCheck;
   const openRet = (o.returns ?? []).find((r) => r.stage !== 'rejected' && r.stage !== 'refunded' && r.stage !== 'exchanged');
   const runPrimary = () => {
     if (next.kind === 'returns' && openRet) { navigate(rhref(openRet.id)); return; }
-    setDialog(next.kind === 'contact' ? 'contact' : next.kind === 'ship' ? 'ship' : next.kind === 'deliver' ? 'deliver' : next.kind === 'cancelRequest' ? 'cancel' : 'fulfil');
+    setDialog(next.kind === 'transfer' ? 'transfer' : next.kind === 'contact' ? 'contact' : next.kind === 'ship' ? 'ship' : next.kind === 'deliver' ? 'deliver' : next.kind === 'cancelRequest' ? 'cancel' : 'fulfil');
   };
   const primary = (cls?: string) => (next.kind !== 'none' && allowed ? <Button onClick={runPrimary} className={cls}><PrimaryIcon className="size-4" aria-hidden="true" />{primaryLabel[next.kind]}</Button> : null);
   const contact = contactOf(o, customersStore.get());
@@ -268,8 +268,9 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
               <div className="my-1 border-t border-border" />
               <Row label={tx('الإجمالي', 'Total')} strong><Money v={m.total} /></Row>
               {m.pay === 'cod_due' && !o.cancelled && <Row label={<span className="flex items-center gap-1">{tx('يُحصّل عند التسليم', 'To collect on delivery')}<InfoHint>{tx('الدفع عند الاستلام: لا يُحتسب محصّلًا حتى التسليم.', 'Cash on delivery: not counted as collected until delivered.')}</InfoHint></span>} tone="amber"><Money v={m.codDue} /></Row>}
+              {m.pay === 'bank_due' && <Row label={tx('بانتظار التحويل', 'Awaiting transfer')} tone="amber"><Money v={m.total} /></Row>}
               {m.pay === 'verifying' && <Row label={tx('بانتظار تحقق المزوّد', 'Awaiting provider check')} tone="amber"><Money v={m.total} /></Row>}
-              {(o.pay === 'failed' || m.pay === 'cod_due') && <Row label={tx('المحصّل', 'Collected')} tone={o.pay === 'failed' && m.pay !== 'verifying' ? 'red' : 'muted'}><Money v={0} /></Row>}
+              {(o.pay === 'failed' || m.pay === 'cod_due') && <Row label={tx('المحصّل', 'Collected')} tone={m.pay === 'failed' ? 'red' : 'muted'}><Money v={0} /></Row>}
               {m.refunded > 0 && <Row label={tx('مسترد', 'Refunded')}><span className="inline-flex items-baseline">−<Money v={m.refunded} /></span></Row>}
               {m.refundPending > 0 && <Row label={tx('استرداد معلّق', 'Refund pending')} tone="amber"><span className="inline-flex items-baseline">−<Money v={m.refundPending} /></span></Row>}
               <div className="my-1 border-t border-border" />
@@ -320,6 +321,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
       {dialog === 'contact' && <ContactModal o={o} onClose={closeDialog} />}
       {dialog === 'cancel' && <CancelModal o={o} onClose={closeDialog} />}
       {dialog === 'decline' && <DeclineCancelModal o={o} onClose={closeDialog} />}
+      {dialog === 'transfer' && <TransferModal o={o} onClose={closeDialog} />}
       {dialog === 'ship' && <ShipModal o={o} to="transit" onClose={closeDialog} />}
       {dialog === 'deliver' && <ShipModal o={o} to="delivered" onClose={closeDialog} />}
       {dialog === 'return' && <OpenReturnModal o={o} onClose={(msg, id) => { closeDialog(msg); if (id) navigate(rhref(id)); }} />}
@@ -404,6 +406,7 @@ function NextCard({ o, next, allowed, onDecline }: { o: Order; next: Next; allow
   const T: Record<Next['reason'], [Tone, ReactNode, string, string]> = {
     payFailed: ['red', <CreditCard className="size-5" />, tx('الدفع لم يكتمل، لا تجهّز الطلب', 'Payment did not complete; do not fulfil'), tx('لم يُحصَّل أي مبلغ. اطلب من العميل إعادة الدفع.', 'Nothing was collected. Ask the customer to pay again.')],
     verifying: ['amber', <Hourglass className="size-5" />, tx('الدفع بانتظار تحقق المزوّد', 'Payment pending provider verification'), tx('لا تجهّز حتى يؤكد المزوّد. لا تطلب من العميل الدفع مرة ثانية.', 'Do not fulfil until the provider confirms. Do not ask the customer to pay again.')],
+    bankDue: ['amber', <CreditCard className="size-5" />, tx('بانتظار التحويل البنكي', 'Awaiting the bank transfer'), tx('تحقق من وصول المبلغ في حسابك ثم أكّد. لا تجهّز قبل ذلك.', 'Check the money arrived in your account, then confirm. Do not fulfil before.')],
     link: ['amber', <CreditCard className="size-5" />, tx('بانتظار دفع العميل عبر الرابط', 'Waiting for the customer to pay by link'), tx('روابط الدفع تحتاج مزوّدًا من الخادم؛ هنا محاكاة.', 'Payment links need a server-side provider; simulated here.')],
     late: ['red', <AlarmClock className="size-5" />, tx(`متأخر: مدفوع ${age(o.hoursAgo)} ولم يُجهَّز`, `Late: paid ${age(o.hoursAgo)}, not fulfilled`), tx('الطلبات المدفوعة تُجهَّز خلال 24 ساعة.', 'Paid orders should be fulfilled within 24 hours.')],
     ready: ['brand', <PackageCheck className="size-5" />, payView(o) === 'cod_due' ? tx('دفع عند الاستلام، جاهز للتجهيز', 'Cash on delivery, ready to fulfil') : tx('مدفوع وجاهز للتجهيز', 'Paid and ready to fulfil'), tx('اختر الموقع والناقل والوزن، راجع التكلفة، ثم أصدر الملصق.', 'Choose location, carrier and weight, review the cost, then issue the label.')],
@@ -443,7 +446,7 @@ function Timeline({ o }: { o: Order }) {
   const logText = (e: LogEntry): [Tone, ReactNode] => {
     switch (e.kind) {
       case 'created': return ['green', o.manual ? tx('أُنشئ الطلب يدويًا', 'Order created by hand') : tx('استُلم الطلب وتأكد الدفع', 'Order placed, payment confirmed')];
-      case 'payFailed': return ['red', o.payment?.state === 'verifying' ? tx('استُلم الطلب والدفع بانتظار التحقق', 'Order placed; payment pending verification') : tx('استُلم الطلب وفشل الدفع لدى المزوّد', 'Order placed; payment failed at the provider')];
+      case 'payFailed': return o.payment?.method === 'bank' ? ['amber', tx('استُلم الطلب بانتظار التحويل البنكي', 'Order placed; awaiting the bank transfer')] : ['red', o.payment?.state === 'verifying' ? tx('استُلم الطلب والدفع بانتظار التحقق', 'Order placed; payment pending verification') : tx('استُلم الطلب وفشل الدفع لدى المزوّد', 'Order placed; payment failed at the provider')];
       case 'labelIssued': return ['sky', <>{tx('صدر ملصق الشحن', 'Shipping label issued')}{e.carrier && ` · ${carrier(e.carrier)}`} · <Ref>{e.ref}</Ref></>];
       case 'labelFailed': return ['red', <>{tx('لم يصدر الملصق: الناقل لم يستجب', 'Label not issued: carrier did not respond')} · <Ref>{e.ref}</Ref></>];
       case 'confirmed': return ['green', tx('أُكّد الطلب', 'Order confirmed')];
@@ -486,6 +489,7 @@ function Timeline({ o }: { o: Order }) {
       case 'returnRefunded': return ['amber', <>{tx('قُرر رد مبلغ المرتجع ', 'Return refund decided: ')}<Money v={a.amount ?? 0} />{ref}</>];
       case 'exchangeReserved': return ['brand', <>{tx(`حُجز البديل ${a.units} في ${loc(a.loc)}`, `Replacement ×${a.units} held at ${loc(a.loc)}`)}{ref}</>];
       case 'exchangeShipped': return ['sky', <>{tx('شُحن البديل', 'Replacement shipped')}{ref}</>];
+      case 'transferConfirmed': return ['green', <>{tx('أُكّد استلام التحويل البنكي ', 'Bank transfer confirmed received: ')}<Money v={a.amount ?? 0} />{a.text && ` · ${a.text}`}</>];
       case 'exchangeCollect': return ['amber', <>{tx('فرق سعر يُحصّل من العميل ', 'Price difference to collect: ')}<Money v={a.amount ?? 0} />{ref}</>];
     }
   };

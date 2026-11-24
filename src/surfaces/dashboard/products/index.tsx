@@ -5,7 +5,7 @@ import { Plus, Upload, Download, PackageOpen, SearchX, Pencil, Globe2, Smartphon
 import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { canSee, can } from '../../merchant/perms';
-import { categoriesStore, levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
 import { applyBulkEdit, toCsv, type BulkRow, type Product, type ProductStatus } from '../../merchant/catalog';
 import type { Channel } from '../../merchant/domain';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
@@ -237,6 +237,7 @@ function BulkModal({ rows, setRows, onClose, onSaved }: { rows: BulkRow[]; setRo
     const next = applyBulkEdit(before, rows.filter((r) => changed.includes(r.id)));
     if (!next) return;
     productsStore.set(next);
+    logAction('products', { ar: 'عدّل السعر والحالة جماعيًا', en: 'Bulk edited price and status' }, { target: `${changed.length} products` });
     rememberUndo({ id: `BULK-T${Date.now().toString(36).slice(-5).toUpperCase()}`, field: 'price', levels: [], products: before.filter((p) => changed.includes(p.id)).map((p) => ({ before: p, afterVersion: p.version + 1 })) }, changed.length);
     onSaved(changed.length);
   };

@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUp, Eye, EyeOff, FolderPlus, FolderTree, Pencil, Trash2
 import { useLang } from '../../../core/lang';
 import { categoryTree, moveToCategory, renameCategory, validateCategory, type Category } from '../../merchant/catalog';
 import { can } from '../../merchant/perms';
-import { categoriesStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, logAction, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, Select, Switch, Textarea, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -43,6 +43,7 @@ export default function Categories() {
   const shown = state === 'empty' ? [] : tree;
   const toggle = (c: Category) => {
     categoriesStore.set((cs) => cs.map((x) => (x.id === c.id ? { ...x, visible: !x.visible, version: x.version + 1 } : x)));
+    logAction('products', c.visible ? { ar: `أخفى الفئة ${c.name.ar} من المتجر`, en: `Hid category ${c.name.en} from the store` } : { ar: `أظهر الفئة ${c.name.ar}`, en: `Showed category ${c.name.en}` }, { target: c.id });
     toast({ tone: 'ok', text: c.visible ? tx(`أُخفيت «${c.name.ar}» من قائمة المتجر`, `“${c.name.en}” hidden from the store menu`) : tx(`ظهرت «${c.name.ar}» في المتجر`, `“${c.name.en}” shown in the store`) });
   };
 
@@ -71,8 +72,8 @@ export default function Categories() {
                   </div>
                   {canEdit && (
                     <div className="flex items-center gap-1">
-                      <Icon label={tx(`قدّم ${cat.name.ar}`, `Move ${cat.name.en} up`)} disabled={pos <= 0} onClick={() => categoriesStore.set((cs) => moveCategory(cs, cat.id, -1))}><ArrowUp className="size-4" /></Icon>
-                      <Icon label={tx(`أخّر ${cat.name.ar}`, `Move ${cat.name.en} down`)} disabled={pos >= siblings.length - 1} onClick={() => categoriesStore.set((cs) => moveCategory(cs, cat.id, 1))}><ArrowDown className="size-4" /></Icon>
+                      <Icon label={tx(`قدّم ${cat.name.ar}`, `Move ${cat.name.en} up`)} disabled={pos <= 0} onClick={() => { categoriesStore.set((cs) => moveCategory(cs, cat.id, -1)); logAction('products', { ar: `غيّر ترتيب الفئة ${cat.name.ar}`, en: `Reordered category ${cat.name.en}` }, { target: cat.id }); }}><ArrowUp className="size-4" /></Icon>
+                      <Icon label={tx(`أخّر ${cat.name.ar}`, `Move ${cat.name.en} down`)} disabled={pos >= siblings.length - 1} onClick={() => { categoriesStore.set((cs) => moveCategory(cs, cat.id, 1)); logAction('products', { ar: `غيّر ترتيب الفئة ${cat.name.ar}`, en: `Reordered category ${cat.name.en}` }, { target: cat.id }); }}><ArrowDown className="size-4" /></Icon>
                       <Icon label={cat.visible ? tx(`أخفِ ${cat.name.ar} من المتجر`, `Hide ${cat.name.en} from the store`) : tx(`أظهر ${cat.name.ar}`, `Show ${cat.name.en}`)} onClick={() => toggle(cat)}>{cat.visible ? <Eye className="size-4" /> : <EyeOff className="size-4" />}</Icon>
                       <Icon label={tx(`عدّل ${cat.name.ar}`, `Edit ${cat.name.en}`)} onClick={() => setForm(toDraft(cat))}><Pencil className="size-4" /></Icon>
                       <Icon label={tx(`احذف ${cat.name.ar}`, `Delete ${cat.name.en}`)} onClick={() => setDel(cat)}><Trash2 className="size-4" /></Icon>
@@ -128,6 +129,7 @@ function CategoryForm({ initial, onClose, onKeep }: { initial: Draft; onClose: (
       const order = cats.filter((c) => (c.parent ?? '') === (d.parent || '')).length;
       categoriesStore.set((cs) => [...cs, { id, ...fields, order, version: 1 }]);
     }
+    logAction('products', orig ? { ar: `عدّل الفئة ${name.ar}`, en: `Edited category ${name.en}` } : { ar: `أضاف الفئة ${name.ar}`, en: `Added category ${name.en}` }, { target: id, before: renamed ? orig!.name.en : undefined, after: renamed ? name.en : undefined });
     toast({ tone: 'ok', text: orig ? (renamed && affected ? tx(`حُفظت الفئة وتغيّر اسمها على ${affected} منتجات`, `Category saved and renamed on ${affected} products`) : tx('حُفظت الفئة', 'Category saved')) : tx(`أُضيفت «${name.ar}»`, `“${name.en}” added`) });
     onClose();
   };
@@ -176,6 +178,7 @@ function DeleteModal({ cat, onClose }: { cat: Category; onClose: () => void }) {
       productsStore.set((ps) => moveToCategory(ps, new Set(inIt.map((p) => p.id)), target.name).products);
     }
     categoriesStore.set((cs) => cs.filter((c) => c.id !== cat.id));
+    logAction('products', { ar: `حذف الفئة ${cat.name.ar}`, en: `Deleted category ${cat.name.en}` }, { target: cat.id, after: block === 'products' && target ? `${inIt.length} products → ${target.name.en}` : undefined });
     toast({ tone: 'ok', text: block === 'products' && target ? tx(`نُقل ${inIt.length} منتجًا إلى «${target.name.ar}» وحُذفت الفئة`, `${inIt.length} products moved to “${target.name.en}” and the category deleted`) : tx('حُذفت الفئة', 'Category deleted') });
     onClose();
   };

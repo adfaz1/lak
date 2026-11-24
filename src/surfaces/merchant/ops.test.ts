@@ -173,3 +173,17 @@ describe('ZATCA QR and VAT number', () => {
     expect(validVatNo('210123456700003')).toBe(false);
   });
 });
+
+describe('bank transfer', () => {
+  it('shows "awaiting transfer" and becomes paid only when the merchant confirms', async () => {
+    const { confirmTransfer: ct } = await import('./ops');
+    const o = { ...byRef('10479'), payment: { method: 'bank' as const, state: 'verifying' as const } };
+    expect(payView(o)).toBe('bank_due');
+    expect(collected(o)).toBe(0);
+    const p = ct(o, ME, T, 'TRX-1');
+    expect(p.pay).toBe('paid');
+    expect(payView(p)).toBe('paid');
+    expect(p.activity?.at(-1)).toMatchObject({ kind: 'transferConfirmed', actor: 'سارة', text: 'TRX-1' });
+    expect(ct(p, ME, T)).toBe(p);
+  });
+});

@@ -6,7 +6,7 @@ import { FileText, Pencil, Printer } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import { replace, type Route } from '../../../core/router';
-import { customersStore, ordersStore, settingsStore, testStore } from '../../merchant/stores';
+import { customersStore, logAction, ordersStore, settingsStore, testStore } from '../../merchant/stores';
 import { CARRIERS, LOCATIONS, type Order } from '../../merchant/domain';
 import { act, payView, placedAt, validVatNo, zatcaTlv } from '../../merchant/ops';
 import { normaliseDigits } from '../../merchant/catalog';
@@ -48,6 +48,7 @@ export default function PrintView({ route }: { route: Route }) {
     } else {
       ordersStore.set((list) => list.map((o) => (usable.some((u) => u.ref === o.ref) ? { ...o, slips: o.slips + 1, log: [...o.log, { when: 'now' as const, who: 'you' as const, kind: 'slipPrinted' as const, actor: who.name, role: who.role, at: now }] } : o)));
     }
+    logAction('orders', { ar: `طباعة ${usable.length} ${doc === 'invoice' ? 'فاتورة' : doc === 'label' ? 'ملصق' : 'قائمة تعبئة'}`, en: `Printed ${usable.length} ${doc}s` }, { target: usable.slice(0, 10).map((o) => o.ref).join(',') });
     toast({ tone: 'ok', text: tx(`أُرسل ${usable.length} مستند للطباعة وسُجّل في كل طلب`, `${usable.length} documents sent to print and logged on each order`) });
     window.setTimeout(() => window.print(), 50);
   };

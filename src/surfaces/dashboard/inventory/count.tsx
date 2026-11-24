@@ -8,7 +8,7 @@ import { LOCATIONS } from '../../merchant/domain';
 import { toCsv } from '../../merchant/catalog';
 import { adjust } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { levelsStore, productsStore, stockLogStore } from '../../merchant/stores';
+import { levelsStore, logAction, productsStore, stockLogStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, ErrorState, LinkButton, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, DataTable, Field, Input, Modal, PageHeader, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -68,6 +68,7 @@ export default function CountImport() {
     }
     levelsStore.set(ls);
     stockLogStore.set(log);
+    logAction('inventory', { ar: `استورد جردًا: ${lines} تعديلًا`, en: `Imported a stock count: ${lines} adjustments` }, { target: file?.name, after: `${units} units` });
     setConfirm(false);
     setDone({ lines, units, conflicts });
     kept = null;

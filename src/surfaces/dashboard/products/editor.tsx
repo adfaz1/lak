@@ -9,7 +9,7 @@ import { LOCATIONS, LOC_IDS, type Channel, type LocId } from '../../merchant/dom
 import { colorText, parseMoney, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
 import { available, levelOf } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { categoriesStore, draftsStore, levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, draftsStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -116,6 +116,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
       const fresh = levelsForNew(d, new Set(levelsStore.get().map((l) => l.sku)));
       if (fresh.length) levelsStore.set((ls) => [...ls, ...fresh]);
       clearStored();
+      logAction('products', isNew ? { ar: d.copyOf ? `أنشأ منتجًا (نسخة من ${d.copyOf})` : 'أنشأ منتجًا', en: d.copyOf ? `Created a product (copy of ${d.copyOf})` : 'Created a product' } : { ar: 'عدّل منتجًا', en: 'Edited a product' }, { target: `${saved.name.en} · ${saved.sku}`, before: product ? `v${product.version}` : undefined, after: `v${version}` });
       const info = { id: newId, version, at: new Date().toLocaleTimeString(lang === 'ar' ? 'ar-SA-u-nu-latn' : 'en-GB', { hour: '2-digit', minute: '2-digit' }) };
       lastSaved = info;
       setSavedInfo(info);

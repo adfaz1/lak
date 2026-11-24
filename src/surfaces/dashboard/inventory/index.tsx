@@ -9,7 +9,7 @@ import { LOCATIONS, LOC_IDS } from '../../merchant/domain';
 import { toCsv } from '../../merchant/catalog';
 import { ADJ_REASONS, adjust, bumpBySomeoneElse, historyFixtures, levelOf, syncStockAlerts, type AdjReason, type Level, type StockAlertEntry, type StockLog, type Transfer } from '../../merchant/inventory';
 import { can, canSee } from '../../merchant/perms';
-import { levelsStore, locationsStore, productsStore, stockAlertsStore, stockLogStore, transfersStore } from '../../merchant/stores';
+import { levelsStore, logAction, locationsStore, productsStore, stockAlertsStore, stockLogStore, transfersStore } from '../../merchant/stores';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, BulkBar, DataTable, Field, FilterChip, Input, Modal, PageHeader, Pagination, SearchInput, Select, Simulated, Tabs, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -304,6 +304,7 @@ function AdjustModal({ level, info, onClose }: { level: Level; info: SkuInfo; on
     if (r.error) return;
     levelsStore.set(r.levels);
     stockLogStore.set((lg) => [r.log!, ...lg]);
+    logAction('inventory', { ar: `عدّل الكمية في ${LOCATIONS[level.loc].ar}: ${names.reason(reason)}`, en: `Adjusted stock at ${LOCATIONS[level.loc].en}: ${names.reason(reason)}` }, { target: `${level.sku} · ${id}`, before: String(r.log!.before), after: String(r.log!.after) });
     toast(r.oversold
       ? { tone: 'bad', text: tx(`سُجل ${id}. الموجود أقل من المحجوز: قد لا تكفي القطع للطلبات المدفوعة.`, `Logged ${id}. On hand is below reserved: paid orders may not be covered.`) }
       : { tone: 'ok', text: tx(`سُجل التعديل ${id}`, `Adjustment ${id} logged`) });

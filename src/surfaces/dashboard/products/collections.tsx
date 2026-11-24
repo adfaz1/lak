@@ -8,7 +8,7 @@ import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import { categoryTree, collectionMembers, validateRule, type Collection, type Product, type Rule, type RuleField, type RuleOp } from '../../merchant/catalog';
 import { can } from '../../merchant/perms';
-import { categoriesStore, collectionsStore, levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, collectionsStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, LinkButton, ProductImage, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, DataTable, Field, Input, Modal, PageHeader, SaveBar, Select, Switch, useToast, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -110,6 +110,7 @@ function Editor({ id }: { id: string }) {
     const next: Collection = { ...d, id: newId, name: { ar: d.name.ar.trim(), en: d.name.en.trim() }, version: (stored?.version ?? 0) + 1 };
     collectionsStore.set((cs) => (stored ? cs.map((c) => (c.id === newId ? next : c)) : [...cs, next]));
     clear();
+    logAction('products', stored ? { ar: `عدّل المجموعة ${next.name.ar}`, en: `Edited collection ${next.name.en}` } : { ar: `أنشأ المجموعة ${next.name.ar}`, en: `Created collection ${next.name.en}` }, { target: newId, after: `${members.length} products` });
     toast({ tone: 'ok', text: `${tx('حُفظت المجموعة', 'Collection saved')} · ${productCount(tx, members.length)}` });
     // Saved: nothing is unsaved any more, so the address change must not ask to leave.
     if (!stored) { discardUnsaved(); setTimeout(() => replace(phref(`collections/${newId}`)), 0); }
@@ -202,7 +203,7 @@ function Editor({ id }: { id: string }) {
       {pick && <Picker selected={d.productIds} onClose={() => setPick(false)} onAdd={(ids) => { set({ productIds: [...d.productIds, ...ids.filter((x) => !d.productIds.includes(x))] }); setPick(false); }} />}
       {del && stored && (
         <Modal title={tx(`حذف «${stored.name.ar}»`, `Delete “${stored.name.en}”`)} onClose={() => setDel(false)}
-          footer={<><Button variant="secondary" onClick={() => setDel(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { collectionsStore.set((cs) => cs.filter((c) => c.id !== stored.id)); clear(); toast({ tone: 'ok', text: tx('حُذفت المجموعة. المنتجات لم تتغير.', 'Collection deleted. Products are unchanged.') }); navigate(phref('collections')); }}>{tx('احذف المجموعة', 'Delete collection')}</Button></>}>
+          footer={<><Button variant="secondary" onClick={() => setDel(false)}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={() => { collectionsStore.set((cs) => cs.filter((c) => c.id !== stored.id)); clear(); logAction('products', { ar: `حذف المجموعة ${stored.name.ar}`, en: `Deleted collection ${stored.name.en}` }, { target: stored.id }); toast({ tone: 'ok', text: tx('حُذفت المجموعة. المنتجات لم تتغير.', 'Collection deleted. Products are unchanged.') }); navigate(phref('collections')); }}>{tx('احذف المجموعة', 'Delete collection')}</Button></>}>
           <p className="text-sm text-muted">{tx('لا يُحذف أي منتج.', 'No product is deleted.')}</p>
         </Modal>
       )}

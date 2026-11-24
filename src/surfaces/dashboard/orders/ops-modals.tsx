@@ -6,7 +6,8 @@ import { useLang } from '../../../core/lang';
 
 import { LOCATIONS, type Order } from '../../merchant/domain';
 import { refundTx } from '../../merchant/finance';
-import { financeStore } from '../../merchant/stores';
+import { financeStore, levelsStore } from '../../merchant/stores';
+import { confirmTransferWithStock } from './model';
 import {
   cancelBlock, cancelOrder, cancelPlan, declineCancel, markDelivered, markShipped, openReturn, parcelShip, parcelsAt, payView,
   returnableQty, validateReturnLines, type ReturnLine,
@@ -173,3 +174,31 @@ export function OpenReturnModal({ o, onClose }: { o: Order; onClose: (msg?: stri
   );
 }
 
+
+/** Bank transfer: the merchant confirms the money arrived; the order becomes paid and stock is held. */
+export function TransferModal({ o, onClose }: { o: Order; onClose: (msg?: string) => void }) {
+  const tx = useTx();
+  const who = useActor();
+  const [note, setNote] = useState('');
+  const total = o.items.reduce((s, i) => s + i.qty * i.unit, 0) - (o.discount ?? 0) + o.fee;
+  const run = () => {
+    const r = confirmTransferWithStock(o, levelsStore.get(), who, Date.now(), note);
+    if (r.order === o) return;
+    levelsStore.set(r.levels);
+    saveOrder(r.order);
+    onClose(tx('أُكّد التحويل وأصبح الطلب مدفوعًا', 'Transfer confirmed; the order is paid'));
+  };
+  return (
+    <Modal title={tx('تأكيد استلام التحويل', 'Confirm the transfer arrived')} onClose={() => onClose()}
+      footer={<><Button variant="secondary" onClick={() => onClose()}>{tx('إلغاء', 'Cancel')}</Button><Button onClick={run}>{tx('أكّد الاستلام', 'Confirm received')}</Button></>}>
+      <Alert tone="warn">{tx('أكّد فقط بعد رؤية المبلغ في كشف حسابك البنكي.', 'Confirm only after you see the money in your bank statement.')}</Alert>
+      <dl className="divide-y divide-border !rounded-xl !border !border-border !px-4">
+        <Row label={tx('المبلغ المتوقع', 'Expected amount')} strong><Money v={total} /></Row>
+        <Row label={tx('الدفع', 'Payment')}>{tx('بانتظار التحويل ← مدفوع', 'Awaiting transfer → paid')}</Row>
+        <Row label={tx('المخزون', 'Stock')}>{tx('يُحجز للطلب', 'Held for the order')}</Row>
+        <Row label={tx('التالي', 'Next')}>{tx('التجهيز', 'Fulfilment')}</Row>
+      </dl>
+      <Field label={tx('مرجع التحويل', 'Transfer reference')} optional>{(p) => <Input {...p} dir="ltr" value={note} onChange={(e) => setNote(e.target.value.slice(0, 60))} />}</Field>
+    </Modal>
+  );
+}

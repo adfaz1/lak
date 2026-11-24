@@ -7,7 +7,7 @@ import { useLang } from '../../../core/lang';
 import { allLocations, type LocDisableReason, type LocKind, type Location } from '../../merchant/domain';
 import { disableBlocks, newLocationId, validateLocation, type DisableBlock } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { levelsStore, locationsStore, transfersStore } from '../../merchant/stores';
+import { levelsStore, locationsStore, logAction, transfersStore } from '../../merchant/stores';
 import { Badge, Button, Card, EmptyState, ErrorState, InfoHint, LinkButton, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, Select, Switch, Textarea, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -49,6 +49,7 @@ export default function Locations() {
 
   const enable = (l: Location) => {
     locationsStore.set((ls) => ls.map((x) => (x.id === l.id ? { ...x, active: true, disabled: undefined, version: x.version + 1 } : x)));
+    logAction('inventory', { ar: `فعّل الموقع ${l.name.ar}`, en: `Enabled location ${l.name.en}` }, { target: l.id, before: 'disabled', after: 'active' });
     toast({ tone: 'ok', text: tx(`فُعّل ${l.name.ar}`, `${l.name.en} enabled`) });
   };
 
@@ -136,6 +137,7 @@ function LocationForm({ initial, onClose, onKeep }: { initial: Draft; onClose: (
     const fields = { name: { ar: d.nameAr.trim(), en: d.nameEn.trim() }, kind: d.kind, city: { ar: d.cityAr.trim(), en: d.cityEn.trim() }, address: d.address.trim(), ships: d.ships, pickup: d.pickup };
     if (d.id) locationsStore.set((ls) => ls.map((l) => (l.id === d.id ? { ...l, ...fields, version: l.version + 1 } : l)));
     else locationsStore.set((ls) => [...ls, { id: newId, ...fields, active: true, version: 1 }]);
+    logAction('inventory', d.id ? { ar: `عدّل الموقع ${fields.name.ar}`, en: `Edited location ${fields.name.en}` } : { ar: `أضاف الموقع ${fields.name.ar}`, en: `Added location ${fields.name.en}` }, { target: newId });
     toast({ tone: 'ok', text: d.id ? tx('حُفظ الموقع', 'Location saved') : tx(`أُضيف ${fields.name.ar}. يظهر الآن في المخزون والتحويل والتجهيز.`, `${fields.name.en} added. It now shows in inventory, transfers and fulfilment.`) });
     onClose();
   };
@@ -182,6 +184,7 @@ function DisableModal({ loc, onClose }: { loc: Location; onClose: () => void }) 
     setTried(true);
     if (blocks.length || !reason) return;
     locationsStore.set((ls) => ls.map((x) => (x.id === loc.id ? { ...x, active: false, disabled: { reason, note: note.trim(), by: 'You' }, version: x.version + 1 } : x)));
+    logAction('inventory', { ar: `عطّل الموقع ${loc.name.ar}`, en: `Disabled location ${loc.name.en}` }, { target: loc.id, before: 'active', after: `disabled: ${reason}${note.trim() ? ` · ${note.trim()}` : ''}` });
     toast({ tone: 'ok', text: tx(`عُطّل ${loc.name.ar}. لا يظهر في التجهيز والتحويل.`, `${loc.name.en} disabled. It no longer shows in fulfilment or transfers.`) });
     onClose();
   };

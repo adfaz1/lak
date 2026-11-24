@@ -7,7 +7,7 @@ import { useLang } from '../../../core/lang';
 import { LOCATIONS, LOC_IDS, type LocId } from '../../merchant/domain';
 import { available, closeWithDiscrepancy, levelOf, receiveTransfer, sendTransfer, validateTransferDraft, type Transfer, type TransferError } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
-import { levelsStore, productsStore, stockLogStore, transfersStore } from '../../merchant/stores';
+import { levelsStore, logAction, productsStore, stockLogStore, transfersStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, Select, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -71,6 +71,7 @@ function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
     levelsStore.set(r.levels);
     persist(r.transfer);
     stockLogStore.set((lg) => [...sendLog(r.transfer, r.levels, 'You'), ...lg]);
+    logAction('inventory', { ar: `أرسل التحويل من ${LOCATIONS[t.from].ar} إلى ${LOCATIONS[t.to].ar}`, en: `Sent transfer ${LOCATIONS[t.from].en} → ${LOCATIONS[t.to].en}` }, { target: t.id, after: `${units(r.transfer).qty}` });
     toast({ tone: 'ok', text: tx(`أُرسل ${t.id}`, `${t.id} sent`) });
     if (isNew) navigate(ihref(`transfers/${t.id}`));
   };
@@ -81,6 +82,7 @@ function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
     levelsStore.set(r.levels);
     persist(r.transfer);
     stockLogStore.set((lg) => [...receiveLog(t, parsed.qty, r.levels, 'You'), ...lg]);
+    logAction('inventory', { ar: 'استلم وحدات تحويل', en: 'Received transfer units' }, { target: t.id, before: `${u.received}/${u.qty}`, after: `${units(r.transfer).received}/${u.qty}` });
     setRecv([]); setErr(null);
     toast({ tone: 'ok', text: r.transfer.status === 'received' ? tx('اكتمل الاستلام', 'Fully received') : tx('سُجل استلام جزئي', 'Partial receipt recorded') });
   };
@@ -91,6 +93,7 @@ function Detail({ initial, isNew }: { initial: Transfer; isNew: boolean }) {
     levelsStore.set(r.levels);
     persist(r.transfer);
     stockLogStore.set((lg) => [...discrepancyLog(r.transfer, r.levels, 'You'), ...lg]);
+    logAction('inventory', { ar: 'أغلق التحويل بفرق', en: 'Closed transfer with a discrepancy' }, { target: t.id, after: closeNote.trim() || undefined });
   };
 
   const stage = stageOf(t.status);

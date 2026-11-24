@@ -8,7 +8,7 @@ import { createStore } from '../../../core/store';
 import { LOCATIONS, LOC_IDS, type Channel, type L } from '../../merchant/domain';
 import { ADJ_REASONS, type AdjReason } from '../../merchant/inventory';
 import { categoryTree, type Product, type ProductStatus } from '../../merchant/catalog';
-import { categoriesStore, levelsStore, productsStore, stockLogStore } from '../../merchant/stores';
+import { categoriesStore, levelsStore, logAction, productsStore, stockLogStore } from '../../merchant/stores';
 import { Button, InfoHint, Money, ProductImage, Segmented, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, Select, Simulated, useToast } from '../../../ds/kit';
 import { useInvNames } from '../inventory/parts';
@@ -35,6 +35,7 @@ export function useUndo() {
     levelsStore.set(r.levels);
     if (r.log.length) stockLogStore.set((lg) => [...r.log, ...lg]);
     undoStore.set(null);
+    logAction('products', { ar: 'تراجع عن تعديل جماعي', en: 'Undid a bulk edit' }, { target: u.id, after: `${r.restored} restored, ${r.skipped} skipped` });
     toast(r.skipped
       ? { tone: 'info', text: tx(`أُعيد ${r.restored}. ${r.skipped} تغيّر بعد التعديل فتُرك كما هو.`, `Restored ${r.restored}. ${r.skipped} changed since, so they were left as they are.`) }
       : { tone: 'ok', text: tx(`تراجعنا عن التعديل الجماعي (${r.restored})`, `Bulk edit undone (${r.restored})`) });
@@ -109,6 +110,7 @@ export function BulkOpModal({ ids, onClose, onDone }: { ids: string[]; onClose: 
     levelsStore.set(r.levels);
     if (r.log.length) stockLogStore.set((lg) => [...r.log, ...lg]);
     rememberUndo(r.undo, r.changed);
+    logAction(op.field === 'stock' ? 'inventory' : 'products', { ar: `تعديل جماعي: ${fieldName[op.field]}`, en: `Bulk edit: ${fieldName[op.field]}` }, { target: `${ref} · ${r.changed} products`, after: [op.mode, op.value, op.loc && op.field === 'stock' ? op.loc : '', op.channel && op.field === 'channel' ? op.channel : ''].filter(Boolean).join(' ') });
     toast({ tone: 'ok', text: `${tx('حُفظ', 'Saved')}: ${fieldName[op.field]} · ${productCount(tx, r.changed)}`, action: { label: tx('تراجع', 'Undo'), run } });
     onDone();
   };

@@ -11,7 +11,7 @@ import {
 } from '../../merchant/catalog';
 import { LOCATIONS, LOC_IDS, type LocId } from '../../merchant/domain';
 import { can } from '../../merchant/perms';
-import { categoriesStore, levelsStore, productsStore } from '../../merchant/stores';
+import { categoriesStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, ErrorState, InfoHint, LinkButton, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { Alert, DataTable, Modal, PageHeader, Select, Switch, type Column } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
@@ -41,6 +41,8 @@ function startJob(plan: ImportPlan, file: FileKind, loc: LocId) {
     levelsStore.set(r.levels);
     const done = s.job.done + batch.length;
     importStore.set((x) => ({ ...x, job: x.job && { ...x.job, done, running: done < work.length, created: x.job.created + r.created, updated: x.job.updated + r.updated } }));
+    const j = importStore.get().job;
+    if (j && !j.running) logAction('products', { ar: `استورد منتجات: ${j.created} جديد و${j.updated} محدّث`, en: `Imported products: ${j.created} created, ${j.updated} updated` }, { target: importStore.get().fileName, after: `${j.plan.invalid.length} invalid skipped` });
   }, 160);
 }
 
