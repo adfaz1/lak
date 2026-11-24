@@ -257,7 +257,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const [list, setList] = useState<ToastMsg[]>([]);
   const push = useCallback((t: Omit<ToastMsg, 'id'>) => {
     const id = Date.now() + Math.random();
-    setList((l) => [...l, { ...t, id }]);
+    // At most two at a time, newest last, so quick actions never pile toasts over a dialog.
+    setList((l) => [...l.filter((x) => x.text !== t.text), { ...t, id }].slice(-2));
     setTimeout(() => setList((l) => l.filter((x) => x.id !== id)), 6000);
   }, []);
   const Icon = { ok: CheckCircle2, info: Info, bad: AlertCircle };
