@@ -4,6 +4,7 @@ import { VIEWS, total, type Order } from '../../merchant/domain';
 import { available, lowStock, type Level } from '../../merchant/inventory';
 import { change, periods, summarize, type DayStat } from '../../merchant/growth';
 import { productIdForSku } from './media';
+import { canSee, type Page, type Role } from '../../merchant/perms';
 
 export type PeriodDays = 7 | 30;
 
@@ -48,6 +49,10 @@ export function tasks(orders: Order[], levels: Level[]): Task[] {
   ];
   return out.filter((t) => t.count > 0).sort((x, y) => y.severity - x.severity || y.value - x.value);
 }
+
+/** The section each task opens; a role only sees tasks it can act on. */
+export const TASK_PAGE: Record<TaskId, Page> = { late: 'orders', payfail: 'orders', fulfil: 'orders', refunds: 'orders', stock: 'inventory' };
+export const tasksFor = (role: Role, list: Task[]): Task[] => list.filter((t) => canSee(role, TASK_PAGE[t.id]));
 
 export interface TopProduct { sku: string; productId: string | undefined; name: Order['items'][number]['name']; units: number; revenue: number }
 /** Best sellers by revenue across paid orders (failed payments excluded). */

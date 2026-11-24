@@ -71,3 +71,17 @@ describe('channels today', () => {
     expect(channelsToday([]).every((x) => x.share === 0)).toBe(true);
   });
 });
+
+describe('role-aware work queue', () => {
+  it('shows each role only the tasks it can open', async () => {
+    const { tasks, tasksFor } = await import('./home');
+    const { allOrders } = await import('../../merchant/domain');
+    const { initialLevels } = await import('../../merchant/inventory');
+    const { productFixtures, skusOf } = await import('../../merchant/catalog');
+    const all = tasks(allOrders(), initialLevels(productFixtures().flatMap(skusOf)));
+    expect(tasksFor('owner', all)).toEqual(all);
+    expect(tasksFor('marketing', all)).toEqual([]);
+    expect(tasksFor('finance', all).some((t) => t.id === 'stock')).toBe(false);
+    expect(tasksFor('fulfilment', all).map((t) => t.id)).toContain('stock');
+  });
+});

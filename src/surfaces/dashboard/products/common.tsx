@@ -1,5 +1,6 @@
 // Shared view parts for the Products and Inventory sections (both import from here).
 // New shared components (not in src/ds): Stepper, NoAccess, ReviewTools, useLeaveGuard, LeaveModal.
+import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Check, Lock, FlaskConical } from 'lucide-react';
 import { link, navigate } from '../../../core/router';
@@ -90,6 +91,8 @@ export function ReviewTools({ children }: { children?: ReactNode }) {
 
 /** Block in-app link navigation and reload/close while there are unsaved edits. */
 export function useLeaveGuard(dirty: boolean, onBlocked: (href: string) => void) {
+  // Search, Back and other non-link navigation are caught by the dashboard-wide guard.
+  useUnsaved(dirty, { ar: 'تعديلات المنتج', en: 'Product edits' });
   const cb = useRef(onBlocked);
   cb.current = onBlocked;
   useEffect(() => {
@@ -110,7 +113,7 @@ export function useLeaveGuard(dirty: boolean, onBlocked: (href: string) => void)
 
 export function LeaveModal({ to, onStay, onKeep, onDiscard }: { to: string; onStay: () => void; onKeep: () => void; onDiscard: () => void }) {
   const tx = useTx();
-  const go = (f: () => void) => { f(); setTimeout(() => navigate(to), 0); };
+  const go = (f: () => void) => { f(); discardUnsaved(); setTimeout(() => navigate(to), 0); };
   return (
     <Modal title={tx('مغادرة دون حفظ؟', 'Leave without saving?')} onClose={onStay}
       description={tx('تعديلاتك لم تصل إلى الخادم بعد.', 'Your edits have not reached the server.')}

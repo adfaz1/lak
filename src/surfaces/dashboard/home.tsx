@@ -5,12 +5,12 @@ import { AlarmClock, CreditCard, PackageCheck, RotateCcw, Boxes, ArrowLeft, Shop
 import { useLang } from '../../core/lang';
 import { link } from '../../core/router';
 import { formatMoney } from '../../core/format';
-import { ordersStore, levelsStore, productsStore } from '../merchant/stores';
+import { ordersStore, levelsStore, productsStore, testStore } from '../merchant/stores';
 import { total, type Order } from '../merchant/domain';
 import { history } from './analytics/model';
 import { Card, CardHeader, Money, Delta, Badge, ProductImage, Avatar, Ref, Skeleton, EmptyState, ErrorState, Segmented, LinkButton, InfoHint, cn, useTx, toneDot, type Tone } from '../../ds/ui';
 import { AreaChart } from '../../ds/charts';
-import { channelsToday, headline, salesToday, stockAlerts, tasks, topProducts, type PeriodDays, type Task, type TaskId } from './model/home';
+import { channelsToday, headline, salesToday, stockAlerts, tasks, tasksFor, topProducts, type PeriodDays, type Task, type TaskId } from './model/home';
 import { productPhoto, skuPhoto } from './model/media';
 import { useDashState, setDashState } from './review';
 import { sectionHref } from './pages';
@@ -31,7 +31,8 @@ export default function Home() {
   const empty = state === 'empty';
   const list = empty ? [] : orders;
   const lv = empty ? [] : levels;
-  const work = tasks(list, lv);
+  const role = testStore.use().role;
+  const work = tasksFor(role, tasks(list, lv));
   const figures = headline(empty ? [] : series, period);
   const top = topProducts(list);
   const alerts = stockAlerts(lv);

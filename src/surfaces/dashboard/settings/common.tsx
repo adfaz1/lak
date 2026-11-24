@@ -1,5 +1,6 @@
 // Shared pieces of the settings pages: frame with category navigation, honest save, leave protection,
 // review-only tools (role preview, failing save) and the no-permission state.
+import { discardUnsaved, useUnsaved } from '../unsaved';
 import { useCallback, useEffect, useRef, useState, type ComponentType, type ReactNode } from 'react';
 import { Bell, CreditCard, FileText, Globe2, Languages, Lock, ShoppingCart, Store, Truck, Users, FlaskConical } from 'lucide-react';
 import { useLang } from '../../../core/lang';
@@ -124,6 +125,7 @@ export function useSave() {
 /** Leave protection: links inside the app ask before discarding unsaved edits; closing the tab asks the browser. */
 export function LeaveGuard({ dirty }: { dirty: boolean }) {
   const tx = useTx();
+  useUnsaved(dirty, { ar: 'تعديلات الإعدادات', en: 'Settings edits' });
   const [to, setTo] = useState<string | null>(null);
   useEffect(() => {
     if (!dirty) return;
@@ -143,7 +145,7 @@ export function LeaveGuard({ dirty }: { dirty: boolean }) {
   if (!to) return null;
   return (
     <Modal title={tx('المغادرة دون حفظ؟', 'Leave without saving?')} description={tx('ستفقد التغييرات التي لم تحفظها في هذه الصفحة.', 'Unsaved changes on this page will be lost.')} onClose={() => setTo(null)}
-      footer={<><Button variant="secondary" onClick={() => setTo(null)}>{tx('تابع التعديل', 'Keep editing')}</Button><Button variant="danger" onClick={() => { const h = to; setTo(null); navigate(h); }}>{tx('تجاهل وغادر', 'Discard and leave')}</Button></>} />
+      footer={<><Button variant="secondary" onClick={() => setTo(null)}>{tx('تابع التعديل', 'Keep editing')}</Button><Button variant="danger" onClick={() => { const h = to; setTo(null); discardUnsaved(); navigate(h); }}>{tx('تجاهل وغادر', 'Discard and leave')}</Button></>} />
   );
 }
 
