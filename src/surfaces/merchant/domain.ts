@@ -56,6 +56,15 @@ export interface Order {
   slips: number;
   /** Included in a payout that has already been paid out. */
   settled: boolean;
+  /** Customer record (customers list) when known; older fixtures match by name. */
+  customerId?: string;
+  /** Order-level discount from a coupon (halalas, VAT-inclusive). Absent on fixture orders. */
+  discount?: number;
+  coupon?: string;
+  /** How the shopper paid in the online store, and the provider's last word on it. */
+  payment?: { method: 'card' | 'applepay' | 'bnpl' | 'cod'; state: 'paid' | 'declined' | 'verifying' | 'cod_due' | 'cod_collected' };
+  /** Epoch ms when the order was placed in this session (online-store orders). */
+  placedAt?: number;
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {
@@ -167,7 +176,9 @@ export function allOrders(): Order[] {
 }
 
 export const subtotal = (o: Order) => o.items.reduce((sum, i) => sum + i.qty * i.unit, 0);
-export const total = (o: Order) => subtotal(o) + o.fee;
+export const total = (o: Order) => subtotal(o) - (o.discount ?? 0) + o.fee;
+/** The next free order reference: one above the highest numeric reference in the book. */
+export const nextOrderRef = (orders: { ref: string }[]): string => String(orders.reduce((m, o) => Math.max(m, Number(o.ref) || 0), 10000) + 1);
 /** VAT contained in a VAT-inclusive total at 15%. */
 export const vatIncluded = (o: Order) => Math.round((total(o) * 15) / 115);
 export const units = (o: Order) => o.items.reduce((sum, i) => sum + i.qty, 0);

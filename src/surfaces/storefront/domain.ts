@@ -1,6 +1,7 @@
 /* Storefront domain: catalogue, cart, coupons, totals, shipping, payment state machine and order idempotency.
    Pure functions only. Money is integer halalas. Every figure is fixture data for a simulated store. */
 import type { L } from '../../core/lang';
+import { colorText } from '../merchant/catalog';
 
 export const DAY = 86_400_000;
 export const VAT_RATE = 15;
@@ -27,19 +28,15 @@ export const MERCHANT = {
 
 /* ───────────── Catalogue ───────────── */
 
-export type CatId = 'abayas' | 'dresses' | 'perfume' | 'scarves' | 'bags';
-export type Kind = 'abaya' | 'dress' | 'perfume' | 'scarf' | 'bag';
-export type ColorId = 'black' | 'sand' | 'olive' | 'ivory' | 'navy' | 'rose' | 'camel' | 'amber';
+/** A category slug derived from the merchant's category (e.g. "fragrance"). */
+export type CatId = string;
+/** Used to pick a placeholder icon; equals the category slug for merchant products. */
+export type Kind = string;
+/** A colour as the merchant typed it ("Black") or a known palette id ("black"). */
+export type ColorId = string;
 
-export const CATEGORIES: { id: CatId; name: L; kind: Kind; tone: ColorId }[] = [
-  { id: 'abayas', name: { ar: 'عبايات', en: 'Abayas' }, kind: 'abaya', tone: 'black' },
-  { id: 'dresses', name: { ar: 'فساتين', en: 'Dresses' }, kind: 'dress', tone: 'rose' },
-  { id: 'perfume', name: { ar: 'عطور', en: 'Fragrance' }, kind: 'perfume', tone: 'amber' },
-  { id: 'scarves', name: { ar: 'أوشحة وشيلات', en: 'Scarves & shaylas' }, kind: 'scarf', tone: 'sand' },
-  { id: 'bags', name: { ar: 'حقائب', en: 'Bags' }, kind: 'bag', tone: 'camel' },
-];
-
-export const COLORS: Record<ColorId, { name: L; hex: string }> = {
+/** Known palette: names and swatches. Colours outside it get the merchant's name and a neutral swatch. */
+export const COLORS: Record<string, { name: L; hex: string }> = {
   black: { name: { ar: 'أسود', en: 'Black' }, hex: '#24211f' },
   sand: { name: { ar: 'رملي', en: 'Sand' }, hex: '#cdb796' },
   olive: { name: { ar: 'زيتي', en: 'Olive' }, hex: '#6d6b47' },
@@ -48,12 +45,27 @@ export const COLORS: Record<ColorId, { name: L; hex: string }> = {
   rose: { name: { ar: 'وردي هادئ', en: 'Dusty rose' }, hex: '#c79c93' },
   camel: { name: { ar: 'جملي', en: 'Camel' }, hex: '#a9784b' },
   amber: { name: { ar: 'كهرماني', en: 'Amber' }, hex: '#b9843f' },
+  white: { name: { ar: 'أبيض', en: 'White' }, hex: '#f6f3ee' },
+  beige: { name: { ar: 'بيج', en: 'Beige' }, hex: '#d9c7a7' },
+};
+const EXTRA_HEX: Record<string, string> = {
+  brown: '#6b4a33', tan: '#b9875a', grey: '#8b8b8b', gray: '#8b8b8b', red: '#a33a36', blue: '#3b5a8c', green: '#4b6b4f',
+  gold: '#c2a25a', pink: '#d8a3a8', cream: '#efe6d2', burgundy: '#6d2433',
 };
 
-export interface Variant { id: string; color?: ColorId; size?: string; price: number; stock: number }
+/** Name and swatch for any colour. Arabic names for merchant-typed colours come from the merchant catalogue. */
+export function colorInfo(c: string): { name: L; hex: string } {
+  const k = c.trim().toLowerCase();
+  const known = COLORS[k];
+  if (known) return known;
+  return { name: { ar: colorText(c, 'ar'), en: c }, hex: EXTRA_HEX[k] ?? '#b8b0a4' };
+}
+
+export interface Variant { id: string; color?: ColorId; size?: string; price: number; stock: number; sku?: string }
 export interface Product {
   id: string;
   cat: CatId;
+  catName: L;
   kind: Kind;
   name: L;
   blurb: L;
@@ -64,79 +76,11 @@ export interface Product {
   colors: ColorId[];
   sizes: string[];
   variants: Variant[];
-}
-
-function build(
-  id: string, cat: CatId, kind: Kind, name: L, blurb: L, details: L[], price: number,
-  colors: ColorId[], sizes: string[], rank: number, added: number,
-  opts: { compareAt?: number; stock?: Record<string, number>; prices?: Record<string, number>; base?: number } = {},
-): Product {
-  const cs: (ColorId | undefined)[] = colors.length ? colors : [undefined];
-  const ss: (string | undefined)[] = sizes.length ? sizes : [undefined];
-  const variants: Variant[] = [];
-  for (const c of cs) for (const s of ss) {
-    const vid = [c, s].filter(Boolean).join('-') || 'one';
-    variants.push({ id: `${id}~${vid}`, color: c, size: s, price: opts.prices?.[s ?? ''] ?? price, stock: opts.stock?.[vid] ?? opts.base ?? 6 });
-  }
-  return { id, cat, kind, name, blurb, details, compareAt: opts.compareAt, rank, added, colors, sizes, variants };
-}
-
-const D = {
-  linen: { ar: 'كتان مغسول ناعم الملمس', en: 'Soft washed linen' },
-  care: { ar: 'غسيل يدوي بماء بارد، كيّ على حرارة منخفضة', en: 'Hand wash cold, low iron' },
-  made: { ar: 'خياطة في ورشة الدار بالرياض', en: 'Sewn in the house workshop in Riyadh' },
-  edp: { ar: 'أو دو بارفان، تركيز 15–18٪', en: 'Eau de parfum, 15–18% concentration' },
-  noReturn: { ar: 'العطور المفتوحة لا تُسترجع لأسباب صحية', en: 'Opened fragrance cannot be returned for hygiene reasons' },
-};
-
-export function catalogue(): Product[] {
-  return [
-    build('linen-abaya', 'abayas', 'abaya', { ar: 'عباية كتان يومية', en: 'Everyday linen abaya' },
-      { ar: 'قصة مستقيمة خفيفة لأيام الخريف، بجيوب جانبية مخفية.', en: 'A light straight cut for autumn days, with hidden side pockets.' },
-      [D.linen, D.care, D.made], 42_900, ['black', 'sand', 'olive'], ['52', '54', '56', '58'], 1, 9,
-      { stock: { 'olive-58': 0, 'sand-52': 2, 'black-56': 3 } }),
-    build('crepe-abaya', 'abayas', 'abaya', { ar: 'عباية كريب بأكمام واسعة', en: 'Wide-sleeve crepe abaya' },
-      { ar: 'كريب ياباني ينسدل بثقل جميل، مع حافة أكمام مزدوجة.', en: 'Japanese crepe with a heavy drape and double-layer cuffs.' },
-      [{ ar: 'كريب ياباني 100٪ بوليستر', en: '100% polyester Japanese crepe' }, D.care, D.made], 58_900, ['black', 'navy'], ['54', '56', '58'], 2, 6,
-      { compareAt: 69_900, stock: { 'navy-54': 0 } }),
-    build('embroidered-abaya', 'abayas', 'abaya', { ar: 'عباية مفتوحة بتطريز يدوي', en: 'Hand-embroidered open abaya' },
-      { ar: 'تطريز يدوي على الأطراف بخيط حريري بلون الليل.', en: 'Hand embroidery along the edges in night-toned silk thread.' },
-      [{ ar: 'تطريز يدوي يستغرق ثلاثة أيام لكل قطعة', en: 'Each piece takes three days to embroider' }, D.care, D.made], 74_900, ['black'], ['52', '54', '56', '58'], 3, 2,
-      { base: 0 }),
-    build('satin-dress', 'dresses', 'dress', { ar: 'فستان ماكسي ساتان', en: 'Satin maxi dress' },
-      { ar: 'ساتان مطفي بطول كامل وأكمام طويلة وحزام قابل للفك.', en: 'Matte satin, full length, long sleeves and a removable belt.' },
-      [{ ar: 'ساتان مطفي مع بطانة قطنية', en: 'Matte satin with cotton lining' }, D.care], 36_900, ['rose', 'olive', 'black'], ['XS', 'S', 'M', 'L', 'XL'], 4, 8,
-      { stock: { 'rose-XS': 0, 'rose-M': 1, 'black-XL': 0 } }),
-    build('shirt-dress', 'dresses', 'dress', { ar: 'فستان قميص قطني', en: 'Cotton shirt dress' },
-      { ar: 'قطن بوبلين مقرمش بأزرار أمامية كاملة.', en: 'Crisp cotton poplin with a full button front.' },
-      [{ ar: 'قطن 100٪', en: '100% cotton' }, D.care], 27_900, ['ivory', 'navy'], ['S', 'M', 'L'], 7, 10),
-    build('night-oud', 'perfume', 'perfume', { ar: 'عطر عود الليل', en: 'Night Oud' },
-      { ar: 'عود دافئ مع زعفران وجلد ناعم. يدوم على القماش.', en: 'Warm oud with saffron and soft leather. Lasts on fabric.' },
-      [D.edp, { ar: 'المكونات: عود، زعفران، جلد، عنبر', en: 'Notes: oud, saffron, leather, amber' }, D.noReturn], 39_500, [], ['50ml', '100ml'], 5, 7,
-      { prices: { '50ml': 39_500, '100ml': 59_500 }, stock: { '50ml': 7, '100ml': 3 } }),
-    build('white-musk', 'perfume', 'perfume', { ar: 'مسك أبيض', en: 'White musk' },
-      { ar: 'مسك نظيف ناعم للاستخدام اليومي.', en: 'A clean, soft musk for every day.' },
-      [D.edp, { ar: 'المكونات: مسك، زهر القطن، خشب الصندل', en: 'Notes: musk, cotton flower, sandalwood' }, D.noReturn], 24_500, [], ['50ml', '100ml'], 6, 5,
-      { prices: { '50ml': 24_500, '100ml': 36_500 }, stock: { '50ml': 12, '100ml': 0 } }),
-    build('taif-rose', 'perfume', 'perfume', { ar: 'ورد الطائف', en: 'Taif rose' },
-      { ar: 'ورد طائفي مقطّر مع لمسة من الهيل.', en: 'Distilled Taif rose with a touch of cardamom.' },
-      [D.edp, { ar: 'المكونات: ورد طائفي، هيل، مسك', en: 'Notes: Taif rose, cardamom, musk' }, D.noReturn], 45_500, [], ['50ml'], 8, 4),
-    build('silk-scarf', 'scarves', 'scarf', { ar: 'وشاح حرير مطبوع', en: 'Printed silk scarf' },
-      { ar: 'حرير توِل بطباعة هندسية مستوحاة من النوافذ النجدية.', en: 'Silk twill printed with a geometric motif from Najdi windows.' },
-      [{ ar: 'حرير 100٪، 90×90 سم', en: '100% silk, 90×90 cm' }, D.care], 18_900, ['sand', 'rose', 'navy'], [], 9, 3,
-      { stock: { 'rose': 0 } }),
-    build('crepe-shayla', 'scarves', 'scarf', { ar: 'شيلة كريب', en: 'Crepe shayla' },
-      { ar: 'شيلة كريب لا تنزلق، بحواف مخيطة يدويًا.', en: 'A non-slip crepe shayla with hand-finished edges.' },
-      [{ ar: 'كريب خفيف، 70×180 سم', en: 'Light crepe, 70×180 cm' }, D.care], 9_900, ['black', 'ivory', 'camel', 'olive'], [], 10, 11),
-    build('leather-tote', 'bags', 'bag', { ar: 'حقيبة جلد يدوية', en: 'Leather tote' },
-      { ar: 'جلد بقري مدبوغ نباتيًا يتسع لجهاز محمول 13 بوصة.', en: 'Vegetable-tanned leather that fits a 13-inch laptop.' },
-      [{ ar: 'جلد بقري طبيعي', en: 'Full-grain cowhide' }, { ar: 'الأبعاد: 38×30×12 سم', en: 'Size: 38×30×12 cm' }], 64_900, ['camel', 'black'], [], 11, 1,
-      { stock: { camel: 1, black: 4 } }),
-    build('evening-clutch', 'bags', 'bag', { ar: 'حقيبة سهرة', en: 'Evening clutch' },
-      { ar: 'حقيبة صغيرة بإغلاق مغناطيسي وسلسلة قابلة للإزالة.', en: 'A small clutch with a magnetic clasp and removable chain.' },
-      [{ ar: 'ساتان على هيكل صلب', en: 'Satin on a rigid frame' }], 32_900, ['black', 'ivory'], [], 12, 12,
-      { compareAt: 38_900 }),
-  ];
+  /** Grams per unit, for weight-based shipping. */
+  weight?: number;
+  /** False when the item cannot be returned (opened fragrance in the rule fixtures, digital goods in the store). */
+  returnable?: boolean;
+  digital?: boolean;
 }
 
 export function productById(products: Product[], id: string): Product | undefined {
@@ -194,8 +138,7 @@ export function normalize(s: string): string {
 export function matches(p: Product, q: string): boolean {
   const n = normalize(q);
   if (!n) return true;
-  const cat = CATEGORIES.find((c) => c.id === p.cat)!;
-  const hay = normalize([p.name.ar, p.name.en, cat.name.ar, cat.name.en, p.blurb.ar, p.blurb.en, ...p.colors.flatMap((c) => [COLORS[c].name.ar, COLORS[c].name.en])].join(' '));
+  const hay = normalize([p.name.ar, p.name.en, p.catName.ar, p.catName.en, p.blurb.ar, p.blurb.en, ...p.colors.flatMap((c) => [colorInfo(c).name.ar, colorInfo(c).name.en])].join(' '));
   return n.split(' ').every((w) => hay.includes(w));
 }
 
@@ -276,32 +219,36 @@ export function validateCart(cart: Cart, products: Product[]): LineIssue[] {
   return out;
 }
 
-export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number }
+export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number; sku?: string; weight?: number }
 
 export function pricedLines(cart: Cart, products: Product[]): PricedLine[] {
   return cart.lines.flatMap((l) => {
     const f = variantById(products, l.vid);
     if (!f) return [];
-    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty }];
+    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty, sku: f.variant.sku, weight: f.product.weight }];
   });
 }
 
 /* ───────────── Coupons ───────────── */
 
-export interface Coupon { code: string; kind: 'percent' | 'fixed'; value: number; minSubtotal?: number; cat?: CatId; expires?: number; limit?: number; used: number }
-
-export function coupons(now: number): Coupon[] {
-  return [
-    { code: 'WELCOME10', kind: 'percent', value: 10, minSubtotal: 20_000, expires: now + 30 * DAY, limit: 500, used: 41 },
-    { code: 'AUTUMN15', kind: 'percent', value: 15, expires: now - 5 * DAY, used: 310 },
-    { code: 'OUD50', kind: 'fixed', value: 5_000, cat: 'perfume', used: 7 },
-    { code: 'VIP100', kind: 'fixed', value: 10_000, limit: 200, used: 200 },
-  ];
+export interface Coupon {
+  code: string; kind: 'percent' | 'fixed' | 'freeShip'; value: number; minSubtotal?: number; cat?: CatId; expires?: number; limit?: number; used: number;
+  /** Not yet started (epoch ms). */
+  starts?: number;
+  /** Paused by the merchant. */
+  paused?: boolean;
+  /** Drafts are not offered: they behave like an unknown code. */
+  hidden?: boolean;
+  /** Uses allowed per customer, and how many this customer already made. */
+  perCustomer?: number;
+  usedByCustomer?: number;
 }
 
 export type CouponResult =
-  | { status: 'valid'; code: string; discount: number; coupon: Coupon }
+  | { status: 'valid'; code: string; discount: number; coupon: Coupon; freeShip: boolean }
   | { status: 'not_found'; code: string }
+  | { status: 'inactive'; code: string }
+  | { status: 'per_customer'; code: string }
   | { status: 'expired'; code: string; expired: number }
   | { status: 'limit_reached'; code: string }
   | { status: 'not_eligible'; code: string; reason: 'category'; cat: CatId }
@@ -310,16 +257,19 @@ export type CouponResult =
 export function evaluateCoupon(input: string, lines: PricedLine[], all: Coupon[], now: number): CouponResult {
   const code = input.trim().toUpperCase();
   const c = all.find((x) => x.code === code);
-  if (!c) return { status: 'not_found', code };
+  if (!c || c.hidden) return { status: 'not_found', code };
   if (c.expires !== undefined && now > c.expires) return { status: 'expired', code, expired: c.expires };
+  if (c.paused || (c.starts !== undefined && now < c.starts)) return { status: 'inactive', code };
   if (c.limit !== undefined && c.used >= c.limit) return { status: 'limit_reached', code };
+  if (c.perCustomer !== undefined && (c.usedByCustomer ?? 0) >= c.perCustomer) return { status: 'per_customer', code };
   const eligible = c.cat ? lines.filter((l) => l.cat === c.cat) : lines;
   const base = eligible.reduce((s, l) => s + l.amount, 0);
   if (c.cat && base === 0) return { status: 'not_eligible', code, reason: 'category', cat: c.cat };
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
   if (c.minSubtotal !== undefined && subtotal < c.minSubtotal) return { status: 'not_eligible', code, reason: 'min_subtotal', shortBy: c.minSubtotal - subtotal, min: c.minSubtotal };
+  if (c.kind === 'freeShip') return { status: 'valid', code, discount: 0, coupon: c, freeShip: true };
   const raw = c.kind === 'percent' ? Math.round((base * c.value) / 100) : c.value;
-  return { status: 'valid', code, discount: Math.min(raw, base), coupon: c };
+  return { status: 'valid', code, discount: Math.min(raw, base), coupon: c, freeShip: false };
 }
 
 /* ───────────── Shipping & delivery estimates ───────────── */
@@ -336,10 +286,14 @@ export const CITIES: { id: CityId; name: L; zone: 0 | 1 | 2; districts: L[] }[] 
 ];
 
 export type ShipId = 'standard' | 'express' | 'pickup';
-export interface ShipMethod { id: ShipId; name: L; cost: number; zones: number[]; transit: Record<number, [number, number]>; note: L }
+export interface ShipMethod {
+  id: ShipId; name: L; cost: number; zones: number[]; transit: Record<number, [number, number]>; note: L;
+  /** Goods value (after discount) from which this method is free; null/absent = never free. */
+  freeFrom?: number | null;
+}
 
 export const SHIP_METHODS: ShipMethod[] = [
-  { id: 'standard', name: { ar: 'توصيل عادي', en: 'Standard delivery' }, cost: 2_500, zones: [0, 1, 2], transit: { 0: [1, 2], 1: [2, 3], 2: [3, 5] },
+  { id: 'standard', name: { ar: 'توصيل عادي', en: 'Standard delivery' }, cost: 2_500, freeFrom: MERCHANT.freeShippingFrom, zones: [0, 1, 2], transit: { 0: [1, 2], 1: [2, 3], 2: [3, 5] },
     note: { ar: 'مجاني للطلبات من 300 ر.س بعد الخصم', en: 'Free on orders from SAR 300 after discount' } },
   { id: 'express', name: { ar: 'توصيل سريع', en: 'Express delivery' }, cost: 4_500, zones: [0, 1], transit: { 0: [1, 1], 1: [1, 2] },
     note: { ar: 'للمدن الرئيسية فقط', en: 'Major cities only' } },
@@ -357,7 +311,7 @@ export function shipAvailable(m: ShipMethod, city?: CityId): boolean {
 
 /** Shipping cost after the free-delivery threshold; `goods` is the subtotal after discount. */
 export function shippingCost(m: ShipMethod, goods: number): number {
-  return m.id === 'standard' && goods >= MERCHANT.freeShippingFrom ? 0 : m.cost;
+  return m.freeFrom != null && goods >= m.freeFrom ? 0 : m.cost;
 }
 
 /** Saudi weekend is Friday and Saturday. */
@@ -385,11 +339,15 @@ export function deliveryEstimate(m: ShipMethod, city: CityId, now: number): { fr
 
 export interface Totals { subtotal: number; discount: number; shipping: number; codFee: number; total: number; vat: number }
 
-export function computeTotals(lines: { amount: number }[], o: { discount?: number; ship?: ShipMethod; cod?: boolean } = {}): Totals {
+/**
+ * `shipping` fixes the delivery charge (an order already placed); `freeShip` is a free-delivery coupon;
+ * `codFee` is the store's cash-on-delivery fee (the rule fixtures default to MERCHANT.codFee).
+ */
+export function computeTotals(lines: { amount: number }[], o: { discount?: number; ship?: ShipMethod; cod?: boolean; codFee?: number; freeShip?: boolean; shipping?: number } = {}): Totals {
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
   const discount = Math.min(o.discount ?? 0, subtotal);
-  const shipping = o.ship ? shippingCost(o.ship, subtotal - discount) : 0;
-  const codFee = o.cod ? MERCHANT.codFee : 0;
+  const shipping = o.freeShip ? 0 : o.shipping ?? (o.ship ? shippingCost(o.ship, subtotal - discount) : 0);
+  const codFee = o.cod ? o.codFee ?? MERCHANT.codFee : 0;
   const total = subtotal - discount + shipping + codFee;
   return { subtotal, discount, shipping, codFee, total, vat: vatIn(total) };
 }
@@ -397,14 +355,18 @@ export function computeTotals(lines: { amount: number }[], o: { discount?: numbe
 /* ───────────── Payment methods & eligibility ───────────── */
 
 export type PayMethod = 'card' | 'applepay' | 'bnpl' | 'cod';
-export type Ineligible = 'no_device' | 'cod_over_limit' | 'cod_open_limit' | 'bnpl_range' | 'pickup_cod';
+export type Ineligible = 'no_device' | 'cod_over_limit' | 'cod_under_min' | 'cod_open_limit' | 'bnpl_range' | 'pickup_cod';
 
-export function payEligibility(m: PayMethod, ctx: { total: number; applePayDevice: boolean; openCod: number; ship?: ShipId }): Ineligible | null {
+/** Limits default to the rule fixtures (MERCHANT); the live store passes the merchant's settings. `codOpenLimit: null` = no limit. */
+export function payEligibility(m: PayMethod, ctx: { total: number; applePayDevice: boolean; openCod: number; ship?: ShipId; codFee?: number; codMin?: number; codMax?: number; codOpenLimit?: number | null }): Ineligible | null {
   if (m === 'applepay' && !ctx.applePayDevice) return 'no_device';
   if (m === 'cod') {
+    const goods = ctx.total - (ctx.codFee ?? MERCHANT.codFee);
+    const openLimit = ctx.codOpenLimit === undefined ? MERCHANT.codOpenLimit : ctx.codOpenLimit;
     if (ctx.ship === 'pickup') return 'pickup_cod';
-    if (ctx.total - MERCHANT.codFee > MERCHANT.codMax) return 'cod_over_limit';
-    if (ctx.openCod >= MERCHANT.codOpenLimit) return 'cod_open_limit';
+    if (goods > (ctx.codMax ?? MERCHANT.codMax)) return 'cod_over_limit';
+    if (goods < (ctx.codMin ?? 0)) return 'cod_under_min';
+    if (openLimit !== null && ctx.openCod >= openLimit) return 'cod_open_limit';
   }
   if (m === 'bnpl' && (ctx.total < MERCHANT.bnplMin || ctx.total > MERCHANT.bnplMax)) return 'bnpl_range';
   return null;
@@ -452,7 +414,7 @@ export type RefundState = 'not_started' | 'pending' | 'refunded';
 export type ReturnReason = 'size' | 'not_as_described' | 'damaged' | 'changed_mind';
 
 export interface Address { name: string; phone: string; city: CityId; district: string; street: string; building: string; nationalCode?: string; notes?: string }
-export interface OrderLine { vid: string; productId: string; qty: number; unit: number; amount: number }
+export interface OrderLine { vid: string; productId: string; qty: number; unit: number; amount: number; sku?: string; name?: L }
 export interface Attempt { n: number; method: PayMethod; outcome: Outcome | 'cod' | 'challenge_pass' | 'challenge_fail' | 'verify_paid' | 'verify_failed' | 'verify_unknown'; at: number }
 export interface ReturnRequest { id: string; lines: { vid: string; qty: number; reason: ReturnReason }[]; method: 'pickup' | 'dropoff'; refundTo: 'original' | 'bank'; iban?: string; state: ReturnState; refund: RefundState; at: number; amount: number }
 export interface Order {
@@ -466,6 +428,8 @@ export interface Order {
   totals: Totals;
   address?: Address;
   ship: ShipId;
+  /** Name of the delivery method as offered at checkout. */
+  shipName?: L;
   eta?: { from: number; to: number };
   pay: { method: PayMethod; state: PayState; attempts: Attempt[] };
   ful: FulState;
@@ -487,6 +451,12 @@ export interface Draft {
   address?: Address;
   contact: { email?: string; phone: string };
   customerId?: string;
+  /** The delivery method offered for this city (live store); falls back to the rule fixtures by id. */
+  shipMethod?: ShipMethod;
+  /** Reference to use if a new order is created (the live store takes the merchant's next free number). */
+  ref?: string;
+  codFee?: number;
+  freeShip?: boolean;
 }
 
 /** Idempotency key: the same checkout session with the same basket, delivery and coupon is the same order. */
@@ -510,20 +480,20 @@ export function submitOrder(orders: Order[], d: Draft, now: number): { orders: O
     const refreshed: Order = { ...existing, address: d.address, contact: d.contact, customerId: d.customerId };
     return { orders: orders.map((o) => (o === existing ? refreshed : o)), order: refreshed, created: false };
   }
-  const ship = shipById(d.ship)!;
-  const totals = computeTotals(d.lines, { discount: d.discount, ship, cod: d.method === 'cod' });
+  const ship = d.shipMethod ?? shipById(d.ship)!;
+  const totals = computeTotals(d.lines, { discount: d.discount, ship, cod: d.method === 'cod', codFee: d.codFee, freeShip: d.freeShip });
   const eta = d.city ? deliveryEstimate(ship, d.city, now) : undefined;
   const order: Order = {
-    ref: nextRef(orders), key, at: now, customerId: d.customerId, contact: d.contact,
-    lines: d.lines.map(({ vid, productId, qty, unit, amount }) => ({ vid, productId, qty, unit, amount })),
-    coupon: d.coupon, totals, address: d.address, ship: d.ship, eta: eta && { from: eta.from, to: eta.to },
+    ref: d.ref ?? nextRef(orders), key, at: now, customerId: d.customerId, contact: d.contact,
+    lines: d.lines.map(({ vid, productId, qty, unit, amount, sku }) => ({ vid, productId, qty, unit, amount, ...(sku ? { sku } : {}) })),
+    coupon: d.coupon, totals, address: d.address, ship: d.ship, shipName: ship.name, eta: eta && { from: eta.from, to: eta.to },
     pay: { method: d.method, state: 'awaiting', attempts: [] }, ful: 'unfulfilled', shipment: 'none', returns: [],
   };
   return { orders: [order, ...orders], order, created: true };
 }
 
 /** Apply a payment event to an order. `applied` is false when the event is not allowed in the current state. */
-export function applyPayment(order: Order, e: PayEvent, method: PayMethod, now: number): { order: Order; applied: boolean } {
+export function applyPayment(order: Order, e: PayEvent, method: PayMethod, now: number, codFee = MERCHANT.codFee): { order: Order; applied: boolean } {
   const next = payTransition(order.pay.state, e);
   if (next === order.pay.state && !(e.type === 'verify' && order.pay.state === 'verifying')) return { order, applied: false };
   const outcome: Attempt['outcome'] =
@@ -533,7 +503,7 @@ export function applyPayment(order: Order, e: PayEvent, method: PayMethod, now: 
   const m = switching ? method : order.pay.method;
   // Changing the method changes the COD fee, so totals are recomputed only when a new attempt starts.
   const totals = switching && m !== order.pay.method
-    ? computeTotals(order.lines, { discount: order.totals.discount, ship: shipById(order.ship), cod: m === 'cod' })
+    ? computeTotals(order.lines, { discount: order.totals.discount, shipping: order.totals.shipping, cod: m === 'cod', codFee })
     : order.totals;
   const prevN = order.pay.attempts.at(-1)?.n ?? 0;
   const n = switching ? prevN + 1 : prevN;
@@ -566,14 +536,14 @@ export type ReturnBlock = 'not_delivered' | 'window_closed' | 'nothing_returnabl
 export function returnableQty(o: Order, vid: string, products: Product[]): number {
   const line = o.lines.find((l) => l.vid === vid);
   if (!line) return 0;
-  if (productById(products, line.productId)?.cat === 'perfume') return 0;
+  if (productById(products, line.productId)?.returnable === false) return 0;
   const already = o.returns.flatMap((r) => r.lines).filter((l) => l.vid === vid).reduce((s, l) => s + l.qty, 0);
   return Math.max(0, line.qty - already);
 }
 
-export function returnEligibility(o: Order, products: Product[], now: number): { ok: true; until: number } | { ok: false; reason: ReturnBlock; until?: number } {
+export function returnEligibility(o: Order, products: Product[], now: number, returnDays = MERCHANT.returnDays): { ok: true; until: number } | { ok: false; reason: ReturnBlock; until?: number } {
   if (o.shipment !== 'delivered' || !o.deliveredAt) return { ok: false, reason: 'not_delivered' };
-  const until = o.deliveredAt + MERCHANT.returnDays * DAY;
+  const until = o.deliveredAt + returnDays * DAY;
   if (now > until) return { ok: false, reason: 'window_closed', until };
   if (!o.lines.some((l) => returnableQty(o, l.vid, products) > 0)) return { ok: false, reason: 'nothing_returnable', until };
   return { ok: true, until };
@@ -589,8 +559,8 @@ export function refundEstimate(o: Order, picks: { vid: string; qty: number }[]):
 export const IBAN_RE = /^SA\d{2}[0-9A-Z]{20}$/;
 export const validIban = (s: string) => IBAN_RE.test(s.replace(/\s+/g, '').toUpperCase());
 
-export function requestReturn(o: Order, r: Omit<ReturnRequest, 'id' | 'state' | 'refund' | 'at' | 'amount'>, products: Product[], now: number): Order {
-  if (!returnEligibility(o, products, now).ok) return o;
+export function requestReturn(o: Order, r: Omit<ReturnRequest, 'id' | 'state' | 'refund' | 'at' | 'amount'>, products: Product[], now: number, returnDays = MERCHANT.returnDays): Order {
+  if (!returnEligibility(o, products, now, returnDays).ok) return o;
   const lines = r.lines.filter((l) => l.qty > 0 && l.qty <= returnableQty(o, l.vid, products));
   if (!lines.length) return o;
   const req: ReturnRequest = { ...r, lines, id: `RMA-${o.ref.replace(/\D/g, '')}-${o.returns.length + 1}`, state: 'requested', refund: 'not_started', at: now, amount: refundEstimate(o, lines) };

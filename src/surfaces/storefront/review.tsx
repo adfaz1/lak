@@ -8,7 +8,7 @@ import { link } from '../../core/router';
 import { Button, Segmented, cn, useTx } from '../../ds/ui';
 import { Select } from '../../ds/kit';
 import type { Outcome } from './domain';
-import { cartStore, catalogStore, sellOutFirstInBag, testStore, type TestState } from './state';
+import { cartStore, liveCatalog, sellOutFirstInBag, testStore, type TestState } from './state';
 import { variantById } from './domain';
 import { useS } from './kit';
 
@@ -54,7 +54,7 @@ export function ReviewPanel() {
   const sellOut = () => {
     const vid = sellOutFirstInBag();
     if (!vid) { setMsg(t.tpSellOutNone); return; }
-    const f = variantById(catalogStore.get(), vid);
+    const f = variantById(liveCatalog(), vid);
     setMsg(t.tpSellOutDone(f ? l(f.product.name) : vid));
   };
   return (

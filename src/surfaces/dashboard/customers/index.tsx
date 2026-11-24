@@ -5,9 +5,9 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Users, Lock, Mail, MessageSquare, StickyNote, Send, ShieldCheck, SearchX, UserX, ShoppingBag } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, replace, type Route } from '../../../core/router';
-import { ordersStore, notesStore, testStore } from '../../merchant/stores';
+import { customersStore, ordersStore, notesStore, testStore } from '../../merchant/stores';
 import { can, canSee } from '../../merchant/perms';
-import { customerFixtures, type Customer, type Segment } from '../../merchant/workspace';
+import type { Customer, Segment } from '../../merchant/workspace';
 import type { Order } from '../../merchant/domain';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, useTx, type Tone } from '../../../ds/ui';
 import { Alert, DataTable, Field, FilterChip, Modal, PageHeader, Pagination, SearchInput, Select, Simulated, Tabs, Textarea, useToast, type Column } from '../../../ds/kit';
@@ -19,7 +19,6 @@ import {
   type CustomerRow, type MsgChannel, type MsgProblem, type Purpose,
 } from './model';
 
-const CUSTOMERS = customerFixtures();
 const href = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard/customers${path ? `/${path}` : ''}`, q);
 
 export default function Customers({ route }: { route: Route }) {
@@ -61,6 +60,8 @@ function List({ route }: { route: Route }) {
   const n = useNames();
   const state = useDashState();
   const orders = ordersStore.use();
+  // The same customer list the online store adds new shoppers to.
+  const customers = customersStore.use();
   const role = testStore.use().role;
   const contact = can(role, 'customer.contact');
   const q = route.query.get('q') ?? '';
@@ -68,7 +69,7 @@ function List({ route }: { route: Route }) {
   const sort = parseSort(route.query.get('sort'));
   const empty = state === 'empty';
 
-  const all = useMemo(() => customerRows(empty ? [] : CUSTOMERS, orders), [orders, empty]);
+  const all = useMemo(() => customerRows(empty ? [] : customers, orders), [customers, orders, empty]);
   const counts = segmentCounts(all);
   const filtered = filterCustomers(all, { q, seg, sort, contact });
   const pg = paginate(filtered, Number(route.query.get('page')) || 1);
@@ -174,7 +175,7 @@ function Profile({ id }: { id: string }) {
   const state = useDashState();
   const orders = ordersStore.use();
   const role = testStore.use().role;
-  const c = CUSTOMERS.find((x) => x.id === id);
+  const c = customersStore.use().find((x) => x.id === id);
   const back = { href: href(), label: tx('العملاء', 'Customers') };
 
   if (state === 'loading') return <div className="space-y-6" aria-busy="true"><PageHeader back={back} title={<Skeleton className="h-8 w-56" />} /><ProfileSkeleton /></div>;

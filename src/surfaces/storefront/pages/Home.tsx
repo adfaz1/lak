@@ -6,20 +6,34 @@ import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
 import { Field, Input } from '../../../ds/kit';
 import { themeStore } from '../../merchant/stores';
 import type { Section } from '../../merchant/workspace';
-import { CATEGORIES, EMAIL_RE, MERCHANT, inStock, productById, type Product } from '../domain';
+import { EMAIL_RE, inStock, productById, type Product } from '../domain';
+import type { Coupon as MCoupon } from '../../merchant/growth';
+import { liveOffer } from '../bridge';
 import { H2, PANEL, ProductPhoto, WRAP, to, useS } from '../kit';
+import { hasPhoto } from '../photos';
 import { newsletterStore } from '../state';
-import { useCatalog } from '../data';
+import { useCatalog, useCategories, useConfig, useCoupons } from '../data';
 import { headingText, liveSections } from '../theme';
 import { ProductCard, ProductGrid } from './Listing';
 
-/** The merchant's own picks for "featured", in order; sold-out picks are skipped. */
-const FEATURED = ['night-oud', 'leather-tote', 'linen-abaya', 'crepe-shayla', 'satin-dress', 'white-musk', 'crepe-abaya', 'evening-clutch'];
-/** The product whose photo stands for each category tile. */
-const CAT_COVER: Record<string, string> = { abayas: 'embroidered-abaya', dresses: 'satin-dress', perfume: 'night-oud', scarves: 'crepe-shayla', bags: 'leather-tote' };
+/** Featured = products on sale first, then the catalogue order the merchant set; sold-out products are skipped. */
+const featured = (products: Product[]) => [...products].filter(inStock).sort((a, b) => Number(!!b.compareAt) - Number(!!a.compareAt) || a.rank - b.rank);
+/** The product whose photo stands for a category tile: the first one with a licensed photo, else the first. */
+const coverOf = (products: Product[], cat: string) => products.find((p) => p.cat === cat && hasPhoto(p.id)) ?? products.find((p) => p.cat === cat);
+
+/** Offer line for the homepage, from the merchant's coupon. */
+function OfferText({ c }: { c: MCoupon }) {
+  const { t, m } = useS();
+  const what = c.type === 'percent' ? t.offerPct(String(c.value)) : c.type === 'fixed' ? t.offerFixed(m(c.value)) : t.offerShip;
+  return <>{t.offerBody(what, c.minSpend ? m(c.minSpend) : '')} <bdi dir="ltr" className="rounded-md border border-dashed border-border px-1.5 py-0.5 font-semibold text-fg">{c.code}</bdi></>;
+}
+function offerTerms(c: MCoupon, s: ReturnType<typeof useS>) {
+  return s.t.offerTerms(c.limitPerCustomer === 1 ? '1' : '', c.ends ? s.d(Date.parse(`${c.ends}T12:00:00Z`)) : '');
+}
 
 export default function Home() {
   const { t, l } = useS();
+  const cfg = useConfig();
   const theme = themeStore.use();
   const products = useCatalog();
   const sections = liveSections(theme).filter((s) => s.kind !== 'announcement');
@@ -34,7 +48,7 @@ export default function Home() {
 
   return (
     <>
-      {!sections.some((s) => s.kind === 'hero') && <h1 className="sr-only">{l(MERCHANT.name)}</h1>}
+      {!sections.some((s) => s.kind === 'hero') && <h1 className="sr-only">{l(cfg.name)}</h1>}
       {sections.map((s) => <HomeSection key={s.id} s={s} products={products} />)}
       <Promises />
     </>
@@ -54,12 +68,17 @@ function SectionHead({ id, title, href }: { id: string; title: string; href?: st
 
 function HomeSection({ s, products }: { s: Section; products: Product[] }) {
   const { lang } = useLang();
-  const { t, l } = useS();
+  const s2 = useS();
+  const { t, l } = s2;
+  const cats = useCategories();
+  const cfg = useConfig();
+  const offer = liveOffer(useCoupons(), Date.now());
   const title = headingText(s.heading, lang);
   const hid = `sf-h-${s.id}`;
   switch (s.kind) {
     case 'hero': {
-      const cover = productById(products, 'embroidered-abaya') ?? products[0];
+      const cover = productById(products, 'p1') ?? products.find((p) => hasPhoto(p.id)) ?? products[0];
+      const second = cats.find((c) => c.id === 'fragrance') ?? cats[1];
       return (
         <section aria-labelledby={hid} className="bg-surface-2/60">
           <div className={cn(WRAP, 'grid items-center gap-8 py-6 sm:py-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:py-16')}>
@@ -68,14 +87,16 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
               <h1 id={hid} className="mt-3 text-[34px] font-semibold leading-[1.15] tracking-tight text-fg sm:text-5xl lg:text-[56px]">{title}</h1>
               <p className="mt-4 text-[15px] leading-relaxed text-muted sm:text-lg">{t.heroSub}</p>
               <div className="mt-7 flex flex-wrap gap-3">
-                <LinkButton href={to('/c/abayas')} size="lg" className="h-12 px-7">{t.heroCta}</LinkButton>
-                <LinkButton href={to('/c/perfume')} size="lg" variant="secondary" className="h-12 px-6">{t.heroCta2}</LinkButton>
+                <LinkButton href={to(`/c/${cover.cat}`)} size="lg" className="h-12 px-7">{t.heroCta}</LinkButton>
+                {second && second.id !== cover.cat && <LinkButton href={to(`/c/${second.id}`)} size="lg" variant="secondary" className="h-12 px-6">{second.id === 'fragrance' ? t.heroCta2 : l(second.name)}</LinkButton>}
               </div>
-              <p className="mt-6 flex items-center gap-2 text-[13px] text-muted">
-                <Tag className="size-4 shrink-0" aria-hidden="true" />
-                <span>{t.offerBody} <bdi dir="ltr" className="rounded-md border border-dashed border-border px-1.5 py-0.5 font-semibold text-fg">WELCOME10</bdi></span>
-                <InfoHint label={t.offerTitle}>{t.offerTerms}</InfoHint>
-              </p>
+              {offer && (
+                <p className="mt-6 flex items-center gap-2 text-[13px] text-muted">
+                  <Tag className="size-4 shrink-0" aria-hidden="true" />
+                  <span><OfferText c={offer} /></span>
+                  <InfoHint label={t.offerTitle}>{offerTerms(offer, s2)}</InfoHint>
+                </p>
+              )}
             </div>
             <a href={to(`/p/${cover.id}`)} className="group order-1 block lg:order-2" aria-label={l(cover.name)}>
               <ProductPhoto p={cover} variant="card" eager className="rounded-3xl shadow-[0_30px_60px_-30px_rgb(0_0_0/0.35)] sm:aspect-[5/4] lg:aspect-[4/5]" />
@@ -85,7 +106,7 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
       );
     }
     case 'featured': {
-      const list = FEATURED.map((id) => productById(products, id)).filter((p): p is Product => !!p && inStock(p)).slice(0, 4);
+      const list = featured(products).slice(0, 4);
       return (
         <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
           <SectionHead id={hid} title={title} href={to('/c/all')} />
@@ -98,13 +119,13 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
         <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
           <SectionHead id={hid} title={title} href={to('/c/all')} />
           <ul className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-5">
-            {CATEGORIES.map((c, i) => {
-              const p = productById(products, CAT_COVER[c.id]) ?? products.find((x) => x.cat === c.id);
-              const n = products.filter((x) => x.cat === c.id).length;
+            {cats.map((c, i) => {
+              const p = coverOf(products, c.id);
+              const n = c.count;
               return (
                 <li key={c.id} className={cn(i === 0 && 'col-span-2 md:col-span-1')}>
                   <a href={to(`/c/${c.id}`)} className="group relative block overflow-hidden rounded-2xl">
-                    {p ? <ProductPhoto p={p} color={p.colors.includes(c.tone) ? c.tone : undefined} className={cn('rounded-2xl', i === 0 && 'max-md:aspect-[16/10]')} /> : <span className="block aspect-[4/5] rounded-2xl bg-surface-2" />}
+                    {p ? <ProductPhoto p={p} className={cn('rounded-2xl', i === 0 && 'max-md:aspect-[16/10]')} /> : <span className="block aspect-[4/5] rounded-2xl bg-surface-2" />}
                     <span className="absolute inset-x-0 bottom-0 flex flex-col gap-0.5 bg-gradient-to-t from-black/65 to-transparent p-4 pt-14 text-white">
                       <span className="text-[15px] font-semibold leading-tight sm:text-base">{l(c.name)}</span>
                       <span className="text-xs opacity-85 tabular-nums">{t.resultN(String(n))}</span>
@@ -123,8 +144,8 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
           <SectionHead id={hid} title={title} />
           <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
             <div className={cn(PANEL, 'flex flex-col justify-between gap-4 p-6')}>
-              <div><p className="text-[13px] font-semibold text-brand-700 dark:text-brand-300">{t.offerTitle}</p><p className="mt-2 text-lg font-semibold">{t.offerBody} <bdi dir="ltr">WELCOME10</bdi></p></div>
-              <p className="text-xs text-muted">{t.offerTerms}</p>
+              {offer ? <><div><p className="text-[13px] font-semibold text-brand-700 dark:text-brand-300">{t.offerTitle}</p><p className="mt-2 text-lg font-semibold"><OfferText c={offer} /></p></div>
+              <p className="text-xs text-muted">{offerTerms(offer, s2)}</p></> : <p className="text-muted">{t.noOffers}</p>}
             </div>
             {sale.length ? <ul className="grid grid-cols-2 gap-x-3 gap-y-8 sm:gap-x-5 md:grid-cols-3">{sale.map((p) => <li key={p.id}><ProductCard p={p} /></li>)}</ul> : <p className="text-muted">{t.noOffers}</p>}
           </div>
@@ -136,7 +157,7 @@ function HomeSection({ s, products }: { s: Section; products: Product[] }) {
       return (
         <section aria-labelledby={hid} className={cn(WRAP, 'pt-16 sm:pt-20')}>
           <div className={cn(PANEL, 'grid gap-6 p-6 sm:p-10 lg:grid-cols-2')}>
-            <div><h2 id={hid} className={H2}>{title}</h2><p className="mt-3 leading-relaxed text-muted">{t.aboutBody}</p></div>
+            <div><h2 id={hid} className={H2}>{title}</h2><p className="mt-3 leading-relaxed text-muted">{t.aboutBody(l(cfg.name))}</p></div>
             <ul className="space-y-3 text-sm">{t.craft.map((c) => <li key={c} className="flex gap-3"><Check className="mt-0.5 size-4 shrink-0 text-brand-700 dark:text-brand-300" aria-hidden="true" />{c}</li>)}</ul>
           </div>
         </section>
@@ -187,10 +208,11 @@ function Newsletter({ id, title }: { id: string; title: string }) {
 
 function Promises() {
   const { t } = useS();
+  const cfg = useConfig();
   const items = [
     { icon: Truck, h: t.vDelivery, d: t.vDeliveryD, href: to('/page/shipping') },
-    { icon: RotateCcw, h: t.vReturns, d: t.vReturnsD, href: to('/page/returns') },
-    { icon: CreditCard, h: t.vPay, d: t.vPayD, href: to('/page/terms') },
+    { icon: RotateCcw, h: t.vReturns(String(cfg.returnDays)), d: t.vReturnsD, href: to('/page/returns') },
+    { icon: CreditCard, h: t.vPay, d: t.vPayD(cfg.methods.map((x) => t.methods[x]).join(t.listSep)), href: to('/page/terms') },
     { icon: Receipt, h: t.vVat, d: t.vVatD, href: to('/page/terms') },
   ];
   return (

@@ -74,7 +74,7 @@ export function storeCss(): string {
 
 /** English for the merchant's fixture headings. Headings the merchant typed later are shown as written. */
 const KNOWN: Record<string, L> = {
-  'توصيل مجاني للطلبات من 300 ر.س داخل المملكة': { ar: 'توصيل مجاني للطلبات من 300 ر.س داخل المملكة', en: 'Free delivery on orders from SAR 300 across Saudi Arabia' },
+  'توصيل مجاني للطلبات من 300 ر.س في منطقة الرياض': { ar: 'توصيل مجاني للطلبات من 300 ر.س في منطقة الرياض', en: 'Free delivery on orders from SAR 300 in the Riyadh region' },
   'تشكيلة العبايات المطرّزة': { ar: 'تشكيلة العبايات المطرّزة', en: 'The embroidered abaya edit' },
   'وصل حديثًا لموسم الخريف': { ar: 'وصل حديثًا لموسم الخريف', en: 'New in for autumn' },
   'الأكثر مبيعًا': { ar: 'الأكثر مبيعًا', en: 'Best sellers' },

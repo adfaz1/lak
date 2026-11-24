@@ -48,11 +48,11 @@ describe('homepage sections from the published theme', () => {
 });
 
 describe('product photos', () => {
-  it('uses a licensed photo only where it shows that product, and says which colour it shows', () => {
-    expect(photoFor('embroidered-abaya')?.src).toBe('/products/p1.jpg');
-    expect(photoFor('leather-tote', 'black')?.shownColor).toBe('camel');
-    expect(photoFor('leather-tote', 'camel')?.shownColor).toBeUndefined();
-    expect(photoFor('satin-dress')).toBeUndefined();
-    expect(photoFor('night-oud', undefined, 'thumb')?.src).toBe('/products/thumb/p3.jpg');
+  it('uses the licensed photo of the merchant product, and says which colour it shows', () => {
+    expect(photoFor('p1')?.src).toBe('/products/p1.jpg');
+    expect(photoFor('p1', 'Navy')?.shownColor).toBe('Black');
+    expect(photoFor('p1', 'Black')?.shownColor).toBeUndefined();
+    expect(photoFor('p7')).toBeUndefined();
+    expect(photoFor('p3', undefined, 'thumb')?.src).toBe('/products/thumb/p3.jpg');
   });
 });

@@ -1,12 +1,13 @@
 // Storefront building blocks on the LAK design system (src/ds), dressed in the merchant's brand (theme.ts).
 import { useState, type ReactNode } from 'react';
-import { ChevronLeft, ChevronRight, Droplet, ImageOff, Minus, Plus, Ribbon, Shirt, ShoppingBag, Trash2, Check, Info, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Droplet, Gift, ImageOff, Lamp, Minus, Package, Plus, Ribbon, Shirt, ShoppingBag, Trash2, Check, Info, X, type LucideIcon } from 'lucide-react';
 import { formatMoney } from '../../core/format';
 import { useLang, type L, type Lang } from '../../core/lang';
 import { link } from '../../core/router';
 import { Money, cn } from '../../ds/ui';
 import { Input } from '../../ds/kit';
-import { CATEGORIES, CITIES, COLORS, type CityId, type ColorId, type CouponResult, type Product, type Totals } from './domain';
+import { CITIES, colorInfo, type CityId, type ColorId, type CouponResult, type Product, type Totals } from './domain';
+import { couponsStore } from '../merchant/stores';
 import { strings, type Strings } from './i18n';
 import { photoFor } from './photos';
 import { cartStore, couponResult } from './state';
@@ -41,7 +42,7 @@ export function districtLabel(city: CityId | undefined, d: string, lang: Lang): 
 }
 
 export function variantLabel(_p: Product, color: ColorId | undefined, size: string | undefined, lang: Lang): string {
-  return [color && COLORS[color].name[lang], size && sizeLabel(size, lang)].filter(Boolean).join(' · ');
+  return [color && colorInfo(color).name[lang], size && sizeLabel(size, lang)].filter(Boolean).join(' · ');
 }
 
 /* ───────────── Layout ───────────── */
@@ -70,7 +71,8 @@ export function Crumbs({ items }: { items: { label: ReactNode; href?: string }[]
 
 /* ───────────── Product photo or placeholder ───────────── */
 
-const KIND_ICON = { abaya: Shirt, dress: Shirt, perfume: Droplet, scarf: Ribbon, bag: ShoppingBag };
+/** Placeholder icon by category slug (merchant categories) or kind (rule fixtures). */
+const KIND_ICON: Record<string, LucideIcon> = { fashion: Shirt, abaya: Shirt, dress: Shirt, fragrance: Droplet, perfume: Droplet, scarf: Ribbon, bags: ShoppingBag, bag: ShoppingBag, home: Lamp, gifts: Gift };
 
 /**
  * Product image box with a fixed aspect so nothing jumps while photos load. Licensed photos where one shows the
@@ -80,9 +82,10 @@ export function ProductPhoto({ p, color, variant = 'card', className, eager }: {
   const { t, l } = useS();
   const [broken, setBroken] = useState(false);
   const ph = photoFor(p.id, color, variant === 'thumb' ? 'thumb' : 'large');
-  const tint = COLORS[color ?? p.colors[0] ?? 'sand']?.hex ?? '#cdb796';
-  const Icon = KIND_ICON[p.kind];
-  const alt = color ? `${l(p.name)} – ${l(COLORS[color].name)}` : l(p.name);
+  const c0 = color ?? p.colors[0];
+  const tint = c0 ? colorInfo(c0).hex : '#cdb796';
+  const Icon = KIND_ICON[p.kind] ?? Package;
+  const alt = color ? `${l(p.name)} – ${l(colorInfo(color).name)}` : l(p.name);
   return (
     <span className={cn('relative block overflow-hidden bg-surface-2', variant === 'thumb' ? 'aspect-square rounded-xl' : 'aspect-[4/5] rounded-2xl', className)}>
       {ph && !broken ? (
@@ -98,7 +101,7 @@ export function ProductPhoto({ p, color, variant = 'card', className, eager }: {
         </span>
       )}
       {ph && !broken && ph.shownColor && variant === 'hero' && (
-        <span className="absolute bottom-3 start-3 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white backdrop-blur">{t.shownIn(l(COLORS[ph.shownColor].name))}</span>
+        <span className="absolute bottom-3 start-3 rounded-full bg-black/55 px-3 py-1 text-xs font-medium text-white backdrop-blur">{t.shownIn(l(colorInfo(ph.shownColor).name))}</span>
       )}
     </span>
   );
@@ -118,7 +121,7 @@ export function Price({ v, compareAt, from, className }: { v: number; compareAt?
 }
 
 export function Swatch({ c, size = 14, className }: { c: ColorId; size?: number; className?: string }) {
-  return <span aria-hidden="true" className={cn('inline-block shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20', className)} style={{ background: COLORS[c].hex, width: size, height: size }} />;
+  return <span aria-hidden="true" className={cn('inline-block shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20', className)} style={{ background: colorInfo(c).hex, width: size, height: size }} />;
 }
 
 /** Quantity control with 44px targets. At 1 the minus becomes "remove" when `onRemove` is given. */
@@ -165,14 +168,20 @@ export function Breakdown({ totals, shippingLabel, shippingNote, coupon, shippin
   );
 }
 
-export function couponMessage(c: CouponResult, s: Ctx): string {
+export function couponMessage(c: CouponResult, s: Ctx, products: Product[] = []): string {
   const { t, m, d, l } = s;
   switch (c.status) {
-    case 'valid': return t.cValid(c.code);
+    case 'valid': return c.freeShip ? `${t.cValid(c.code)} · ${t.cFreeShip}` : t.cValid(c.code);
     case 'not_found': return t.cNotFound;
+    case 'inactive': return t.cInactive;
+    case 'per_customer': return t.cPerCustomer;
     case 'expired': return t.cExpired(d(c.expired));
     case 'limit_reached': return t.cLimit;
-    case 'not_eligible': return c.reason === 'category' ? t.cCat(l(CATEGORIES.find((x) => x.id === c.cat)!.name)) : t.cMin(m(c.min), m(c.shortBy));
+    case 'not_eligible': {
+      if (c.reason !== 'category') return t.cMin(m(c.min), m(c.shortBy));
+      const cat = products.find((p) => p.cat === c.cat)?.catName;
+      return t.cCat(cat ? l(cat) : c.cat);
+    }
   }
 }
 
@@ -180,6 +189,7 @@ export function CouponBox({ idp = 'sf-coupon', products }: { idp?: string; produ
   const s = useS();
   const { t } = s;
   const cart = cartStore.use();
+  couponsStore.use();
   const [code, setCode] = useState(cart.coupon ?? '');
   const [open, setOpen] = useState(!!cart.coupon);
   const res = couponResult(cart, products);
@@ -198,7 +208,7 @@ export function CouponBox({ idp = 'sf-coupon', products }: { idp?: string; produ
       {res && (
         <div id={`${idp}-msg`} role="status" className={cn('flex items-start gap-2 rounded-xl px-3 py-2 text-[13px]', ok ? 'bg-emerald-500/10 text-emerald-800 dark:text-emerald-300' : 'bg-amber-500/10 text-amber-900 dark:text-amber-200')}>
           {ok ? <Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" /> : <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />}
-          <span className="flex-1">{couponMessage(res, s)}</span>
+          <span className="flex-1">{couponMessage(res, s, products)}</span>
           <button type="button" aria-label={t.couponRemove} title={t.couponRemove} className="grid size-6 shrink-0 place-items-center rounded-md hover:bg-black/5 dark:hover:bg-white/10"
             onClick={() => { cartStore.set((c) => ({ ...c, coupon: undefined })); setCode(''); }}><X className="size-3.5" aria-hidden="true" /></button>
         </div>

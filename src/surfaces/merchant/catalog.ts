@@ -69,6 +69,7 @@ export function productFixtures(): Product[] {
 const COLOR_AR: Record<string, string> = {
   black: 'أسود', navy: 'كحلي', white: 'أبيض', beige: 'بيج', olive: 'زيتي', sand: 'رملي', grey: 'رمادي', gray: 'رمادي', brown: 'بني', tan: 'بني فاتح',
   red: 'أحمر', blue: 'أزرق', green: 'أخضر', gold: 'ذهبي', pink: 'وردي', cream: 'كريمي', burgundy: 'عنابي', camel: 'جملي',
+  ivory: 'عاجي', rose: 'وردي هادئ',
 };
 export const colorText = (c: string, lang: 'ar' | 'en'): string => (lang === 'ar' ? COLOR_AR[c.trim().toLowerCase()] ?? c : c);
 /** "Black / L" in both languages. */

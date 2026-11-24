@@ -4,12 +4,12 @@ import { replace, type Route } from '../../../core/router';
 import { Button, EmptyState, LinkButton, cn } from '../../../ds/ui';
 import { Drawer, Select } from '../../../ds/kit';
 import {
-  CATEGORIES, COLORS, PRICE_BANDS, SORTS, facets, fromPrice, hasPriceRange, inStock, listProducts,
+  PRICE_BANDS, SORTS, colorInfo, facets, fromPrice, hasPriceRange, inStock, listProducts,
   type CatId, type ColorId, type ListQuery, type PriceBand, type Product, type Sort,
 } from '../domain';
 import { Crumbs, H1, Price, ProductPhoto, Swatch, WRAP, sizeLabel, to, useS } from '../kit';
 import { accountStore, toggleWish } from '../state';
-import { useCatalog } from '../data';
+import { useCatalog, useCategories } from '../data';
 
 const csv = (s: string | null) => (s ? s.split(',').filter(Boolean) : []);
 
@@ -21,7 +21,7 @@ export function readQuery(route: Route, cat?: CatId): ListQuery {
     q: route.query.get('q') ?? undefined,
     sort: sort && SORTS.includes(sort) ? sort : 'featured',
     sizes: csv(route.query.get('size')),
-    colors: csv(route.query.get('color')).filter((c): c is ColorId => c in COLORS),
+    colors: csv(route.query.get('color')) as ColorId[],
     inStockOnly: route.query.get('stock') === '1',
     price: price && price in PRICE_BANDS ? price : undefined,
   };
@@ -39,7 +39,8 @@ const chip = 'inline-flex h-10 cursor-pointer select-none items-center gap-2 rou
 export default function Listing({ route, cat, search }: { route: Route; cat?: string; search?: boolean }) {
   const { t, l, lang } = useS();
   const products = useCatalog();
-  const category = CATEGORIES.find((c) => c.id === cat);
+  const cats = useCategories();
+  const category = cats.find((c) => c.id === cat);
   const validCat = search || cat === 'all' || !!category;
   const base = search ? '/search' : `/c/${cat ?? 'all'}`;
   const q = readQuery(route, category?.id);
@@ -52,7 +53,7 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
   const toggle = <T,>(arr: T[], v: T) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
   const nActive = q.sizes.length + q.colors.length + (q.inStockOnly ? 1 : 0) + (q.price ? 1 : 0);
   const clear = () => set({ sizes: [], colors: [], inStockOnly: false, price: undefined });
-  const isPerfume = category?.id === 'perfume';
+  const isPerfume = category?.id === 'fragrance';
 
   if (!validCat) {
     return (
@@ -76,7 +77,7 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
         <label key={s} className={chip}><input type="checkbox" className="sr-only" checked={q.sizes.includes(s)} onChange={() => set({ sizes: toggle(q.sizes, s) })} /><bdi>{sizeLabel(s, lang)}</bdi></label>
       )))}
       {f.colors.length > 0 && group(t.color, f.colors.map((c) => (
-        <label key={c} className={chip}><input type="checkbox" className="sr-only" checked={q.colors.includes(c)} onChange={() => set({ colors: toggle(q.colors, c) })} /><Swatch c={c} />{l(COLORS[c].name)}</label>
+        <label key={c} className={chip}><input type="checkbox" className="sr-only" checked={q.colors.includes(c)} onChange={() => set({ colors: toggle(q.colors, c) })} /><Swatch c={c} />{l(colorInfo(c).name)}</label>
       )))}
       {group(t.price, (Object.keys(PRICE_BANDS) as PriceBand[]).map((b) => (
         <label key={b} className={chip}><input type="checkbox" className="sr-only" checked={q.price === b} onChange={() => set({ price: q.price === b ? undefined : b })} />{t.bands[b]}</label>
@@ -87,7 +88,7 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
 
   const chips = [
     ...q.sizes.map((s) => ({ k: `s-${s}`, label: sizeLabel(s, lang), off: () => set({ sizes: q.sizes.filter((x) => x !== s) }) })),
-    ...q.colors.map((c) => ({ k: `c-${c}`, label: l(COLORS[c].name), off: () => set({ colors: q.colors.filter((x) => x !== c) }) })),
+    ...q.colors.map((c) => ({ k: `c-${c}`, label: l(colorInfo(c).name), off: () => set({ colors: q.colors.filter((x) => x !== c) }) })),
     ...(q.price ? [{ k: 'p', label: t.bands[q.price], off: () => set({ price: undefined }) }] : []),
     ...(q.inStockOnly ? [{ k: 'st', label: t.inStockOnly, off: () => set({ inStockOnly: false }) }] : []),
   ];
@@ -114,7 +115,7 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
 
       {!search && (
         <nav aria-label={t.cats} className="scrollbar-thin -mx-4 mt-5 flex gap-2 overflow-x-auto px-4 pb-1 lg:hidden">
-          {[{ id: 'all', name: t.all }, ...CATEGORIES.map((c) => ({ id: c.id, name: l(c.name) }))].map((c) => (
+          {[{ id: 'all', name: t.all }, ...cats.map((c) => ({ id: c.id, name: l(c.name) }))].map((c) => (
             <a key={c.id} href={to(`/c/${c.id}`)} aria-current={cat === c.id ? 'page' : undefined}
               className={cn('inline-flex h-9 shrink-0 items-center rounded-full border px-4 text-[13px] font-medium', cat === c.id ? 'border-fg bg-fg text-bg' : 'border-border bg-surface text-muted')}>{c.name}</a>
           ))}
@@ -184,9 +185,10 @@ export default function Listing({ route, cat, search }: { route: Route; cat?: st
 
 function CatLinks({ center }: { center?: boolean }) {
   const { l } = useS();
+  const cats = useCategories();
   return (
     <ul className={cn('mt-4 flex flex-wrap gap-2', center && 'justify-center')}>
-      {CATEGORIES.map((c) => <li key={c.id}><a href={to(`/c/${c.id}`)} className="inline-flex h-10 items-center rounded-full border border-border bg-surface px-4 text-sm font-medium hover:border-fg/40">{l(c.name)}</a></li>)}
+      {cats.map((c) => <li key={c.id}><a href={to(`/c/${c.id}`)} className="inline-flex h-10 items-center rounded-full border border-border bg-surface px-4 text-sm font-medium hover:border-fg/40">{l(c.name)}</a></li>)}
     </ul>
   );
 }
@@ -221,7 +223,7 @@ export function ProductCard({ p, eager }: { p: Product; eager?: boolean }) {
           {p.colors.length > 1 && (
             <span className="flex items-center gap-1.5 pt-1">
               {p.colors.map((c) => <Swatch key={c} c={c} size={12} />)}
-              <span className="sr-only">{p.colors.map((c) => l(COLORS[c].name)).join('، ')}</span>
+              <span className="sr-only">{p.colors.map((c) => l(colorInfo(c).name)).join('، ')}</span>
             </span>
           )}
         </span>

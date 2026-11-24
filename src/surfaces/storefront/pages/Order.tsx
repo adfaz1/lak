@@ -1,15 +1,15 @@
 import { useState, type ReactNode } from 'react';
 import { AlertTriangle, Check, CheckCircle2, Clock, FlaskConical, PackageCheck, RefreshCw, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
-import { navigate, type Route } from '../../../core/router';
+import { link, navigate, type Route } from '../../../core/router';
 import { Alert, Field, Input } from '../../../ds/kit';
 import { Badge, Button, EmptyState, LinkButton, Money, Ref, cn, useTx, type Tone } from '../../../ds/ui';
 import {
-  addToCart, advanceFulfilment, canAdvance, cityById, cleanPhone, isSettled, returnEligibility, shipById, variantById,
+  addToCart, cityById, cleanPhone, isSettled, returnEligibility, shipById, variantById,
   type FulState, type Order, type PayState, type ShipState,
 } from '../domain';
 import { Breakdown, Crumbs, H1, H3, PANEL, ProductPhoto, SimNote, WRAP, districtLabel, to, useS, variantLabel } from '../kit';
 import { CUSTOMER, accountStore, cartStore, checkStatus, updateOrder } from '../state';
-import { useCatalog, useOrders } from '../data';
+import { useCatalog, useConfig, useOrders } from '../data';
 import { simNow, useSim } from '../review';
 
 export const payTone = (s: PayState): Tone =>
@@ -19,7 +19,8 @@ export const shipTone = (s: ShipState): Tone => (s === 'delivered' ? 'green' : s
 
 /** Who may see an order: the signed-in owner, the session that placed it, or someone who knows reference + mobile. */
 export function canView(o: Order, mobile?: string | null): boolean {
-  if (!o.key.startsWith('fixture-')) return true;
+  // Orders placed in this session are visible here; history and other customers' orders need the account or the mobile.
+  if (!o.key.startsWith('fixture-') && !o.key.startsWith('m-')) return true;
   if (accountStore.get().signedIn && o.customerId === CUSTOMER.id) return true;
   return !!mobile && cleanPhone(mobile) === o.contact.phone;
 }
@@ -40,12 +41,22 @@ export function Lines({ o }: { o: Order }) {
     <ul className="space-y-4">
       {o.lines.map((line) => {
         const f = variantById(products, line.vid);
-        if (!f) return null;
+        const qtyBadge = <span className="absolute -top-2 -end-2 grid min-w-5 place-items-center rounded-full bg-fg px-1.5 text-[11px] font-bold leading-5 text-bg tabular-nums">{line.qty}</span>;
+        // A product no longer sold online still shows under the name it was bought with.
+        if (!f) {
+          return (
+            <li key={line.vid} className="flex items-center gap-3">
+              <span className="relative w-14 shrink-0"><span className="block aspect-square rounded-xl bg-surface-2" aria-hidden="true" />{qtyBadge}</span>
+              <span className="min-w-0 flex-1"><span className="line-clamp-1 block text-sm font-medium">{line.name ? l(line.name) : line.sku}</span></span>
+              <Money v={line.amount} className="text-sm" />
+            </li>
+          );
+        }
         return (
           <li key={line.vid} className="flex items-center gap-3">
             <span className="relative w-14 shrink-0">
               <ProductPhoto p={f.product} color={f.variant.color} variant="thumb" />
-              <span className="absolute -top-2 -end-2 grid min-w-5 place-items-center rounded-full bg-fg px-1.5 text-[11px] font-bold leading-5 text-bg tabular-nums">{line.qty}</span>
+              {qtyBadge}
             </span>
             <span className="min-w-0 flex-1"><span className="line-clamp-1 block text-sm font-medium">{l(f.product.name)}</span><span className="block text-xs text-muted">{variantLabel(f.product, f.variant.color, f.variant.size, lang)}</span></span>
             <Money v={line.amount} className="text-sm" />
@@ -59,6 +70,7 @@ export function Lines({ o }: { o: Order }) {
 function Details({ o, stack }: { o: Order; stack?: boolean }) {
   const { t, l, lang, dl } = useS();
   const sm = shipById(o.ship)!;
+  const shipName = o.shipName ?? sm.name;
   const h = 'mb-1 text-xs font-semibold text-muted';
   return (
     <div className={cn('grid gap-5 text-sm', !stack && 'sm:grid-cols-3')}>
@@ -74,7 +86,7 @@ function Details({ o, stack }: { o: Order; stack?: boolean }) {
       )}
       <div>
         <h3 className={h}>{t.sShip}</h3>
-        <p>{l(sm.name)}</p>
+        <p>{l(shipName)}</p>
         {o.eta && o.ship !== 'pickup' && <p className="text-muted">{t.etaRange(dl(o.eta.from), dl(o.eta.to))}</p>}
       </div>
       <div>
@@ -173,12 +185,13 @@ export function OrderPage({ reference }: { reference: string }) {
 export function TrackLookup({ route }: { route: Route }) {
   const { t } = useS();
   const orders = useOrders();
+  const sample = orders.find((x) => x.key.startsWith('m-') && x.customerId === CUSTOMER.id);
   const [ref, setRef] = useState(route.query.get('ref') ?? '');
   const [mobile, setMobile] = useState('');
   const [miss, setMiss] = useState(false);
   const find = () => {
     const r = ref.trim().toUpperCase().replace(/^#/, '');
-    const o = orders.find((x) => x.ref === r || x.ref === `DN-${r}`);
+    const o = orders.find((x) => x.ref === r);
     if (o && cleanPhone(mobile) === o.contact.phone) navigate(to(`/track/${o.ref}`, { m: cleanPhone(mobile) }));
     else setMiss(true);
   };
@@ -188,7 +201,7 @@ export function TrackLookup({ route }: { route: Route }) {
       <p className="mt-2 text-muted">{t.trackSub}</p>
       <form className={cn(PANEL, 'mt-6 space-y-4 p-5 sm:p-6')} noValidate onSubmit={(e) => { e.preventDefault(); find(); }}>
         <Field id="sf-t-ref" label={t.ref}>
-          {(p) => <Input {...p} dir="ltr" value={ref} placeholder="DN-24788" className="h-11" onChange={(e) => { setRef(e.target.value); setMiss(false); }} />}
+          {(p) => <Input {...p} dir="ltr" value={ref} placeholder={sample?.ref ?? '10484'} className="h-11" onChange={(e) => { setRef(e.target.value); setMiss(false); }} />}
         </Field>
         <Field id="sf-t-m" label={t.phone} error={miss ? t.noTrackMatch : null}>
           {(p) => (
@@ -200,7 +213,7 @@ export function TrackLookup({ route }: { route: Route }) {
         </Field>
         <Button type="submit" size="lg" className="w-full">{t.find}</Button>
       </form>
-      <p className="mt-4 text-xs text-muted">{t.sampleOrder} <Ref>DN-24788</Ref> · <Ref>501234567</Ref></p>
+      {sample && <p className="mt-4 text-xs text-muted">{t.sampleOrder} <Ref>{sample.ref}</Ref> · <Ref>{sample.contact.phone}</Ref></p>}
     </div>
   );
 }
@@ -213,6 +226,7 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
   const orders = useOrders();
   accountStore.use();
   const products = useCatalog();
+  const cfg = useConfig();
   const sim = useSim();
   const [reordered, setReordered] = useState<string | null>(null);
   const mobile = route.query.get('m');
@@ -226,7 +240,7 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
     { k: 'out', label: t.steps.out, done: SHIP_STEPS.indexOf(o.shipment) >= 2 },
     { k: 'delivered', label: t.steps.delivered, done: o.shipment === 'delivered' },
   ];
-  const ret = returnEligibility(o, products, Date.now());
+  const ret = returnEligibility(o, products, Date.now(), cfg.returnDays);
   const reorder = () => {
     let added = 0;
     cartStore.set((c) => o.lines.reduce((acc, line) => {
@@ -283,18 +297,18 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
               </div>
             ))}
             <div className="flex flex-wrap gap-2 pt-1">
-              {o.shipment === 'delivered' && !o.received && <Button variant="secondary" onClick={() => updateOrder(o.ref, (x) => ({ ...x, received: true }))}><PackageCheck className="size-4" aria-hidden="true" />{t.confirmReceived}</Button>}
+              {o.shipment === 'delivered' && !o.received && <Button variant="secondary" onClick={() => updateOrder(o.ref, (x) => ({ ...x, received: true }), o)}><PackageCheck className="size-4" aria-hidden="true" />{t.confirmReceived}</Button>}
               {ret.ok && <LinkButton variant="secondary" href={to(`/returns/${o.ref}`, mobile ? { m: mobile } : undefined)}><RotateCcw className="size-4" aria-hidden="true" />{t.requestReturn}</LinkButton>}
               <Button variant="secondary" onClick={reorder}><ShoppingBag className="size-4" aria-hidden="true" />{t.reorder}</Button>
             </div>
             {o.received && <p className="flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400" role="status"><Check className="size-4" aria-hidden="true" />{t.received}</p>}
             {reordered && <p className="text-sm" role="status">{reordered} <a className="font-semibold underline underline-offset-2" href={to('/cart')}>{t.viewBag}</a></p>}
             {ret.ok && <p className="text-xs text-muted">{t.returnUntil(d(ret.until))}</p>}
-            {!ret.ok && ret.reason === 'window_closed' && ret.until && <p className="text-xs text-muted">{t.windowClosed(d(ret.until))}</p>}
+            {!ret.ok && ret.reason === 'window_closed' && ret.until && <p className="text-xs text-muted">{t.windowClosed(d(ret.until), String(cfg.returnDays))}</p>}
             {!ret.ok && ret.reason === 'nothing_returnable' && <p className="text-xs text-muted">{t.nothingReturnable}</p>}
           </section>
 
-          <section aria-labelledby="sf-att-h" className={cn(PANEL, 'p-5 sm:p-6')}>
+          {o.pay.attempts.length > 0 && <section aria-labelledby="sf-att-h" className={cn(PANEL, 'p-5 sm:p-6')}>
             <h2 id="sf-att-h" className={cn(H3, 'mb-3')}>{t.attempts}</h2>
             <ol className="space-y-3">
               {o.pay.attempts.map((a, i) => (
@@ -306,13 +320,13 @@ export function TrackPage({ reference, route }: { reference: string; route: Rout
               ))}
             </ol>
             <SimNote className="mt-4">{t.notifySim}</SimNote>
-          </section>
+          </section>}
 
           {sim.review && (
             <div className="space-y-2 rounded-2xl border border-dashed border-border p-4 text-sm">
               <p className="flex items-center gap-2 font-semibold"><FlaskConical className="size-4 text-muted" aria-hidden="true" />{tx('وضع المراجعة', 'Review mode')}</p>
               <p className="text-[13px] text-muted">{t.advanceNote}</p>
-              <Button size="sm" variant="secondary" disabled={!canAdvance(o)} onClick={() => updateOrder(o.ref, (x) => advanceFulfilment(x, Date.now()))}>{t.advance}</Button>
+              <LinkButton size="sm" variant="secondary" href={link(`/dashboard/orders/${o.ref}`)}>{t.advance}</LinkButton>
               {!isSettled(o.pay.state) && <p className="text-[13px]">{t.cantAdvancePay}</p>}
             </div>
           )}

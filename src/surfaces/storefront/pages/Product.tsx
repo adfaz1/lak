@@ -6,17 +6,20 @@ import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
 import { settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
-  CATEGORIES, CITIES, COLORS, SHIP_METHODS, addToCart, deliveryEstimate, findVariant, inStock, missingOptions, productById,
+  addToCart, colorInfo, deliveryEstimate, findVariant, inStock, missingOptions, productById,
   stockLevel, type CityId, type ColorId,
 } from '../domain';
 import { Crumbs, H2, PANEL, Price, ProductPhoto, Stepper, Swatch, WRAP, sizeLabel, to, useS, variantLabel } from '../kit';
 import { accountStore, cartStore, toggleWish } from '../state';
-import { useCatalog } from '../data';
+import { useCatalog, useCategories, useConfig } from '../data';
+import { deliverableCities, standardFor } from '../bridge';
 import { ProductGrid } from './Listing';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
-  const { t, l, lang, dl } = useS();
+  const { t, l, lang, dl, m } = useS();
   const products = useCatalog();
+  const cats = useCategories();
+  const cfg = useConfig();
   const cart = cartStore.use();
   const acc = accountStore.use();
   const canOrder = shopperView(settingsStore.use().status) === 'open';
@@ -46,10 +49,11 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const inBag = variant ? cart.lines.find((x) => x.vid === variant.id)?.qty ?? 0 : 0;
   const room = variant ? Math.max(0, variant.stock - inBag) : 0;
   const wish = acc.wishlist.includes(p.id);
-  const cat = CATEGORIES.find((c) => c.id === p.cat)!;
-  const isPerfume = p.kind === 'perfume';
-  const std = SHIP_METHODS[0];
-  const est = deliveryEstimate(std, city, Date.now());
+  const cat = cats.find((c) => c.id === p.cat) ?? { id: p.cat, name: p.catName };
+  const isPerfume = p.cat === 'fragrance';
+  const cities = deliverableCities(cfg.zones);
+  const std = standardFor(cfg.zones, city, p.weight ?? 0);
+  const est = std && deliveryEstimate(std, city, Date.now());
   const price = variant?.price ?? Math.min(...p.variants.map((v) => v.price));
   const sameCat = products.filter((x) => x.cat === p.cat && x.id !== p.id);
   const related = [...sameCat, ...products.filter((x) => x.cat !== p.cat && inStock(x)).sort((a, b) => a.rank - b.rank)].slice(0, 4);
@@ -107,16 +111,16 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
 
           {p.colors.length > 1 && (
             <fieldset ref={colorRef} aria-describedby={err.includes('color') ? 'sf-err-color' : undefined}>
-              <legend className="mb-3 text-sm font-semibold">{t.color}{color && <span className="font-normal text-muted"> · {l(COLORS[color].name)}</span>}</legend>
+              <legend className="mb-3 text-sm font-semibold">{t.color}{color && <span className="font-normal text-muted"> · {l(colorInfo(color).name)}</span>}</legend>
               <div className="flex flex-wrap gap-2.5">
                 {p.colors.map((c) => {
                   const out = soldAll(colorVariants(c));
                   return (
-                    <label key={c} title={l(COLORS[c].name)} className={cn('relative grid size-11 cursor-pointer place-items-center rounded-full ring-1 ring-border transition-shadow has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500', err.includes('color') && 'ring-red-500')}>
+                    <label key={c} title={l(colorInfo(c).name)} className={cn('relative grid size-11 cursor-pointer place-items-center rounded-full ring-1 ring-border transition-shadow has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500', err.includes('color') && 'ring-red-500')}>
                       <input type="radio" name="sf-color" className="sr-only" checked={color === c} onChange={() => pick('color', c)} />
                       <Swatch c={c} size={32} />
                       {out && <span aria-hidden="true" className="absolute h-px w-9 -rotate-45 bg-fg/70" />}
-                      <span className="sr-only">{l(COLORS[c].name)}{out ? ` – ${t.soldOut}` : ''}</span>
+                      <span className="sr-only">{l(colorInfo(c).name)}{out ? ` – ${t.soldOut}` : ''}</span>
                     </label>
                   );
                 })}
@@ -152,7 +156,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
               {p.colors.length + p.sizes.length > 0 && <span className="text-muted">· {variantLabel(p, color, size, lang)}</span>}
             </p>
           )}
-          {allOut ? <p role="status" className="text-sm font-medium">{t.allOut}</p> : soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
+          {allOut ? <p role="status" className="text-sm font-medium">{p.colors.length + p.sizes.length > 0 ? t.allOut : t.allOutOne}</p> : soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
           {variant && variant.stock > 0 && room <= 0 && <p className="text-[13px] text-muted">{t.maxed}</p>}
 
           <div className="flex items-center gap-2">
@@ -186,18 +190,19 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </Alert>
           )}
 
-          {!allOut && <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
+          {!allOut && !p.digital && cities.length > 0 && <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
             <h2 id="sf-eta-h" className="flex items-center gap-2 text-sm font-semibold"><Truck className="size-4 text-muted" aria-hidden="true" />{t.delivery}
               {est && <InfoHint>{t.basis(String(est.handling), est.transit[0] === est.transit[1] ? String(est.transit[0]) : `${est.transit[0]}–${est.transit[1]}`)}</InfoHint>}
             </h2>
             <label className="flex items-center gap-3 text-sm">
               <span className="shrink-0 text-muted">{t.deliverTo}</span>
               <Select className="h-10 w-auto" value={city} onChange={(e) => setCity(e.target.value as CityId)}>
-                {CITIES.map((c) => <option key={c.id} value={c.id}>{l(c.name)}</option>)}
+                {cities.map((c) => <option key={c.id} value={c.id}>{l(c.name)}</option>)}
               </Select>
             </label>
             {est && <p className="font-semibold">{est.from === est.to ? t.estimateSame(dl(est.from)) : t.estimate(dl(est.from), dl(est.to))}</p>}
-            <p className="text-[13px] text-muted">{l(std.note)}</p>
+            {std ? <p className="text-[13px] text-muted">{l(std.name)} · {l(std.note)} · {std.cost ? m(std.cost) : t.free}{std.freeFrom ? ` · ${t.freeFromT(m(std.freeFrom))}` : ''}</p>
+              : <p className="text-[13px] text-muted">{t.noShipZone}</p>}
           </section>}
 
           <div className="divide-y divide-border border-y border-border">
@@ -207,7 +212,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
             </details>
             <details className="group py-1">
               <summary className="flex h-12 cursor-pointer list-none items-center justify-between text-sm font-semibold [&::-webkit-details-marker]:hidden">{t.pReturns}<ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
-              <p className="flex gap-2 pb-4 text-sm text-muted"><RotateCcw className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{isPerfume ? l(p.details[p.details.length - 1]) : t.returnsLine} <a className="font-semibold text-fg underline-offset-4 hover:underline" href={to('/page/returns')}>{t.pReturns}</a></span></p>
+              <p className="flex gap-2 pb-4 text-sm text-muted"><RotateCcw className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{p.digital ? t.noReturnDigital : t.returnsLine(String(cfg.returnDays))} <a className="font-semibold text-fg underline-offset-4 hover:underline" href={to('/page/returns')}>{t.pReturns}</a></span></p>
             </details>
           </div>
         </div>

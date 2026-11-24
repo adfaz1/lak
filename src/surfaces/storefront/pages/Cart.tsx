@@ -3,24 +3,28 @@ import { Button, EmptyState, LinkButton, Money, cn } from '../../../ds/ui';
 import { Alert } from '../../../ds/kit';
 import { settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
-import { MERCHANT, SHIP_METHODS, computeTotals, itemCount, pricedLines, removeLine, setQty, validateCart, variantById } from '../domain';
+import { computeTotals, itemCount, pricedLines, removeLine, setQty, validateCart, variantById } from '../domain';
 import { Breakdown, CouponBox, H1, H3, PANEL, ProductPhoto, Stepper, WRAP, to, useS, variantLabel } from '../kit';
 import { cartStore, couponResult } from '../state';
-import { useCart, useCatalog } from '../data';
+import { useCart, useCatalog, useConfig } from '../data';
+import { freeDeliveryOffer } from '../bridge';
 
 export default function CartPage() {
   const { t, l, lang, m } = useS();
   const cart = useCart();
   const products = useCatalog();
+  const cfg = useConfig();
   const canOrder = shopperView(settingsStore.use().status) === 'open';
   const lines = pricedLines(cart, products);
   const issues = validateCart(cart, products);
   const c = couponResult(cart, products);
   const discount = c?.status === 'valid' ? c.discount : 0;
-  const totals = computeTotals(lines, { discount, ship: SHIP_METHODS[0] });
+  // Delivery depends on the city's zone, so the bag shows goods only; shipping is priced at checkout.
+  const totals = computeTotals(lines, { discount });
   const goods = totals.subtotal - totals.discount;
   const n = itemCount(cart);
-  const progress = Math.min(100, Math.round((goods / MERCHANT.freeShippingFrom) * 100));
+  const free = freeDeliveryOffer(cfg.zones);
+  const progress = free ? Math.min(100, Math.round((goods / free.from) * 100)) : 0;
 
   if (!cart.lines.length) {
     return (
@@ -95,17 +99,18 @@ export default function CartPage() {
         <aside className="lg:sticky lg:top-24 lg:self-start">
           <div className={cn(PANEL, 'space-y-5 p-5 sm:p-6')}>
             <h2 className={H3}>{t.summary}</h2>
-            <div className="space-y-2">
-              <p className="flex items-center gap-2 text-[13px]"><Truck className="size-4 shrink-0 text-muted" aria-hidden="true" />{goods >= MERCHANT.freeShippingFrom ? t.freeOk : t.freeLeft(m(MERCHANT.freeShippingFrom - goods))}</p>
+            {free && <div className="space-y-2">
+              <p className="flex items-center gap-2 text-[13px]"><Truck className="size-4 shrink-0 text-muted" aria-hidden="true" />{goods >= free.from ? t.freeOk : t.freeLeft(m(free.from - goods))}</p>
+              <p className="ps-6 text-xs text-muted">{t.freeWhere(l(free.zone))}</p>
               <div className="h-1.5 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress} aria-label={t.freeProgress}>
                 <div className="h-full rounded-full bg-brand-600 transition-[width] duration-300" style={{ width: `${progress}%` }} />
               </div>
-            </div>
+            </div>}
             <CouponBox products={products} />
-            <Breakdown totals={totals} shippingLabel={t.shipEst} shippingNote={t.shipNote} coupon={c?.status === 'valid' ? c.code : undefined} />
+            <Breakdown totals={totals} shippingPending shippingNote={t.shipNote} coupon={c?.status === 'valid' ? c.code : undefined} />
             {checkoutBtn}
             {(issues.length > 0 || !canOrder) && <p id="sf-blocked" className="text-[13px] text-amber-800 dark:text-amber-300">{!canOrder ? t.browseOnly : t.blocked}</p>}
-            <p className="text-center text-xs text-muted">{t.payList}</p>
+            {cfg.methods.length > 0 && <p className="text-center text-xs text-muted">{cfg.methods.map((x) => t.methods[x]).join(t.listSep)}</p>}
           </div>
         </aside>
       </div>

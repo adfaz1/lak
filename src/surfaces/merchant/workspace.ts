@@ -1,6 +1,6 @@
 // Workspace domain: new-store setup checklist, evidence-based assistant answers, and fixtures for
 // settings, team, themes, apps and help. Pure functions; the UI keeps state in stores.
-import { people, VIEWS, type L, type LocId, type Order } from './domain';
+import { people, total, VIEWS, type L, type LocId, type Order } from './domain';
 import { available, coverage, type Coverage, type History, type Level } from './inventory';
 import { summarize, type DayStat } from './growth';
 import type { Plan } from './finance';
@@ -167,7 +167,7 @@ export interface ThemeState { published: ThemeVersion; draft: Section[]; history
 
 export function themeFixture(): ThemeState {
   const sections: Section[] = [
-    { id: 's1', kind: 'announcement', visible: true, heading: 'توصيل مجاني للطلبات من 300 ر.س داخل المملكة' },
+    { id: 's1', kind: 'announcement', visible: true, heading: 'توصيل مجاني للطلبات من 300 ر.س في منطقة الرياض' },
     { id: 's2', kind: 'hero', visible: true, heading: 'تشكيلة العبايات المطرّزة' },
     { id: 's3', kind: 'featured', visible: true, heading: 'الأكثر مبيعًا' },
     { id: 's4', kind: 'categories', visible: true, heading: 'تسوّق حسب الفئة' },
@@ -258,9 +258,10 @@ export function customerFixtures(): Customer[] {
 export type Segment = 'returning' | 'new' | 'highValue' | 'emailConsent';
 export const SEGMENTS: Segment[] = ['returning', 'new', 'highValue', 'emailConsent'];
 export function customerStats(c: Customer, orders: Order[]) {
-  const mine = orders.filter((o) => o.customer.en === c.name.en);
+  // Orders from the online store carry the customer id; older fixtures are matched by name.
+  const mine = orders.filter((o) => (o.customerId ? o.customerId === c.id : o.customer.en === c.name.en));
   const paid = mine.filter((o) => o.pay !== 'failed');
-  const spent = paid.reduce((s, o) => s + o.items.reduce((a, i) => a + i.qty * i.unit, 0) + o.fee - o.refunds.filter((r) => r.status === 'confirmed').reduce((a, r) => a + r.amount, 0), 0);
+  const spent = paid.reduce((s, o) => s + total(o) - o.refunds.filter((r) => r.status === 'confirmed').reduce((a, r) => a + r.amount, 0), 0);
   return { orders: mine, paidCount: paid.length, spent };
 }
 /** Segments are rules over order history and consent; nothing is inferred about age, gender or credit. */

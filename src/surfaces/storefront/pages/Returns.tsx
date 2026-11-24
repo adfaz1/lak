@@ -6,7 +6,7 @@ import { Button, EmptyState, LinkButton, Money, Ref, cn } from '../../../ds/ui';
 import { refundEstimate, requestReturn, returnEligibility, returnableQty, validIban, variantById, type ReturnReason } from '../domain';
 import { Crumbs, H1, H3, PANEL, ProductPhoto, SimNote, WRAP, to, useS, variantLabel } from '../kit';
 import { updateOrder } from '../state';
-import { useCatalog, useOrders } from '../data';
+import { useCatalog, useConfig, useOrders } from '../data';
 import { canView } from './Order';
 
 const REASONS: ReturnReason[] = ['size', 'not_as_described', 'damaged', 'changed_mind'];
@@ -16,6 +16,7 @@ export default function ReturnsPage({ reference, route }: { reference: string; r
   const { t, l, lang, m, d } = useS();
   const orders = useOrders();
   const products = useCatalog();
+  const cfg = useConfig();
   const mobile = route.query.get('m');
   const o = orders.find((x) => x.ref === reference);
   const [picks, setPicks] = useState<Record<string, { qty: number; reason: ReturnReason }>>({});
@@ -45,7 +46,7 @@ export default function ReturnsPage({ reference, route }: { reference: string; r
     );
   }
 
-  const elig = returnEligibility(o, products, Date.now());
+  const elig = returnEligibility(o, products, Date.now(), cfg.returnDays);
   const cod = o.pay.method === 'cod';
   const chosen = Object.entries(picks).filter(([, p]) => p.qty > 0).map(([vid, p]) => ({ vid, qty: p.qty, reason: p.reason }));
   const estimate = refundEstimate(o, chosen);
@@ -62,10 +63,10 @@ export default function ReturnsPage({ reference, route }: { reference: string; r
     const before = o.returns.length;
     let id: string | null = null;
     updateOrder(o.ref, (x) => {
-      const next = requestReturn(x, { lines: chosen, method, refundTo: cod ? 'bank' : 'original', iban: cod ? iban.replace(/\s+/g, '').toUpperCase() : undefined }, products, Date.now());
+      const next = requestReturn(x, { lines: chosen, method, refundTo: cod ? 'bank' : 'original', iban: cod ? iban.replace(/\s+/g, '').toUpperCase() : undefined }, products, Date.now(), cfg.returnDays);
       if (next.returns.length > before) id = next.returns[next.returns.length - 1].id;
       return next;
-    });
+    }, o);
     setConfirm(false);
     if (id) setDone(id);
   };
@@ -77,7 +78,7 @@ export default function ReturnsPage({ reference, route }: { reference: string; r
 
       {!elig.ok ? (
         <div className={cn(PANEL, 'space-y-4 p-6')}>
-          <p>{elig.reason === 'window_closed' && elig.until ? t.windowClosed(d(elig.until)) : elig.reason === 'nothing_returnable' ? t.nothingReturnable : t.notDeliveredYet}</p>
+          <p>{elig.reason === 'window_closed' && elig.until ? t.windowClosed(d(elig.until), String(cfg.returnDays)) : elig.reason === 'nothing_returnable' ? t.nothingReturnable : t.notDeliveredYet}</p>
           <LinkButton href={back} variant="secondary">{t.backToOrder}</LinkButton>
         </div>
       ) : (

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DAY, MERCHANT, SHIP_METHODS, addBusinessDays, addToCart, advanceFulfilment, applyPayment, canPay, catalogue, checkoutKey,
-  computeTotals, coupons, deliveryEstimate, evaluateCoupon, findVariant, listProducts, missingOptions, normalize, payEligibility,
+  DAY, MERCHANT, SHIP_METHODS, addBusinessDays, addToCart, advanceFulfilment, applyPayment, canPay, checkoutKey,
+  computeTotals, deliveryEstimate, evaluateCoupon, findVariant, listProducts, missingOptions, normalize, payEligibility,
   payTransition, pricedLines, refundEstimate, removeLine, requestReturn, returnEligibility, returnableQty, setQty, shipById,
   submitOrder, validIban, validateAddress, validateCart, vatIn,
   type Cart, type Draft, type ListQuery, type Order,
 } from './domain';
+import { catalogue, coupons } from './fixtures';
 
 const NOW = Date.UTC(2026, 10, 24, 9); // Tuesday
 const products = catalogue();

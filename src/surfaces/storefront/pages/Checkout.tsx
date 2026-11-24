@@ -8,8 +8,8 @@ import { Button, EmptyState, LinkButton, Money, Segmented, cn, useTx } from '../
 import { settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
-  CITIES, MERCHANT, SHIP_METHODS, canPay, cityById, cleanPhone, computeTotals, deliveryEstimate, isSettled, payEligibility,
-  pricedLines, shipAvailable, shipById, validateAddress, validateCart, variantById,
+  CITIES, canPay, cityById, cleanPhone, computeTotals, deliveryEstimate, isSettled, payEligibility,
+  pricedLines, validateAddress, validateCart, variantById,
   type Address, type AddrErr, type CityId, type Order, type PayMethod,
 } from '../domain';
 import { Breakdown, CouponBox, H1, PANEL, ProductPhoto, SimNote, WRAP, districtLabel, to, useS, variantLabel } from '../kit';
@@ -17,7 +17,8 @@ import {
   CUSTOMER, accountStore, buildDraft, cartStore, checkStatus, checkoutStore, couponResult, ordersStore, openCodCount,
   payEvent, pendingForSession, signIn, signOut, stripSaved, submit,
 } from '../state';
-import { useCatalog } from '../data';
+import { useCatalog, useConfig } from '../data';
+import { cartWeight, standardFor } from '../bridge';
 import { simNow, useSim } from '../review';
 
 const FIELD_ORDER: (keyof AddrErr)[] = ['email', 'name', 'phone', 'city', 'district', 'street', 'building', 'nationalCode'];
@@ -34,6 +35,7 @@ export default function Checkout() {
   const acc = accountStore.use();
   const sim = useSim();
   const canOrder = shopperView(settingsStore.use().status) === 'open';
+  const cfg = useConfig();
   ordersStore.use();
   const [tried, setTried] = useState(false);
   const [touched, setTouched] = useState<Partial<Record<keyof AddrErr, boolean>>>({});
@@ -47,24 +49,38 @@ export default function Checkout() {
   const issues = validateCart(cart, products);
   const coupon = couponResult(cart, products);
   const discount = coupon?.status === 'valid' ? coupon.discount : 0;
+  const freeShip = coupon?.status === 'valid' && coupon.freeShip;
   const city = co.addr.city as CityId | undefined;
-  const ship = shipById(co.ship)!;
-  const shipOk = !!city && shipAvailable(ship, city);
+  // One delivery method, priced by the merchant's shipping zone for this city and the bag's weight.
+  const ship = standardFor(cfg.zones, city, cartWeight(lines));
+  const shipOk = !!city && !!ship;
   const signed = co.mode === 'account' && acc.signedIn;
+  const needSignIn = !cfg.guest && !signed;
   const openCod = openCodCount();
-  const totalsNoCod = computeTotals(lines, { discount, ship });
-  const elig = (pm: PayMethod) => payEligibility(pm, { total: totalsNoCod.total + (pm === 'cod' ? MERCHANT.codFee : 0), applePayDevice: sim.applePay, openCod, ship: co.ship });
-  const methodOk = !elig(co.method);
-  const totals = computeTotals(lines, { discount, ship, cod: co.method === 'cod' && methodOk });
+  const totalsNoCod = computeTotals(lines, { discount, ship, freeShip, codFee: cfg.codFee });
+  const elig = (pm: PayMethod) => payEligibility(pm, {
+    total: totalsNoCod.total + (pm === 'cod' ? cfg.codFee : 0), applePayDevice: sim.applePay, openCod, ship: co.ship,
+    codFee: cfg.codFee, codMin: cfg.codMin, codMax: cfg.codMax, codOpenLimit: cfg.codOpenLimit,
+  });
+  // Only methods the merchant connected; Apple Pay also needs a device that supports it.
+  const offered = cfg.methods.filter((pm) => pm !== 'applepay' || sim.applePay);
+  const methodOk = offered.includes(co.method) && !elig(co.method);
+  const totals = computeTotals(lines, { discount, ship, freeShip, cod: co.method === 'cod' && methodOk, codFee: cfg.codFee });
   const errs = validateAddress(co.addr, { email: co.email });
   const pending = pendingForSession();
   const showErr = (k: keyof AddrErr) => (tried || touched[k] ? errs[k] : undefined);
   const touch = (k: keyof AddrErr) => () => setTouched((x) => ({ ...x, [k]: true }));
 
   // If Apple Pay is not available on this device, fall back to card rather than leaving an impossible choice selected.
+  const firstOffered = offered[0];
   useEffect(() => {
-    if (co.method === 'applepay' && !sim.applePay) checkoutStore.set((c) => ({ ...c, method: 'card' }));
-  }, [co.method, sim.applePay]);
+    if (firstOffered && !offered.includes(co.method)) checkoutStore.set((c) => ({ ...c, method: firstOffered }));
+  }, [co.method, firstOffered, offered.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Guest checkout turned off by the merchant: the shopper signs in.
+  useEffect(() => {
+    if (!cfg.guest && co.mode !== 'account') checkoutStore.set((c) => ({ ...c, mode: 'account' }));
+  }, [cfg.guest, co.mode]);
 
   useEffect(() => { if (co.notice) noticeRef.current?.focus(); }, [co.notice]);
 
@@ -92,7 +108,7 @@ export default function Checkout() {
 
   const valid = () => {
     setTried(true);
-    if (issues.length || !canOrder) return false;
+    if (issues.length || !canOrder || needSignIn || !offered.length) return false;
     const first = FIELD_ORDER.find((k) => errs[k]);
     if (first) { document.getElementById(`sf-f-${first}`)?.focus(); return false; }
     if (!shipOk) { document.getElementById('sf-ship-h')?.focus(); return false; }
@@ -150,12 +166,15 @@ export default function Checkout() {
     );
   }
 
-  const methods: { id: PayMethod; label: string; note: ReactNode; icon: ReactNode }[] = [
+  const allMethods: { id: PayMethod; label: string; note: ReactNode; icon: ReactNode }[] = [
     { id: 'card', label: t.card, note: t.cardNote, icon: <CreditCard className="size-5" aria-hidden="true" /> },
-    ...(sim.applePay ? [{ id: 'applepay' as PayMethod, label: t.apple, note: t.appleNote2, icon: <Smartphone className="size-5" aria-hidden="true" /> }] : []),
-    { id: 'bnpl', label: t.bnpl, note: t.bnplNote, icon: <Clock className="size-5" aria-hidden="true" /> },
-    { id: 'cod', label: t.cod, note: t.codNote(m(MERCHANT.codFee)), icon: <Banknote className="size-5" aria-hidden="true" /> },
+    { id: 'applepay', label: t.apple, note: t.appleNote2, icon: <Smartphone className="size-5" aria-hidden="true" /> },
+    { id: 'bnpl', label: t.bnpl, note: t.bnplNote(cfg.bnplNames.map(l).join(t.listSep)), icon: <Clock className="size-5" aria-hidden="true" /> },
+    { id: 'cod', label: t.cod, note: t.codNote(cfg.codFee ? m(cfg.codFee) : ''), icon: <Banknote className="size-5" aria-hidden="true" /> },
   ];
+  const methods = allMethods.filter((x) => offered.includes(x.id));
+  const whyText = (why: NonNullable<ReturnType<typeof elig>>) =>
+    why === 'cod_over_limit' ? t.codMaxT(m(cfg.codMax)) : why === 'cod_under_min' ? t.codMinT(m(cfg.codMin)) : t.inel[why];
 
   const errMsg = (k: keyof AddrErr) => {
     const e = showErr(k);
@@ -241,8 +260,10 @@ export default function Checkout() {
           )}
 
           {step(1, 'sf-c-h', t.sContact, <>
-            <Segmented label={t.sContact} value={co.mode} onChange={(v) => { checkoutStore.set((c) => ({ ...c, mode: v })); if (v === 'account' && acc.signedIn) signIn(); }}
-              options={[{ value: 'guest', label: t.guest }, { value: 'account', label: t.signIn }]} />
+            {cfg.guest ? (
+              <Segmented label={t.sContact} value={co.mode} onChange={(v) => { checkoutStore.set((c) => ({ ...c, mode: v })); if (v === 'account' && acc.signedIn) signIn(); }}
+                options={[{ value: 'guest', label: t.guest }, { value: 'account', label: t.signIn }]} />
+            ) : <p className={cn('text-sm', tried && needSignIn ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted')}>{t.guestOff}</p>}
             {co.mode === 'account' && !acc.signedIn && (
               <div className="space-y-2 rounded-xl bg-surface-2 p-4">
                 <Button variant="secondary" onClick={signIn}><User className="size-4" aria-hidden="true" />{t.signInSim}</Button>
@@ -332,32 +353,30 @@ export default function Checkout() {
             {!city ? <p className={cn('text-sm', tried ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted')}>{t.cityFirst}</p> : (
               <fieldset className="space-y-2">
                 <legend className="sr-only">{t.sShip}</legend>
-                {SHIP_METHODS.map((sm) => {
-                  const ok = shipAvailable(sm, city);
-                  const est = ok ? deliveryEstimate(sm, city, Date.now()) : undefined;
-                  const cost = computeTotals(lines, { discount, ship: sm }).shipping;
+                {ship ? (() => {
+                  const est = deliveryEstimate(ship, city, Date.now());
+                  const cost = totalsNoCod.shipping;
                   return (
-                    <label key={sm.id} className={radioCard}>
-                      <input type="radio" name="sf-ship" className={radio} checked={co.ship === sm.id} disabled={!ok} onChange={() => checkoutStore.set((c) => ({ ...c, ship: sm.id, method: sm.id === 'pickup' && c.method === 'cod' ? 'card' : c.method }))} />
+                    <label className={radioCard}>
+                      <input type="radio" name="sf-ship" className={radio} checked={co.ship === ship.id} onChange={() => checkoutStore.set((c) => ({ ...c, ship: ship.id }))} />
                       <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold">{l(sm.name)}</span>
+                        <span className="block text-sm font-semibold">{l(ship.name)}</span>
                         <span className="mt-0.5 block text-[13px] text-muted">
-                          {!ok ? t.notForCity : est && (sm.id === 'pickup' ? t.readyFrom(dl(est.from)) : t.etaRange(dl(est.from), dl(est.to)))}
-                          {ok && <> · {l(sm.note)}</>}
+                          {est && t.etaRange(dl(est.from), dl(est.to))} · {l(ship.note)}{ship.freeFrom ? ` · ${t.freeFromT(m(ship.freeFrom))}` : ''}
                         </span>
                       </span>
-                      {ok && <span className="shrink-0 text-sm font-semibold">{cost === 0 ? <span className="text-emerald-700 dark:text-emerald-400">{t.free}</span> : <Money v={cost} />}</span>}
+                      <span className="shrink-0 text-sm font-semibold">{cost === 0 ? <span className="text-emerald-700 dark:text-emerald-400">{t.free}</span> : <Money v={cost} />}</span>
                     </label>
                   );
-                })}
+                })() : <p className="text-sm font-medium text-red-600 dark:text-red-400">{t.noShipZone}</p>}
               </fieldset>
             )}
-            {tried && city && !shipOk && <p className="text-sm font-medium text-red-600 dark:text-red-400">{t.notForCity}</p>}
             {city && <SimNote>{t.shipSim}</SimNote>}
           </>, true)}
 
           {step(4, 'sf-pay-h', t.sPay, <>
             {notice}
+            {!methods.length && <Alert tone="warn" title={t.noMethods} />}
             <fieldset className="space-y-2">
               <legend className="sr-only">{t.sPay}</legend>
               {methods.map((pm) => {
@@ -367,14 +386,14 @@ export default function Checkout() {
                     <input type="radio" name="sf-pay" className={radio} checked={co.method === pm.id} disabled={!!why} onChange={() => checkoutStore.set((c) => ({ ...c, method: pm.id }))} aria-describedby={`sf-pm-${pm.id}`} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold">{pm.label}</span>
-                      <span id={`sf-pm-${pm.id}`} className="mt-0.5 block text-[13px] text-muted">{why ? t.inel[why] : pm.note}</span>
+                      <span id={`sf-pm-${pm.id}`} className="mt-0.5 block text-[13px] text-muted">{why ? whyText(why) : pm.note}</span>
                     </span>
                     <span className="shrink-0 text-muted">{pm.icon}</span>
                   </label>
                 );
               })}
             </fieldset>
-            {!sim.applePay && <p className="text-xs text-muted">{t.appleHidden}</p>}
+            {cfg.methods.includes('applepay') && !sim.applePay && <p className="text-xs text-muted">{t.appleHidden}</p>}
             <label className="flex items-center gap-2.5 text-sm">
               <input type="checkbox" className="size-[18px] accent-brand-600" checked={co.gift} onChange={(e) => checkoutStore.set((c) => ({ ...c, gift: e.target.checked }))} />{t.gift}
             </label>
@@ -387,7 +406,7 @@ export default function Checkout() {
 
           <div className="space-y-3">
             {tried && anyErr && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t.checkFields}</p>}
-            <Button size="lg" className="h-13 w-full py-3.5 text-base" onClick={start} disabled={busy || !!pending || issues.length > 0 || !canOrder} aria-busy={busy || undefined}>
+            <Button size="lg" className="h-13 w-full py-3.5 text-base" onClick={start} disabled={busy || !!pending || issues.length > 0 || !canOrder || !methods.length} aria-busy={busy || undefined}>
               {busy ? <><RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t.processing}</> : <><Lock className="size-4" aria-hidden="true" />{payLabel}</>}
             </Button>
             <SimNote className="justify-center text-center">{co.method === 'cod' ? t.codSim : t.paySim}</SimNote>

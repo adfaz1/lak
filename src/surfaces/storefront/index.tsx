@@ -9,10 +9,10 @@ import { Button, ErrorState, IconButton, LinkButton, Skeleton, cn, useTx } from 
 import { Drawer, ToastProvider } from '../../ds/kit';
 import { settingsStore, themeStore } from '../merchant/stores';
 import { shopperView, type ShopperView } from '../dashboard/storefront/model';
-import { CATEGORIES, MERCHANT, itemCount } from './domain';
+import { itemCount } from './domain';
 import { H1, WRAP, to, useS } from './kit';
 import { accountStore } from './state';
-import { useCart } from './data';
+import { useCart, useCategories, useConfig } from './data';
 import { ReviewPanel, setSfState, useSfState } from './review';
 import { headingText, sectionOf, storeCss } from './theme';
 import Home from './pages/Home';
@@ -121,11 +121,12 @@ function NotFound() {
 
 function Closed({ view, message }: { view: ShopperView; message: string }) {
   const { t, l } = useS();
+  const cfg = useConfig();
   return (
     <div className={cn(WRAP, 'flex flex-col items-center py-24 text-center')}>
       <span className="grid size-14 place-items-center rounded-2xl bg-brand-500/10 text-brand-700 dark:text-brand-300">{view === 'maintenance' ? <Wrench className="size-6" aria-hidden="true" /> : <StoreIcon className="size-6" aria-hidden="true" />}</span>
       <h1 className={cn(H1, 'mt-5')}>{view === 'maintenance' ? t.maintT : t.hiddenT}</h1>
-      <p className="mt-2 max-w-md text-muted">{view === 'maintenance' && message ? message : t.closedB(l(MERCHANT.name))}</p>
+      <p className="mt-2 max-w-md text-muted">{view === 'maintenance' && message ? message : t.closedB(l(cfg.name))}</p>
       <LinkButton href={to('/track')} variant="secondary" className="mt-6">{t.trackTitle}</LinkButton>
     </div>
   );
@@ -165,6 +166,8 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
   const tx = useTx();
   const cart = useCart();
   const acc = accountStore.use();
+  const cats = useCategories();
+  const cfg = useConfig();
   const n = itemCount(cart);
   const [menu, setMenu] = useState(false);
   const onSearch = route.path[0] === 'search';
@@ -198,10 +201,10 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
     <header className="glass sticky top-0 z-30 border-b border-border">
       <div className={cn(WRAP, 'flex h-16 items-center gap-2')}>
         <IconButton label={t.menu} onClick={() => setMenu(true)} className="-ms-2 text-fg lg:hidden"><Menu className="size-5" aria-hidden="true" /></IconButton>
-        <a href={to()} className="text-[22px] font-bold tracking-tight text-fg max-lg:absolute max-lg:start-1/2 max-lg:-translate-x-1/2 max-lg:rtl:translate-x-1/2 sm:text-2xl">{l(MERCHANT.name)}</a>
+        <a href={to()} className="text-[22px] font-bold tracking-tight text-fg max-lg:absolute max-lg:start-1/2 max-lg:-translate-x-1/2 max-lg:rtl:translate-x-1/2 sm:text-2xl">{l(cfg.name)}</a>
         <nav aria-label={t.cats} className="ms-10 hidden items-center gap-6 lg:flex">
           {navLink(to('/c/all'), t.all, curCat === 'all')}
-          {CATEGORIES.map((c) => navLink(to(`/c/${c.id}`), l(c.name), curCat === c.id))}
+          {cats.map((c) => navLink(to(`/c/${c.id}`), l(c.name), curCat === c.id))}
         </nav>
         <div className="ms-auto flex items-center gap-0.5">
           <form role="search" className="relative me-1 hidden xl:block" onSubmit={(e) => { e.preventDefault(); navigate(to('/search', { q: q.trim() || undefined })); }}>
@@ -221,11 +224,11 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
         </div>
       </div>
       {menu && (
-        <Drawer title={l(MERCHANT.name)} onClose={() => setMenu(false)}>
+        <Drawer title={l(cfg.name)} onClose={() => setMenu(false)}>
           <nav aria-label={t.cats}>
             <p className="mb-2 text-xs font-semibold text-subtle">{t.cats}</p>
             <ul className="divide-y divide-border">
-              {[{ href: to('/c/all'), label: t.all }, ...CATEGORIES.map((c) => ({ href: to(`/c/${c.id}`), label: l(c.name) }))].map((x) => (
+              {[{ href: to('/c/all'), label: t.all }, ...cats.map((c) => ({ href: to(`/c/${c.id}`), label: l(c.name) }))].map((x) => (
                 <li key={x.href}><a href={x.href} className="flex h-12 items-center text-[15px] font-medium">{x.label}</a></li>
               ))}
             </ul>
@@ -247,19 +250,21 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
 
 function Footer() {
   const { t, l } = useS();
+  const cats = useCategories();
+  const cfg = useConfig();
   const col = 'space-y-2.5 text-sm';
   const a = 'text-muted hover:text-fg';
   return (
     <footer className="mt-20 border-t border-border bg-surface">
       <div className={cn(WRAP, 'grid gap-10 py-12 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]')}>
         <div className="space-y-3">
-          <p className="text-xl font-bold tracking-tight">{l(MERCHANT.name)}</p>
-          <p className="max-w-xs text-sm text-muted">{l(MERCHANT.tagline)}</p>
+          <p className="text-xl font-bold tracking-tight">{l(cfg.name)}</p>
+          <p className="max-w-xs text-sm text-muted">{t.aboutBody(l(cfg.name))}</p>
           <p className="text-xs text-muted">{t.vatNote}</p>
         </div>
         <nav aria-label={t.cats}>
           <h2 className="mb-3 text-[13px] font-semibold">{t.shopH}</h2>
-          <ul className={col}>{CATEGORIES.map((c) => <li key={c.id}><a href={to(`/c/${c.id}`)} className={a}>{l(c.name)}</a></li>)}</ul>
+          <ul className={col}>{cats.map((c) => <li key={c.id}><a href={to(`/c/${c.id}`)} className={a}>{l(c.name)}</a></li>)}</ul>
         </nav>
         <nav aria-label={t.care}>
           <h2 className="mb-3 text-[13px] font-semibold">{t.care}</h2>

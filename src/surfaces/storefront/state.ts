@@ -1,26 +1,42 @@
-/* Module-level fixture stores for the storefront. Simulated state kept for the tab session; "Reset data" clears it. */
+/* Storefront session state and actions. The catalogue, stock, coupons, settings, customers and the order book are the
+   merchant's stores (merchant/stores.ts); this file keeps only what belongs to the shopper's session: the bag, the
+   checkout form, the account (saved addresses, wishlist) and the checkout record of each order placed here (payment
+   attempts, address, returns). Simulated state for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
+import { couponsStore, customersStore, levelsStore, ordersStore as merchantOrders, productsStore, settingsStore } from '../merchant/stores';
+import { customerFixtures } from '../merchant/workspace';
+import { checkoutStore as checkoutSettingsStore } from '../dashboard/settings/stores';
 import {
-  DAY, applyPayment, catalogue, computeTotals, coupons, evaluateCoupon, isSettled, pricedLines, shipById, submitOrder,
+  applyPayment, evaluateCoupon, isSettled, pricedLines, submitOrder,
   type Address, type Cart, type CityId, type Draft, type Order, type Outcome, type PayEvent, type PayMethod, type Product, type ShipId,
 } from './domain';
+import {
+  cartWeight, couponUses, matchCustomer, nextStoreRef, phoneKey, standardFor, storeConfig, syncOrder, toStoreCoupon, toStoreProducts,
+  withMerchant, type StoreConfig,
+} from './bridge';
 
 const sid = () => Math.random().toString(36).slice(2, 10);
 
-export const catalogStore = createStore.key('storefront.catalogStore')<Product[]>(catalogue);
+/* ───────────── Live reads of the merchant's data ───────────── */
+
+export const liveCatalog = (): Product[] => toStoreProducts(productsStore.get(), levelsStore.get());
+export const liveConfig = (): StoreConfig => storeConfig(settingsStore.get(), checkoutSettingsStore.get());
+
 export const cartStore = createStore.key('storefront.cartStore')<Cart>(() => ({ lines: [] }));
 
 export interface SavedAddress extends Address { id: string; label: string }
-export const CUSTOMER = { id: 'c-1001', name: { ar: 'سارة الحربي', en: 'Sara Alharbi' }, phone: '501234567', email: 'sara@example.com' };
+/** The test shopper is an existing customer of the store (C-1005), so signed-in orders land on her profile. */
+const me = customerFixtures().find((c) => c.id === 'C-1005')!;
+export const CUSTOMER = { id: me.id, name: me.name, phone: phoneKey(me.phone), email: me.email };
 
 export interface Account { signedIn: boolean; addresses: SavedAddress[]; defaultId?: string; wishlist: string[] }
 export const accountStore = createStore.key('storefront.accountStore')<Account>(() => ({
   signedIn: false,
-  wishlist: ['satin-dress'],
+  wishlist: ['p4'],
   defaultId: 'a1',
   addresses: [
-    { id: 'a1', label: 'home', name: 'Sara Alharbi', phone: '501234567', city: 'riyadh', district: 'Al Malqa', street: 'Anas Ibn Malik Rd', building: '8132', nationalCode: 'RMLA8132' },
-    { id: 'a2', label: 'work', name: 'Sara Alharbi', phone: '501234567', city: 'riyadh', district: 'Al Olaya', street: 'Olaya St', building: '7421' },
+    { id: 'a1', label: 'home', name: me.name.en, phone: CUSTOMER.phone, city: 'riyadh', district: 'Al Malqa', street: 'Anas Ibn Malik Rd', building: '8132', nationalCode: 'RMLA8132' },
+    { id: 'a2', label: 'work', name: me.name.en, phone: CUSTOMER.phone, city: 'riyadh', district: 'Al Olaya', street: 'Olaya St', building: '7421' },
   ],
 }));
 
@@ -43,50 +59,49 @@ export const checkoutStore = createStore.key('storefront.checkoutStore')<Checkou
 export interface TestState { open: boolean; applePay: boolean; outcome: Outcome; verify: 'paid' | 'failed' | 'unknown' }
 export const testStore = createStore.key('storefront.testStore')<TestState>(() => ({ open: false, applePay: false, outcome: 'success', verify: 'paid' }));
 
-/** Past orders for the test customer, so tracking, returns and the COD limit have something real to work on. */
-function pastOrders(): Order[] {
-  const now = Date.now();
-  const products = catalogue();
-  const mk = (ref: string, vids: [string, number][], daysAgo: number, method: PayMethod, extra: Partial<Order>): Order => {
-    const lines = pricedLines({ lines: vids.map(([vid, qty]) => ({ vid, qty })) }, products);
-    const at = now - daysAgo * DAY;
-    const totals = computeTotals(lines, { ship: shipById('standard'), cod: method === 'cod' });
-    return {
-      ref, key: `fixture-${ref}`, at, customerId: CUSTOMER.id, contact: { phone: CUSTOMER.phone, email: CUSTOMER.email },
-      lines: lines.map(({ vid, productId, qty, unit, amount }) => ({ vid, productId, qty, unit, amount })), totals,
-      address: accountStore.get().addresses[0], ship: 'standard', eta: { from: at + 2 * DAY, to: at + 3 * DAY },
-      pay: { method, state: method === 'cod' ? 'cod_due' : 'paid', attempts: [{ n: 1, method, outcome: method === 'cod' ? 'cod' : 'success', at }] },
-      ful: 'fulfilled', shipment: 'delivered', returns: [], ...extra,
-    };
-  };
-  return [
-    mk('DN-24796', [['white-musk~50ml', 1], ['crepe-shayla~camel', 2]], 1, 'cod', { shipment: 'in_transit', trackingNo: 'TRK24796SA' }),
-    mk('DN-24788', [['linen-abaya~sand-54', 1], ['silk-scarf~navy', 1]], 5, 'card', { deliveredAt: now - 3 * DAY, trackingNo: 'TRK24788SA' }),
-    mk('DN-24741', [['shirt-dress~ivory-M', 1]], 44, 'card', { deliveredAt: now - 41 * DAY, received: true, trackingNo: 'TRK24741SA' }),
-  ];
-}
-export const ordersStore = createStore.key('storefront.ordersStore')<Order[]>(pastOrders);
+/**
+ * Checkout records of orders placed in this session: payment attempts, address and return requests. The order itself
+ * lives in the merchant's book under the same reference; fulfilment and shipment are read from there.
+ */
+export const ordersStore = createStore.key('storefront.checkouts')<Order[]>(() => []);
 
 /* ───────────── Actions ───────────── */
 
+/** The customer this checkout belongs to: the signed-in shopper, or an existing customer matching the typed mobile/email. */
+export function checkoutCustomerId(): string | undefined {
+  const co = checkoutStore.get();
+  if (co.mode === 'account' && accountStore.get().signedIn) return CUSTOMER.id;
+  const phone = co.addr.phone ? phoneKey(co.addr.phone) : '';
+  if (phone.length !== 9 && !co.email.trim()) return undefined;
+  const m = matchCustomer(customersStore.get(), { name: '', phone, email: co.email, city: { ar: '', en: '' } }, '');
+  return m.created ? undefined : m.customer.id;
+}
+
 export function couponResult(cart: Cart, products: Product[]) {
   if (!cart.coupon) return undefined;
-  return evaluateCoupon(cart.coupon, pricedLines(cart, products), coupons(Date.now()), Date.now());
+  const code = cart.coupon.trim().toUpperCase();
+  const uses = couponUses(merchantOrders.get(), checkoutCustomerId(), code);
+  const list = couponsStore.get().map((c) => toStoreCoupon(c, c.code === code ? uses : 0));
+  return evaluateCoupon(cart.coupon, pricedLines(cart, products), list, Date.now());
 }
 
 export function buildDraft(): Draft {
   const cart = cartStore.get();
-  const products = catalogStore.get();
+  const products = liveCatalog();
+  const cfg = liveConfig();
   const co = checkoutStore.get();
   const acc = accountStore.get();
   const lines = pricedLines(cart, products);
   const c = couponResult(cart, products);
   const signed = co.mode === 'account' && acc.signedIn;
+  const city = co.addr.city as CityId | undefined;
   return {
     sessionId: co.sessionId, lines, coupon: c?.status === 'valid' ? c.code : undefined, discount: c?.status === 'valid' ? c.discount : 0,
-    ship: co.ship, city: co.addr.city as CityId | undefined, method: co.method,
+    freeShip: c?.status === 'valid' && c.freeShip, ship: co.ship, city, method: co.method,
     address: co.addr as Address, contact: { phone: co.addr.phone ?? '', email: co.email || undefined },
-    customerId: signed ? CUSTOMER.id : undefined,
+    customerId: signed ? CUSTOMER.id : undefined, codFee: cfg.codFee,
+    shipMethod: standardFor(cfg.zones, city, cartWeight(lines)),
+    ref: nextStoreRef(merchantOrders.get(), ordersStore.get()),
   };
 }
 
@@ -97,33 +112,43 @@ export function submit(draft: Draft): { order: Order; created: boolean } {
   return { order: res.order, created: res.created };
 }
 
+/** A checkout record seen with the merchant's progress (fulfilment, shipment, refunds). */
 export function getOrder(ref: string): Order | undefined {
-  return ordersStore.get().find((o) => o.ref === ref);
+  const o = ordersStore.get().find((x) => x.ref === ref);
+  return o && withMerchant(o, merchantOrders.get().find((m) => m.ref === ref), Date.now());
 }
 
-export function updateOrder(ref: string, fn: (o: Order) => Order): void {
-  ordersStore.set((all) => all.map((o) => (o.ref === ref ? fn(o) : o)));
+/**
+ * Change the shopper's record of an order (received, return request). An order from the merchant's history has no
+ * record yet: `seed` (the order as the shopper sees it) starts one.
+ */
+export function updateOrder(ref: string, fn: (o: Order) => Order, seed?: Order): void {
+  ordersStore.set((all) => (all.some((o) => o.ref === ref) ? all.map((o) => (o.ref === ref ? fn(o) : o)) : seed ? [...all, fn(seed)] : all));
 }
 
-/** Apply a payment event. When the order becomes settled, take stock and close the checkout session. */
+/**
+ * Apply a payment event to the checkout record and mirror it into the merchant's order book: the order appears there
+ * with its payment state, and once paid (or COD confirmed) stock is reserved and the coupon use counted.
+ */
 export function payEvent(ref: string, e: PayEvent, method: PayMethod): Order | undefined {
-  const before = getOrder(ref);
+  const before = ordersStore.get().find((o) => o.ref === ref);
   if (!before) return undefined;
-  const { order, applied } = applyPayment(before, e, method, Date.now());
+  const { order, applied } = applyPayment(before, e, method, Date.now(), liveConfig().codFee);
   if (!applied) return before;
   updateOrder(ref, () => order);
+  const book = syncOrder(
+    { orders: merchantOrders.get(), levels: levelsStore.get(), customers: customersStore.get(), coupons: couponsStore.get() },
+    before, order, { products: liveCatalog(), now: Date.now() },
+  );
+  if (book.customers !== customersStore.get()) customersStore.set(book.customers);
+  if (book.levels !== levelsStore.get()) levelsStore.set(book.levels);
+  if (book.coupons !== couponsStore.get()) couponsStore.set(book.coupons);
+  if (book.orders !== merchantOrders.get()) merchantOrders.set(book.orders);
   if (!isSettled(before.pay.state) && isSettled(order.pay.state)) settle(order);
   return order;
 }
 
 function settle(order: Order): void {
-  catalogStore.set((ps) => ps.map((p) => ({
-    ...p,
-    variants: p.variants.map((v) => {
-      const l = order.lines.find((x) => x.vid === v.id);
-      return l ? { ...v, stock: Math.max(0, v.stock - l.qty) } : v;
-    }),
-  })));
   // The bag is emptied only if it is still the basket this order was made from.
   if (order.key.startsWith(checkoutStore.get().sessionId)) {
     cartStore.set({ lines: [] });
@@ -137,9 +162,11 @@ export function pendingForSession(): Order | undefined {
   return ordersStore.get().find((o) => o.key.startsWith(`${s}|`) && (o.pay.state === 'verifying' || o.pay.state === 'challenge'));
 }
 
+/** Unpaid cash-on-delivery orders of the signed-in shopper (the merchant's per-customer COD limit counts these). */
 export function openCodCount(): number {
   if (!accountStore.get().signedIn || checkoutStore.get().mode !== 'account') return 0;
-  return ordersStore.get().filter((o) => o.customerId === CUSTOMER.id && o.pay.state === 'cod_due').length;
+  const book = merchantOrders.get();
+  return book.filter((m) => m.customerId === CUSTOMER.id && m.payment?.method === 'cod' && m.pay === 'paid' && m.ship !== 'delivered').length;
 }
 
 export function toggleWish(id: string): void {
@@ -168,18 +195,19 @@ export function stripSaved(a: SavedAddress): Partial<Address> {
 
 /** Ask the (simulated) provider for the result of a payment that timed out. */
 export function checkStatus(ref: string, result: TestState['verify'] = testStore.get().verify): Order | undefined {
-  const o = getOrder(ref);
+  const o = ordersStore.get().find((x) => x.ref === ref);
   if (!o || o.pay.state !== 'verifying') return o;
   const next = payEvent(ref, { type: 'verify', result }, o.pay.method);
   if (next?.pay.state === 'declined') checkoutStore.set((c) => ({ ...c, notice: { kind: 'verify_failed', ref } }));
   return next;
 }
 
-/** Review tool: the first item in the bag sells out, to show how the bag and checkout recover. Returns its variant id. */
+/** Review tool: the first item in the bag sells out in the merchant's inventory (available = 0 everywhere). */
 export function sellOutFirstInBag(): string | undefined {
   const first = cartStore.get().lines[0];
   if (!first) return undefined;
-  catalogStore.set((ps) => ps.map((p) => ({ ...p, variants: p.variants.map((v) => (v.id === first.vid ? { ...v, stock: 0 } : v)) })));
+  const sku = first.vid.split('~')[1];
+  levelsStore.set((ls) => ls.map((l) => (l.sku === sku ? { ...l, onHand: l.reserved, version: l.version + 1 } : l)));
   return first.vid;
 }
 

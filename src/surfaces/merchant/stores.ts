@@ -8,7 +8,7 @@ import { financeFixtures, type Plan } from './finance';
 import { automationFixtures, cartFixtures, couponFixtures, runFixtures } from './growth';
 import {
   appFixtures, domainFixture, notifyFixture, policyFixtures, providerFixtures, setupFixture, statusFixture, storeFixture, teamFixture,
-  themeFixture, zoneFixtures, type Member,
+  themeFixture, zoneFixtures, customerFixtures, type Customer, type Member,
 } from './workspace';
 import type { Role } from './perms';
 
@@ -39,6 +39,8 @@ export const settingsStore = createStore.key('merchant.settingsStore')(() => ({
   planRequest: null as Plan | null,
   storeLangs: { ar: true, en: true },
 }));
+/** Customers: the fixtures plus anyone who orders from the online store with a new mobile/email. */
+export const customersStore = createStore.key('merchant.customersStore')<Customer[]>(customerFixtures);
 export const teamStore = createStore.key('merchant.teamStore')(() => ({ members: teamFixture() as Member[], log: [] as { who: string; what: string }[] }));
 export const themeStore = createStore.key('merchant.themeStore')(themeFixture);
 export const appsStore = createStore.key('merchant.appsStore')(appFixtures);

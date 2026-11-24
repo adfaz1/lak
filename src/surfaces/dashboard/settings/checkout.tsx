@@ -24,7 +24,7 @@ export default function CheckoutPage() {
   return (
     <>
       <LeaveGuard dirty={dirty} />
-      <Alert tone="info">{tx('المتجر التجريبي يستخدم بياناته الخاصة ولا يقرأ هذه الإعدادات بعد.', 'The demo storefront keeps its own data and doesn’t read these settings yet.')}</Alert>
+      <Alert tone="info">{tx('المتجر الإلكتروني يطبّق الشراء كضيف وحد الدفع عند الاستلام فور الحفظ. إلغاء العميل لطلبه غير متاح في المتجر بعد.', 'The online store applies guest checkout and the COD limit as soon as you save. Self-cancellation is not offered in the store yet.')}</Alert>
       <Section id="ck-g" title={tx('الشراء كضيف', 'Guest checkout')}>
         <div className="flex items-center gap-4">
           <p className="min-w-0 flex-1 text-sm text-muted">{d.guest ? tx('يستطيع العميل الطلب دون إنشاء حساب.', 'Shoppers can order without an account.') : tx('يجب على العميل إنشاء حساب قبل الطلب.', 'Shoppers must create an account before ordering.')}</p>
