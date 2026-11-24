@@ -1,12 +1,14 @@
+// P01-LGL / P01-ABT — contact (validated form, simulated send), legal drafts, about.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { CheckCircle2, FileText, Mail, MapPin, Phone } from 'lucide-react';
 import type { Route } from '../../core/router';
 import { createStore } from '../../core/store';
-import { Alert, Field, Sim } from '../../core/ui';
+import { Badge, Button, Card, cn, EmptyState, LinkButton, Ref } from '../../ds/ui';
+import { Alert, Field, Input, Select, Simulated, Textarea } from '../../ds/kit';
 import { CONTACT_TOPICS, LEGAL } from './content';
 import { MESSAGE_MAX, hasErrors, simRef, validateContact, type ContactDraft, type ContactErrors } from './domain';
-import { Icon, Intro, Pending, Status, jumpTo, site, useSite } from './kit';
-
-/* Contact (form with validation and simulated submit), legal drafts, about. */
+import { Fwd, H2, H3, Intro, Pending, Status, jumpTo, site, useSite, wrap } from './kit';
+import { useSiteState } from './review';
 
 const C = {
   ar: {
@@ -18,7 +20,7 @@ const C = {
     send: 'أرسل الرسالة', sentTitle: 'استلمنا رسالتك في هذه المعاينة', sentBody: 'محاكاة: لم تُرسل الرسالة إلى أي جهة، ولن يتواصل معك أحد. في المنتج الحقيقي سيصلك تأكيد على بريدك.',
     ref: 'مرجع المحاكاة', another: 'اكتب رسالة أخرى', summary: 'ملخص رسالتك',
     lEyebrow: 'السياسات', lTitle: 'السياسات والاتفاقيات', lLead: 'مسودات هيكلية تُظهر ما ستغطيه كل وثيقة. النصوص القانونية النهائية تحتاج مراجعة مختصة واعتمادًا قبل النشر.',
-    draft: 'مسودة للتخطيط، ليست نصًا قانونيًا', draftWhy: 'لا تعتمد على هذه الصفحة كشروط ملزمة. النص النهائي بانتظار المراجعة القانونية.',
+    draft: 'مسودة بانتظار الاعتماد القانوني، ليست نصًا ملزمًا', draftWhy: 'لا تعتمد على هذه الصفحة كشروط ملزمة. النص النهائي بانتظار المراجعة القانونية.',
     contents: 'المحتويات', pendingDocs: 'وثائق بانتظار الإصدار', complaints: 'بوابة الشكاوى الخارجية', vatCert: 'شهادة التسجيل في ضريبة القيمة المضافة',
     pendingDocsWhy: 'ستُربط هنا عند توفر الرابط والوثيقة الرسمية.', open: 'افتح', otherDocs: 'وثائق أخرى', missing: 'هذه الوثيقة غير موجودة',
     aEyebrow: 'عن لك', aTitle: 'نبني منصة يفهمها التاجر من أول يوم',
@@ -32,7 +34,7 @@ const C = {
       ['هوية التاجر لمتجره', 'هوية لك في منتجاتنا، وهوية التاجر في متجره وتطبيقه.'],
     ] as [string, string][],
     facts: 'معلومات الشركة', founded: 'سنة التأسيس', hq: 'المقر', cr: 'السجل التجاري',
-    join: 'ابدأ متجرك', talk: 'تواصل معنا',
+    join: 'ابدأ إنشاء متجرك', talk: 'تواصل معنا', fix: 'صحّح الحقول المعلّمة', draftBadge: 'مسودة',
   },
   en: {
     cEyebrow: 'Contact us', cTitle: 'How can we reach you?', cLead: 'Write to us about plans, your store or a problem you hit. This form is simulated in the preview and sends no messages.',
@@ -43,7 +45,7 @@ const C = {
     send: 'Send message', sentTitle: 'We received your message in this preview', sentBody: 'Simulated: the message was not sent anywhere and nobody will contact you. In the real product you would get a confirmation email.',
     ref: 'Simulation reference', another: 'Write another message', summary: 'Your message summary',
     lEyebrow: 'Policies', lTitle: 'Policies and agreements', lLead: 'Structural drafts showing what each document will cover. Final legal texts need specialist review and approval before publishing.',
-    draft: 'Layout draft, not legal text', draftWhy: 'Do not rely on this page as binding terms. The final text is awaiting legal review.',
+    draft: 'Draft pending legal approval, not binding text', draftWhy: 'Do not rely on this page as binding terms. The final text is awaiting legal review.',
     contents: 'Contents', pendingDocs: 'Documents awaiting release', complaints: 'External complaints portal', vatCert: 'VAT registration certificate',
     pendingDocsWhy: 'Will be linked here once the official link and document are available.', open: 'Open', otherDocs: 'Other documents', missing: 'This document does not exist',
     aEyebrow: 'About LAK', aTitle: 'Building a platform merchants understand from day one',
@@ -57,7 +59,7 @@ const C = {
       ['The merchant’s brand in their store', 'LAK’s brand on our products; the merchant’s brand on their store and app.'],
     ],
     facts: 'Company facts', founded: 'Founded', hq: 'Headquarters', cr: 'Commercial registration',
-    join: 'Start your store', talk: 'Contact us',
+    join: 'Start your store', talk: 'Contact us', fix: 'Fix the marked fields', draftBadge: 'Draft',
   },
 };
 
@@ -101,59 +103,59 @@ export function Contact({ route }: { route: Route }) {
   };
 
   const err = (k: keyof ContactDraft) => (errors[k] ? t.errors[errors[k]!] : undefined);
-  const aria = (k: keyof ContactDraft, id: string, hint = false) => ({ 'aria-invalid': !!errors[k], 'aria-describedby': errors[k] ? `${id}-err` : hint ? `${id}-hint` : undefined });
   const nErr = Object.keys(errors).length;
+  const details = [[Phone, c.phone], [Mail, c.email], [MapPin, c.address]] as const;
 
   return (
-    <div className="site-wrap site-pad">
+    <div className={cn(wrap, 'py-14 sm:py-20')}>
       <Intro eyebrow={c.cEyebrow} title={c.cTitle} lead={c.cLead} />
-      <div className="site-contact">
-        <aside className="site-contact-details" aria-labelledby="site-cd">
-          <h2 className="site-h3" id="site-cd">{c.details}</h2>
-          <dl>
-            {([['phone', c.phone], ['mail', c.email], ['pin', c.address]] as const).map(([icon, label]) => (
-              <div key={label}><dt><Icon name={icon} size={18} />{label}</dt><dd><Status s="pending" /><span className="muted small">{c.pendingDetail}</span></dd></div>
-            ))}
-          </dl>
-          <p className="muted small">{c.issueNote}</p>
-        </aside>
-
-        <div className="site-contact-form">
-          {lastRef && sent > 0 && (
-            <div className="site-sent" tabIndex={-1} ref={done} role="status">
-              <div className="site-sent-head"><Icon name="check" /><h2 className="site-h3">{c.sentTitle}</h2><Sim /></div>
-              <p>{c.sentBody}</p>
-              <p className="small">{c.ref}: <bdi dir="ltr" className="strong">{lastRef}</bdi></p>
-              <button type="button" className="btn" onClick={() => contactStore.set((s) => ({ ...s, lastRef: null }))}>{c.another}</button>
-            </div>
-          )}
-          {!lastRef && (
-            <form className="site-form" onSubmit={submit} noValidate>
-              {nErr > 0 && <div tabIndex={-1} ref={summary}><Alert tone="danger">{t.fixErrors(nErr)}</Alert></div>}
-              <div className="site-form-grid">
-                <Field id="site-ct-name" label={c.name} error={err('name')}>
-                  <input id="site-ct-name" className="input" value={draft.name} autoComplete="name" onChange={(e) => set('name', e.target.value)} {...aria('name', 'site-ct-name')} />
-                </Field>
-                <Field id="site-ct-email" label={c.mail} error={err('email')}>
-                  <input id="site-ct-email" className="input" type="email" dir="ltr" value={draft.email} autoComplete="email" onChange={(e) => set('email', e.target.value)} {...aria('email', 'site-ct-email')} />
-                </Field>
-                <Field id="site-ct-phone" label={<>{c.mobile} <span className="muted">{t.optional}</span></>} hint="05XXXXXXXX" error={err('phone')}>
-                  <input id="site-ct-phone" className="input" type="tel" dir="ltr" inputMode="tel" value={draft.phone} autoComplete="tel" onChange={(e) => set('phone', e.target.value)} {...aria('phone', 'site-ct-phone', true)} />
-                </Field>
-                <Field id="site-ct-topic" label={c.topic} error={err('topic')}>
-                  <select id="site-ct-topic" className="input" value={draft.topic} onChange={(e) => set('topic', e.target.value)} {...aria('topic', 'site-ct-topic')}>
-                    <option value="">{c.choose}</option>
-                    {CONTACT_TOPICS.map((x) => <option key={x.id} value={x.id}>{tr(x.name)}</option>)}
-                  </select>
-                </Field>
+      <div className="mt-12 grid gap-10 lg:grid-cols-12">
+        <div className="lg:col-span-7">
+          {lastRef && sent > 0 ? (
+            <Card className="p-6 sm:p-8">
+              <div ref={done} tabIndex={-1} role="status" className="space-y-4 outline-none">
+                <div className="flex flex-wrap items-center gap-3"><CheckCircle2 className="size-6 text-emerald-600" aria-hidden="true" /><H2 className="text-xl sm:text-2xl">{c.sentTitle}</H2><Simulated /></div>
+                <p className="text-sm leading-relaxed text-muted">{c.sentBody}</p>
+                <p className="text-sm text-fg">{c.ref}: <span className="font-semibold"><Ref>{lastRef}</Ref></span></p>
+                <Button variant="secondary" onClick={() => contactStore.set((s) => ({ ...s, lastRef: null }))}>{c.another}</Button>
               </div>
-              <Field id="site-ct-msg" label={c.message} hint={c.msgHint(draft.message.trim().length)} error={err('message')}>
-                <textarea id="site-ct-msg" className="input" rows={6} value={draft.message} onChange={(e) => set('message', e.target.value)} {...aria('message', 'site-ct-msg', true)} />
-              </Field>
-              <div className="actions"><button type="submit" className="btn primary">{c.send}</button><Sim /></div>
-            </form>
+            </Card>
+          ) : (
+            <Card className="p-6 sm:p-8">
+              <form onSubmit={submit} noValidate className="space-y-5">
+                {nErr > 0 && <div tabIndex={-1} ref={summary} className="outline-none"><Alert tone="bad" title={c.fix}>{t.fixErrors(nErr)}</Alert></div>}
+                <div className="grid gap-5 sm:grid-cols-2">
+                  <Field label={c.name} error={err('name')}>{(f) => <Input {...f} value={draft.name} autoComplete="name" onChange={(e) => set('name', e.target.value)} />}</Field>
+                  <Field label={c.mail} error={err('email')}>{(f) => <Input {...f} type="email" dir="ltr" value={draft.email} autoComplete="email" onChange={(e) => set('email', e.target.value)} />}</Field>
+                  <Field label={c.mobile} optional hint="05XXXXXXXX" error={err('phone')}>{(f) => <Input {...f} type="tel" dir="ltr" inputMode="tel" value={draft.phone} autoComplete="tel" onChange={(e) => set('phone', e.target.value)} />}</Field>
+                  <Field label={c.topic} error={err('topic')}>
+                    {(f) => <Select {...f} value={draft.topic} onChange={(e) => set('topic', e.target.value)}>
+                      <option value="">{c.choose}</option>
+                      {CONTACT_TOPICS.map((x) => <option key={x.id} value={x.id}>{tr(x.name)}</option>)}
+                    </Select>}
+                  </Field>
+                </div>
+                <Field label={c.message} hint={c.msgHint(draft.message.trim().length)} error={err('message')}>
+                  {(f) => <Textarea {...f} rows={6} value={draft.message} onChange={(e) => set('message', e.target.value)} />}
+                </Field>
+                <div className="flex flex-wrap items-center gap-3"><Button type="submit" size="lg">{c.send}</Button><Simulated /></div>
+              </form>
+            </Card>
           )}
         </div>
+        <aside aria-labelledby="site-cd" className="space-y-5 lg:col-span-5">
+          <H3 id="site-cd">{c.details}</H3>
+          <dl className="divide-y divide-border border-y border-border">
+            {details.map(([I, label]) => (
+              <div key={label} className="flex flex-wrap items-center gap-3 py-4">
+                <dt className="flex min-w-0 flex-1 items-center gap-2.5 text-sm font-medium text-fg"><I className="size-4 text-muted" aria-hidden="true" />{label}</dt>
+                <dd><Status s="pending" /></dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-subtle">{c.pendingDetail}</p>
+          <p className="text-sm leading-relaxed text-muted">{c.issueNote}</p>
+        </aside>
       </div>
     </div>
   );
@@ -164,21 +166,37 @@ export function Contact({ route }: { route: Route }) {
 export function Legal({ id }: { id?: string }) {
   const { lang, tr } = useSite();
   const c = C[lang];
-  const doc = LEGAL.find((d) => d.id === id);
+  const empty = useSiteState() === 'empty';
+  const docs = empty ? [] : LEGAL;
+  const doc = docs.find((d) => d.id === id);
 
   if (!id || !doc) {
     return (
-      <div className="site-wrap site-pad">
+      <div className={cn(wrap, 'space-y-12 py-14 sm:py-20')}>
         <Intro eyebrow={c.lEyebrow} title={id ? c.missing : c.lTitle} lead={c.lLead} />
-        <ul className="site-list site-list-grid">
-          {LEGAL.map((d) => (
-            <li key={d.id}><a href={site(`legal/${d.id}`)}><span className="site-list-title">{tr(d.title)}</span><span className="muted">{d.sections.map((s) => tr(s.h)).join(' · ')}</span></a></li>
-          ))}
-        </ul>
-        <section className="site-block" aria-labelledby="site-pd">
-          <h2 className="site-h3" id="site-pd">{c.pendingDocs}</h2>
-          <ul className="site-rows">
-            {[c.complaints, c.vatCert].map((x) => <li key={x}><span className="site-rows-main"><span className="strong">{x}</span><span className="muted small">{c.pendingDocsWhy}</span></span><Status s="pending" /></li>)}
+        {docs.length === 0 ? (
+          <Card><EmptyState as="h2" icon={<FileText className="size-6" aria-hidden="true" />} title={c.pendingDocs}>{c.pendingDocsWhy}</EmptyState></Card>
+        ) : (
+          <ul className="grid gap-4 md:grid-cols-3">
+            {docs.map((d) => (
+              <li key={d.id}>
+                <a href={site(`legal/${d.id}`)} className="group flex h-full flex-col gap-3 rounded-2xl border border-border bg-surface p-6 transition-colors hover:border-brand-300">
+                  <span className="flex items-center justify-between gap-2"><span className="font-semibold text-fg group-hover:text-brand-700 dark:group-hover:text-brand-300">{tr(d.title)}</span><Badge tone="amber">{c.draftBadge}</Badge></span>
+                  <span className="text-sm leading-relaxed text-muted">{d.sections.map((s) => tr(s.h)).join(' · ')}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        <section aria-labelledby="site-pd" className="space-y-3">
+          <H3 id="site-pd">{c.pendingDocs}</H3>
+          <ul className="divide-y divide-border border-y border-border">
+            {[c.complaints, c.vatCert].map((x) => (
+              <li key={x} className="flex flex-wrap items-center gap-3 py-4">
+                <span className="min-w-0 flex-1"><span className="block text-sm font-semibold text-fg">{x}</span><span className="block text-xs text-muted">{c.pendingDocsWhy}</span></span>
+                <Status s="pending" />
+              </li>
+            ))}
           </ul>
         </section>
       </div>
@@ -186,29 +204,31 @@ export function Legal({ id }: { id?: string }) {
   }
 
   return (
-    <div className="site-wrap site-pad site-article-layout">
-      <article className="site-article">
-        <nav className="site-crumbs" aria-label={c.lEyebrow}><a href={site('legal')}>{c.lEyebrow}</a></nav>
-        <Intro title={tr(doc.title)} />
+    <div className={cn(wrap, 'grid gap-12 py-14 sm:py-20 lg:grid-cols-12')}>
+      <article className="space-y-8 lg:col-span-8">
+        <a href={site('legal')} className="text-[13px] font-medium text-muted hover:text-fg">{c.lEyebrow}</a>
+        <Intro title={tr(doc.title)}><Badge tone="amber">{c.draftBadge}</Badge></Intro>
         <Pending title={c.draft}>{c.draftWhy}</Pending>
-        <div className="site-prose">
+        <div className="max-w-[68ch] space-y-8">
           {doc.sections.map((s, i) => (
-            <section key={s.id} aria-labelledby={`site-lg-${s.id}`}>
-              <h2 className="site-h3" id={`site-lg-${s.id}`}>{i + 1}. {tr(s.h)}</h2>
-              <p>{tr(s.p)}</p>
+            <section key={s.id} aria-labelledby={`site-lg-${s.id}`} className="space-y-2">
+              <h2 id={`site-lg-${s.id}`} className="scroll-mt-24 text-lg font-semibold text-fg">{i + 1}. {tr(s.h)}</h2>
+              <p className="leading-[1.85] text-muted">{tr(s.p)}</p>
             </section>
           ))}
         </div>
       </article>
-      <aside className="site-aside">
-        <h2 className="site-h4">{c.contents}</h2>
-        <ol className="site-aside-list">
-          {doc.sections.map((s, i) => <li key={s.id}><button type="button" className="site-toc" onClick={() => jumpTo(`site-lg-${s.id}`)}>{i + 1}. {tr(s.h)}</button></li>)}
-        </ol>
-        <h2 className="site-h4">{c.otherDocs}</h2>
-        <ul className="site-aside-list">
-          {LEGAL.filter((d) => d.id !== doc.id).map((d) => <li key={d.id}><a href={site(`legal/${d.id}`)}>{tr(d.title)}</a></li>)}
-        </ul>
+      <aside className="space-y-8 lg:col-span-4 lg:pt-12">
+        <div className="lg:sticky lg:top-24 space-y-8">
+          <div>
+            <h2 className="mb-3 text-xs font-semibold tracking-wide text-subtle">{c.contents}</h2>
+            <ol className="space-y-1.5">{doc.sections.map((s, i) => <li key={s.id}><button type="button" onClick={() => jumpTo(`site-lg-${s.id}`)} className="text-start text-sm text-muted hover:text-fg">{i + 1}. {tr(s.h)}</button></li>)}</ol>
+          </div>
+          <div>
+            <h2 className="mb-3 text-xs font-semibold tracking-wide text-subtle">{c.otherDocs}</h2>
+            <ul className="space-y-1.5">{LEGAL.filter((d) => d.id !== doc.id).map((d) => <li key={d.id}><a href={site(`legal/${d.id}`)} className="text-sm font-medium text-fg hover:text-brand-700 hover:underline dark:hover:text-brand-300">{tr(d.title)}</a></li>)}</ul>
+          </div>
+        </div>
       </aside>
     </div>
   );
@@ -220,30 +240,36 @@ export function About() {
   const { lang } = useSite();
   const c = C[lang];
   return (
-    <div className="site-wrap site-pad">
-      <div className="site-about-hero">
-        <Intro eyebrow={c.aEyebrow} title={c.aTitle} lead={c.aLead} />
-        <img src="/lak-logo.png" alt="" width="112" height="192" className="site-about-logo" />
+    <div className={cn(wrap, 'space-y-20 py-14 sm:py-20')}>
+      <div className="grid items-end gap-10 lg:grid-cols-12">
+        <Intro eyebrow={c.aEyebrow} title={c.aTitle} lead={c.aLead} className="lg:col-span-9" />
+        <img src="/brand/lak-logo-sm.png" alt="" width={112} height={194} className="h-40 w-auto lg:col-span-3 lg:justify-self-end" />
       </div>
-      <section className="site-block site-mission" aria-labelledby="site-mission">
-        <h2 className="site-eyebrow" id="site-mission">{c.mission}</h2>
-        <p className="site-quote">{c.missionBody}</p>
+      <section aria-labelledby="site-mission" className="border-y border-border py-14">
+        <p id="site-mission" className="text-[13px] font-semibold tracking-wide text-brand-600 dark:text-brand-300">{c.mission}</p>
+        <p className="mt-4 max-w-4xl text-2xl font-semibold leading-snug text-fg sm:text-[34px]">{c.missionBody}</p>
       </section>
-      <section className="site-block" aria-labelledby="site-princ">
-        <h2 className="site-h2" id="site-princ">{c.principles}</h2>
-        <ol className="site-principles">
-          {c.p.map(([h, b], i) => <li key={h}><span className="site-journey-n" aria-hidden="true">0{i + 1}</span><h3 className="site-h3">{h}</h3><p>{b}</p></li>)}
+      <section aria-labelledby="site-princ" className="space-y-10">
+        <H2 id="site-princ">{c.principles}</H2>
+        <ol className="grid gap-10 sm:grid-cols-2 lg:grid-cols-4">
+          {c.p.map(([h, b], i) => (
+            <li key={h} className="space-y-2 border-t-2 border-fg pt-5">
+              <span className="text-xs font-semibold text-subtle tabular-nums" aria-hidden="true">0{i + 1}</span>
+              <H3>{h}</H3>
+              <p className="text-sm leading-relaxed text-muted">{b}</p>
+            </li>
+          ))}
         </ol>
       </section>
-      <section className="site-block" aria-labelledby="site-facts">
-        <h2 className="site-h3" id="site-facts">{c.facts}</h2>
-        <ul className="site-rows">
-          {[c.founded, c.hq, c.cr].map((f) => <li key={f}><span className="site-rows-main strong">{f}</span><Status s="pending" /></li>)}
+      <section aria-labelledby="site-facts" className="max-w-2xl space-y-3">
+        <H3 id="site-facts">{c.facts}</H3>
+        <ul className="divide-y divide-border border-y border-border">
+          {[c.founded, c.hq, c.cr].map((f) => <li key={f} className="flex items-center justify-between gap-3 py-4 text-sm font-semibold text-fg">{f}<Status s="pending" /></li>)}
         </ul>
       </section>
-      <div className="site-cta-row site-block">
-        <a className="btn primary site-btn-lg" href={site('start')}>{c.join}<Icon name="arrow" size={18} /></a>
-        <a className="btn site-btn-lg" href={site('contact')}>{c.talk}</a>
+      <div className="flex flex-wrap gap-3">
+        <LinkButton size="lg" href={site('start')}>{c.join}<Fwd /></LinkButton>
+        <LinkButton size="lg" variant="secondary" href={site('contact')}>{c.talk}</LinkButton>
       </div>
     </div>
   );

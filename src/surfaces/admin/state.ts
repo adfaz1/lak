@@ -2,7 +2,7 @@ import type { L } from '../../core/lang';
 import { createStore } from '../../core/store';
 import {
   advanceDelivery, advanceDispute, announcementFixtures, applicationFixtures, applyPlanChange, carrierFixtures, decideKyc,
-  decidePlanChange, deliveryFixtures, disputeFixtures, isLive, ledgerFixtures, moderate, proposePlanChange, reactivateStore,
+  decidePlanChange, deliveryFixtures, disputeFixtures, holdPayout, isLive, releasePayout, ledgerFixtures, moderate, proposePlanChange, reactivateStore,
   PLAN_NAME, revenueFixture, startAccess, storeFixtures, storeFromApplication, submissionFixtures, suspendStore, TODAY,
   type AccessSession, type Announcement, type AnnouncementDraft, type AuditAction, type AuditEntry, type DeliveryState,
   type DisputeState, type ErrorCode, type KycDecision, type ModAction, type PlanChange, type PlanId, type RoleId,
@@ -180,4 +180,29 @@ export function cancelAnnouncement(id: string, reason: string) {
   if (!a) return;
   announcementsStore.set((all) => all.map((x) => (x.id === id ? { ...x, status: 'cancelled' } : x)));
   audit('announcementCancelled', id, a.title, reason.trim());
+}
+
+export function holdStorePayout(id: string, reason: string): Outcome {
+  const s = storesStore.get().find((x) => x.id === id);
+  if (!s) return 'badTransition';
+  const r = holdPayout(s, reason, roleStore.get(), Date.now());
+  if (!r.ok) return r.error;
+  storesStore.set((all) => all.map((x) => (x.id === id ? r.value : x)));
+  audit('payoutHeld', id, s.name, reason.trim());
+  return null;
+}
+
+export function releaseStorePayout(id: string, reason: string): Outcome {
+  const s = storesStore.get().find((x) => x.id === id);
+  if (!s) return 'badTransition';
+  const r = releasePayout(s, reason, roleStore.get());
+  if (!r.ok) return r.error;
+  storesStore.set((all) => all.map((x) => (x.id === id ? r.value : x)));
+  audit('payoutReleased', id, s.name, reason.trim());
+  return null;
+}
+
+/** Prefill the announcement composer with a store audience (from a bulk selection). */
+export function draftForStores(storeIds: string[]) {
+  draftStore.set((d) => ({ ...d, audience: { type: 'stores', plans: [], storeIds } }));
 }

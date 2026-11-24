@@ -1,11 +1,11 @@
+// Site-local building blocks on the LAK design system (src/ds). Pages compose these and ds components.
 import type { ReactNode } from 'react';
+import { ArrowLeft, ArrowRight, Info } from 'lucide-react';
 import { useLang } from '../../core/lang';
 import { link } from '../../core/router';
-import { Badge } from '../../core/ui';
+import { Badge, cn } from '../../ds/ui';
 import type { L } from './domain';
 import { strings } from './i18n';
-
-/* Small site-local building blocks shared by the pages. */
 
 export const site = (path = '', query?: Record<string, string | undefined>) => link(`/site${path ? `/${path}` : ''}`, query);
 
@@ -14,82 +14,55 @@ export function useSite() {
   return { lang, dir, t: strings[lang], tr: (l: L) => l[lang] };
 }
 
-type IconName = 'arrow' | 'check' | 'minus' | 'search' | 'menu' | 'close' | 'box' | 'wallet' | 'layers' | 'clock' | 'lock' | 'info' | 'chevron' | 'mail' | 'phone' | 'pin';
+/** Page container: one width for the whole site. */
+export const wrap = 'mx-auto w-full max-w-[1200px] px-4 sm:px-6 lg:px-8';
 
-const PATHS: Record<IconName, ReactNode> = {
-  arrow: <path d="M5 12h14M13 6l6 6-6 6" />,
-  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
-  minus: <path d="M6 12h12" />,
-  search: <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></>,
-  menu: <path d="M4 7h16M4 12h16M4 17h16" />,
-  close: <path d="M6 6l12 12M18 6L6 18" />,
-  box: <><path d="M4 8l8-4 8 4v8l-8 4-8-4z" /><path d="M4 8l8 4 8-4M12 12v8" /></>,
-  wallet: <><rect x="3.5" y="6" width="17" height="13" rx="2" /><path d="M3.5 10h17M15.5 14.5h2" /></>,
-  layers: <><path d="M12 4l8 4-8 4-8-4z" /><path d="M4 12l8 4 8-4M4 16l8 4 8-4" /></>,
-  clock: <><circle cx="12" cy="12" r="8" /><path d="M12 8v4.5l3 2" /></>,
-  lock: <><rect x="5" y="10.5" width="14" height="9.5" rx="2" /><path d="M8.5 10.5V8a3.5 3.5 0 017 0v2.5" /></>,
-  info: <><circle cx="12" cy="12" r="8.5" /><path d="M12 11v5M12 8h.01" /></>,
-  chevron: <path d="M9 6l6 6-6 6" />,
-  mail: <><rect x="3.5" y="5.5" width="17" height="13" rx="2" /><path d="M4 7l8 6 8-6" /></>,
-  phone: <path d="M6.5 4h3l1.5 4-2 1.5a10 10 0 005.5 5.5l1.5-2 4 1.5v3a2 2 0 01-2 2A15 15 0 014.5 6a2 2 0 012-2z" />,
-  pin: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0113 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></>,
-};
-
-/** Inline stroke icon. Direction icons (arrow, chevron) flip in RTL via the `site-flip` class. */
-export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
-  const flip = name === 'arrow' || name === 'chevron';
-  return (
-    <svg className={flip ? 'site-icon site-flip' : 'site-icon'} width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {PATHS[name]}
-    </svg>
-  );
+/** Forward arrow in reading direction. */
+export function Fwd({ className }: { className?: string }) {
+  const { lang } = useLang();
+  const I = lang === 'ar' ? ArrowLeft : ArrowRight;
+  return <I className={cn('size-4 shrink-0', className)} aria-hidden="true" />;
 }
 
-/** Capability status. "demo" = built in this prototype; "planned" = in the blueprint, not available. */
+/** Capability status. "demo" = can be tried in this preview; "planned" = blueprint only; "pending" = awaiting a decision. */
 export function Status({ s }: { s: 'demo' | 'planned' | 'pending' }) {
   const { t } = useSite();
-  if (s === 'demo') return <Badge tone="info">{t.available}</Badge>;
-  if (s === 'pending') return <Badge tone="warning">{t.awaitingApproval}</Badge>;
-  return <Badge>{t.planned}</Badge>;
+  if (s === 'demo') return <Badge tone="green">{t.available}</Badge>;
+  if (s === 'pending') return <Badge tone="amber">{t.awaitingApproval}</Badge>;
+  return <Badge tone="gray">{t.planned}</Badge>;
 }
 
-/** Frame around a real UI fragment built from core components, labelled as example data. */
-export function Frame({ title, children, note }: { title: string; children: ReactNode; note?: ReactNode }) {
-  const { t } = useSite();
-  return (
-    <figure className="site-frame">
-      <div className="site-frame-bar">
-        <span className="site-frame-dots" aria-hidden="true"><i /><i /><i /></span>
-        <span className="site-frame-title">{title}</span>
-        <span className="site-frame-tag">{t.exampleData}</span>
-      </div>
-      <div className="site-frame-body">{children}</div>
-      {note && <figcaption className="site-frame-note">{note}</figcaption>}
-    </figure>
-  );
-}
+export const Eyebrow = ({ children, id }: { children: ReactNode; id?: string }) =>
+  <p id={id} className="text-[13px] font-semibold tracking-wide text-brand-600 dark:text-brand-300">{children}</p>;
 
 /** Standard page intro: eyebrow, h1 (focused on navigation), lead. */
-export function Intro({ eyebrow, title, lead, children }: { eyebrow?: string; title: string; lead?: ReactNode; children?: ReactNode }) {
+export function Intro({ eyebrow, title, lead, children, className }: { eyebrow?: string; title: string; lead?: ReactNode; children?: ReactNode; className?: string }) {
   return (
-    <header className="site-intro">
-      {eyebrow && <p className="site-eyebrow">{eyebrow}</p>}
-      <h1 className="site-h1" tabIndex={-1} data-page-heading>{title}</h1>
-      {lead && <p className="site-lead">{lead}</p>}
+    <header className={cn('max-w-3xl space-y-4', className)}>
+      {eyebrow && <Eyebrow>{eyebrow}</Eyebrow>}
+      <h1 tabIndex={-1} data-page-heading className="text-[32px] font-bold leading-[1.2] tracking-tight text-fg outline-none sm:text-[44px]">{title}</h1>
+      {lead && <p className="max-w-2xl text-base leading-relaxed text-muted sm:text-lg">{lead}</p>}
       {children}
     </header>
   );
 }
 
-export function Section({ id, eyebrow, title, lead, children, tone }: { id: string; eyebrow?: string; title: string; lead?: ReactNode; children: ReactNode; tone?: 'tint' | 'ink' }) {
+export const H2 = ({ children, id, className }: { children: ReactNode; id?: string; className?: string }) =>
+  <h2 id={id} className={cn('text-2xl font-bold leading-snug tracking-tight text-fg sm:text-[30px]', className)}>{children}</h2>;
+export const H3 = ({ children, id, className }: { children: ReactNode; id?: string; className?: string }) =>
+  <h3 id={id} className={cn('text-lg font-semibold text-fg', className)}>{children}</h3>;
+export const Lead = ({ children, className }: { children: ReactNode; className?: string }) =>
+  <p className={cn('max-w-2xl text-base leading-relaxed text-muted', className)}>{children}</p>;
+
+/** A full-width band with a heading block. `tone="tint"` gives a quiet surface for rhythm. */
+export function Section({ id, eyebrow, title, lead, children, tone }: { id: string; eyebrow?: string; title: string; lead?: ReactNode; children: ReactNode; tone?: 'tint' }) {
   return (
-    <section className={`site-section${tone ? ` site-section-${tone}` : ''}`} aria-labelledby={id}>
-      <div className="site-wrap">
-        <div className="site-section-head">
-          {eyebrow && <p className="site-eyebrow">{eyebrow}</p>}
-          <h2 className="site-h2" id={id}>{title}</h2>
-          {lead && <p className="site-section-lead">{lead}</p>}
+    <section aria-labelledby={id} className={cn('py-16 sm:py-24', tone === 'tint' && 'border-y border-border bg-surface')}>
+      <div className={wrap}>
+        <div className="mb-10 max-w-3xl space-y-3">
+          {eyebrow && <Eyebrow>{eyebrow}</Eyebrow>}
+          <H2 id={id}>{title}</H2>
+          {lead && <Lead>{lead}</Lead>}
         </div>
         {children}
       </div>
@@ -100,10 +73,30 @@ export function Section({ id, eyebrow, title, lead, children, tone }: { id: stri
 /** Notice that a block is a draft or awaiting an approved source. */
 export function Pending({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="site-pending" role="note">
-      <Icon name="info" />
-      <div><strong>{title}</strong>{children && <p>{children}</p>}</div>
+    <div role="note" className="flex gap-3 rounded-xl border border-amber-500/30 bg-amber-500/8 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
+      <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0"><p className="font-semibold">{title}</p>{children && <p className="mt-0.5 opacity-90">{children}</p>}</div>
     </div>
+  );
+}
+
+/** Text link with a forward arrow. */
+export function ArrowLink({ href, children }: { href: string; children: ReactNode }) {
+  return <a href={href} className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 hover:underline dark:text-brand-300">{children}<Fwd /></a>;
+}
+
+/** A real screenshot of the product in a quiet window frame, labelled as demo data. */
+export function Shot({ src, alt, label, className, priority }: { src: string; alt: string; label?: string; className?: string; priority?: boolean }) {
+  const { t } = useSite();
+  return (
+    <figure className={cn('overflow-hidden rounded-2xl border border-border bg-surface shadow-pop', className)}>
+      <div className="flex h-9 items-center gap-3 border-b border-border px-3.5">
+        <span className="flex gap-1.5" aria-hidden="true"><i className="size-2.5 rounded-full bg-border" /><i className="size-2.5 rounded-full bg-border" /><i className="size-2.5 rounded-full bg-border" /></span>
+        {label && <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted">{label}</span>}
+        <span className="ms-auto shrink-0 rounded-full bg-amber-500/12 px-2 py-0.5 text-[11px] font-semibold text-amber-800 dark:text-amber-300">{t.exampleData}</span>
+      </div>
+      <img src={src} alt={alt} width={2160} height={1350} loading={priority ? 'eager' : 'lazy'} decoding="async" className="block aspect-[16/10] h-auto w-full object-cover object-top" />
+    </figure>
   );
 }
 

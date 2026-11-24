@@ -10,7 +10,8 @@ export type Result<T> = { ok: true; value: T } | { ok: false; error: ErrorCode }
 export type ErrorCode =
   | 'noPerm' | 'reasonRequired' | 'terminal' | 'docsIncomplete' | 'notActive' | 'notSuspended' | 'daysInvalid'
   | 'samePlan' | 'pendingExists' | 'selfApproval' | 'notPending' | 'writeNotAllowed' | 'sessionActive' | 'durationInvalid'
-  | 'badTransition' | 'checksFailed' | 'titleRequired' | 'bodyRequired' | 'audienceEmpty' | 'scheduleInPast' | 'windowInvalid';
+  | 'badTransition' | 'checksFailed' | 'titleRequired' | 'bodyRequired' | 'audienceEmpty' | 'scheduleInPast' | 'windowInvalid'
+  | 'noPayout' | 'alreadyHeld' | 'notHeld';
 
 const ok = <T,>(value: T): Result<T> => ({ ok: true, value });
 const fail = <T,>(error: ErrorCode): Result<T> => ({ ok: false, error });
@@ -171,8 +172,9 @@ export interface Store {
   domain: { host: string; kind: 'custom' | 'platform'; state: 'verified' | 'pending' | 'failed' };
   platformPath: string; created: string; gmv30: number; orders30: number; openOrders: number; pendingPayout: number;
   errors24h: number; visits30: number; staff: number; products: number; tickets: number; lastOrder: string | null;
-  featuresInUse: string[]; suspension?: Suspension;
+  featuresInUse: string[]; suspension?: Suspension; payoutHold?: PayoutHold;
 }
+export interface PayoutHold { reason: string; by: RoleId; at: number }
 
 /** "Active store": not suspended, published (not onboarding) and at least one order in the last 30 days. */
 export function isActiveStore(s: Store, today: string): boolean {
@@ -210,6 +212,23 @@ export function reactivateStore(s: Store, reason: string, role: RoleId): Result<
 /** What a suspension does. Data is preserved; nothing is deleted. */
 export function suspensionImpact(s: Store) {
   return { storefrontOffline: true, checkoutClosed: true, openOrders: s.openOrders, pendingPayout: s.pendingPayout, products: s.products, dataPreserved: true };
+}
+
+/* ---------- Payout hold (merchant funds stay with the provider; nothing is moved) ---------- */
+
+/** Holds the next payout of a store's pending merchant funds. Finance decision, reason required. */
+export function holdPayout(s: Store, reason: string, role: RoleId, at: number): Result<Store> {
+  if (!can(role, 'payments.act')) return fail('noPerm');
+  if (s.pendingPayout <= 0) return fail('noPayout');
+  if (s.payoutHold) return fail('alreadyHeld');
+  if (!hasReason(reason)) return fail('reasonRequired');
+  return ok({ ...s, payoutHold: { reason: reason.trim(), by: role, at } });
+}
+export function releasePayout(s: Store, reason: string, role: RoleId): Result<Store> {
+  if (!can(role, 'payments.act')) return fail('noPerm');
+  if (!s.payoutHold) return fail('notHeld');
+  if (!hasReason(reason)) return fail('reasonRequired');
+  return ok({ ...s, payoutHold: undefined });
 }
 
 /* ---------- KYC ---------- */
@@ -389,7 +408,8 @@ export function toCsv(headers: string[], rows: (string | number)[][]): string {
 export type AuditAction =
   | 'roleSwitched' | 'kycApprove' | 'kycReject' | 'kycInfo' | 'docViewed' | 'storeSuspended' | 'storeReactivated'
   | 'accessStarted' | 'accessEnded' | 'accessExpired' | 'planProposed' | 'planApproved' | 'planRejected'
-  | 'disputeMoved' | 'deliveryMoved' | 'contentModerated' | 'reportExported' | 'announcementScheduled' | 'announcementCancelled';
+  | 'disputeMoved' | 'deliveryMoved' | 'contentModerated' | 'reportExported' | 'announcementScheduled' | 'announcementCancelled'
+  | 'payoutHeld' | 'payoutReleased';
 export interface AuditEntry { id: string; at: number; role: RoleId; action: AuditAction; target: string; targetLabel: L; reason?: string; detail?: L }
 
 /* ---------- Fixtures ---------- */

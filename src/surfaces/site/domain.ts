@@ -149,3 +149,19 @@ export function lowestPlan(cells: Cell[]): PlanId | null {
 export function progress(done: Record<string, boolean>, ids: string[]): { done: number; total: number } {
   return { done: ids.filter((id) => done[id]).length, total: ids.length };
 }
+
+/* ---------- product screenshots ---------- */
+
+export type ShotName = 'home' | 'orders' | 'order' | 'finance' | 'inventory' | 'marketing' | 'products' | 'phone';
+const DARK_SHOTS: ShotName[] = ['home', 'phone'];
+
+/** Path of a real dashboard capture in /public/site for the page language; dark captures exist for the hero only. */
+export function shotSrc(name: ShotName, lang: Lang, dark = false): string {
+  return `/site/${name}-${lang}${dark && DARK_SHOTS.includes(name) ? '-dark' : ''}.jpg`;
+}
+
+/** 1-based guide step from the URL, clamped to a valid index (0-based). */
+export function guideIndex(raw: string | null, total: number): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= total ? n - 1 : 0;
+}

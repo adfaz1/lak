@@ -1,12 +1,15 @@
+// P01-HLP / P01-BLG — help center (searchable knowledge base) and blog (list, categories, article, comments).
 import { useState, type FormEvent } from 'react';
+import { BookOpen, ChevronLeft, ChevronRight, LifeBuoy, SearchX } from 'lucide-react';
+import { useLang } from '../../core/lang';
 import { replace, type Route } from '../../core/router';
 import { createStore } from '../../core/store';
-import { Badge, Empty, Field, Sim } from '../../core/ui';
+import { Badge, Button, Card, cn, EmptyState, LinkButton } from '../../ds/ui';
+import { Field, Input, SearchInput, Simulated, Textarea } from '../../ds/kit';
 import { ARTICLES, BLOG_CATS, HELP_CATS, POSTS } from './content';
 import { hasErrors, related, searchItems, validateComment, type CommentDraft } from './domain';
-import { Icon, Intro, Pending, site, useSite } from './kit';
-
-/* Help center (searchable knowledge base) and blog (list, categories, article, comments). */
+import { ArrowLink, Fwd, H3, Intro, Pending, site, useSite, wrap } from './kit';
+import { useSiteState } from './review';
 
 const C = {
   ar: {
@@ -35,6 +38,20 @@ const C = {
   },
 };
 
+const pageCls = cn(wrap, 'py-14 sm:py-20');
+
+function Crumbs({ items }: { items: { href: string; label: string }[] }) {
+  const { lang } = useLang();
+  const Sep = lang === 'ar' ? ChevronLeft : ChevronRight;
+  return (
+    <nav aria-label={lang === 'ar' ? 'مسار الصفحة' : 'Breadcrumb'} className="mb-6 flex flex-wrap items-center gap-1.5 text-[13px] font-medium text-muted">
+      {items.map((i, n) => <span key={i.href} className="inline-flex items-center gap-1.5">{n > 0 && <Sep className="size-3.5" aria-hidden="true" />}<a href={i.href} className="hover:text-fg">{i.label}</a></span>)}
+    </nav>
+  );
+}
+
+const Prose = ({ paras }: { paras: string[] }) => <div className="max-w-[68ch] space-y-5 text-[17px] leading-[1.85] text-fg">{paras.map((p) => <p key={p}>{p}</p>)}</div>;
+
 /* ---------------- help ---------------- */
 
 export function Help({ route, id }: { route: Route; id?: string }) {
@@ -44,59 +61,69 @@ export function Help({ route, id }: { route: Route; id?: string }) {
 function HelpIndex({ route }: { route: Route }) {
   const { lang, t, tr } = useSite();
   const c = C[lang];
+  const empty = useSiteState() === 'empty';
+  const all = empty ? [] : ARTICLES;
   const q = route.query.get('q') ?? '';
   const cat = HELP_CATS.some((h) => h.id === route.query.get('cat')) ? route.query.get('cat')! : '';
-  const results = searchItems(ARTICLES, q, cat || undefined);
+  const results = searchItems(all, q, cat || undefined);
   const set = (next: { q?: string; cat?: string }) => replace(site('help', { q: next.q ?? q, cat: next.cat ?? cat }));
+  const catLink = (id: string, label: string, count: number, blurb?: string) => (
+    <a href={site('help', { q: q || undefined, cat: id || undefined })} aria-current={cat === id ? 'true' : undefined}
+      className={cn('block rounded-xl px-3 py-2.5 transition-colors', cat === id ? 'bg-brand-500/10 text-brand-700 dark:text-brand-300' : 'text-fg hover:bg-surface-2')}>
+      <span className="flex items-center justify-between gap-2 text-sm font-semibold">{label}<span className="text-xs font-medium text-subtle tabular-nums">{count}</span></span>
+      {blurb && <span className="mt-0.5 block text-xs text-muted">{blurb}</span>}
+    </a>
+  );
 
   return (
-    <div className="site-wrap site-pad">
+    <div className={pageCls}>
       <Intro eyebrow={c.hEyebrow} title={c.hTitle} lead={c.hLead}>
-        <form className="site-search" role="search" onSubmit={(e) => e.preventDefault()}>
-          <label htmlFor="site-help-q" className="sr">{c.hSearch}</label>
-          <Icon name="search" />
-          <input id="site-help-q" className="input" type="search" value={q} placeholder={c.hSearchPh}
-            onChange={(e) => set({ q: e.target.value })} autoComplete="off" />
-          {q && <button type="button" className="btn small" onClick={() => set({ q: '' })}>{t.clear}</button>}
+        <form role="search" onSubmit={(e) => e.preventDefault()} className="flex max-w-xl gap-2 pt-2 [&>div]:sm:max-w-none">
+          <SearchInput value={q} onChange={(v) => set({ q: v })} placeholder={c.hSearchPh} />
+          {q && <Button variant="ghost" onClick={() => set({ q: '' })}>{t.clear}</Button>}
         </form>
       </Intro>
 
-      <section className="site-block" aria-labelledby="site-help-cats">
-        <h2 className="site-h3" id="site-help-cats">{c.cats}</h2>
-        <ul className="site-cats">
-          <li><a href={site('help', { q: q || undefined })} aria-current={!cat ? 'true' : undefined}><span className="strong">{c.allArticles}</span><span className="muted small">{c.articles(ARTICLES.length)}</span></a></li>
-          {HELP_CATS.map((h) => (
-            <li key={h.id}>
-              <a href={site('help', { q: q || undefined, cat: h.id })} aria-current={cat === h.id ? 'true' : undefined}>
-                <span className="strong">{tr(h.name)}</span><span className="muted small">{tr(h.blurb)} · {c.articles(ARTICLES.filter((a) => a.cat === h.id).length)}</span>
-              </a>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      <section className="site-block" aria-labelledby="site-help-res">
-        <h2 className="site-h3" id="site-help-res">{cat ? tr(HELP_CATS.find((h) => h.id === cat)!.name) : c.allArticles}</h2>
-        <p className="muted small" aria-live="polite">{t.results(results.length)}</p>
-        {results.length === 0 ? (
-          <Empty action={<a className="btn" href={site('contact', { topic: 'support' })}>{c.contactSupport}</a>}>
-            <span><strong>{t.noResults(q)}</strong> <span className="muted">{t.noResultsHint}</span></span>
-          </Empty>
-        ) : (
-          <ul className="site-list">
-            {results.map((a) => (
-              <li key={a.id}>
-                <a href={site(`help/${a.id}`)}>
-                  <span className="site-list-meta">{tr(HELP_CATS.find((h) => h.id === a.cat)!.name)} · {t.minutes(a.minutes)}</span>
-                  <span className="site-list-title">{tr(a.title)}</span>
-                  <span className="muted">{tr(a.summary)}</span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="muted small">{c.videos}</p>
-      </section>
+      {all.length === 0 ? (
+        <Card className="mt-12"><EmptyState as="h2" icon={<BookOpen className="size-6" aria-hidden="true" />} title={t.emptyHelp}
+          action={<LinkButton href={site('contact', { topic: 'support' })}>{c.contactSupport}</LinkButton>}>{t.emptyHelpBody}</EmptyState></Card>
+      ) : (
+        <div className="mt-12 grid gap-10 lg:grid-cols-12">
+          <nav aria-labelledby="site-help-cats" className="lg:col-span-3">
+            <h2 id="site-help-cats" className="mb-3 px-3 text-xs font-semibold tracking-wide text-subtle">{c.cats}</h2>
+            <ul className="space-y-1">
+              <li>{catLink('', c.allArticles, all.length)}</li>
+              {HELP_CATS.map((h) => <li key={h.id}>{catLink(h.id, tr(h.name), all.filter((a) => a.cat === h.id).length, tr(h.blurb))}</li>)}
+            </ul>
+          </nav>
+          <section aria-labelledby="site-help-res" className="lg:col-span-9">
+            <div className="mb-4 flex items-baseline justify-between gap-3">
+              <h2 id="site-help-res" className="text-lg font-semibold text-fg">{cat ? tr(HELP_CATS.find((h) => h.id === cat)!.name) : c.allArticles}</h2>
+              <p className="text-sm text-muted" aria-live="polite">{t.results(results.length)}</p>
+            </div>
+            {results.length === 0 ? (
+              <Card><EmptyState icon={<SearchX className="size-6" aria-hidden="true" />} title={t.noResults(q)}
+                action={<><Button variant="secondary" onClick={() => set({ q: '', cat: '' })}>{t.clear}</Button><LinkButton variant="ghost" href={site('contact', { topic: 'support' })}>{c.contactSupport}</LinkButton></>}>{t.noResultsHint}</EmptyState></Card>
+            ) : (
+              <Card><ul className="divide-y divide-border">
+                {results.map((a) => (
+                  <li key={a.id}>
+                    <a href={site(`help/${a.id}`)} className="group flex gap-4 px-5 py-4 transition-colors hover:bg-surface-2/60">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-xs text-subtle">{tr(HELP_CATS.find((h) => h.id === a.cat)!.name)} · {t.minutes(a.minutes)}</span>
+                        <span className="mt-1 block font-semibold text-fg group-hover:text-brand-700 dark:group-hover:text-brand-300">{tr(a.title)}</span>
+                        <span className="mt-1 block text-sm text-muted">{tr(a.summary)}</span>
+                      </span>
+                      <Fwd className="mt-6 text-subtle" />
+                    </a>
+                  </li>
+                ))}
+              </ul></Card>
+            )}
+            <p className="mt-4 text-xs text-subtle">{c.videos}</p>
+          </section>
+        </div>
+      )}
     </div>
   );
 }
@@ -110,30 +137,31 @@ function HelpArticle({ id }: { id: string }) {
   const cat = HELP_CATS.find((h) => h.id === a.cat)!;
 
   return (
-    <div className="site-wrap site-pad site-article-layout">
-      <article className="site-article">
-        <nav className="site-crumbs" aria-label={t.back}>
-          <a href={site('help')}>{c.hEyebrow}</a><Icon name="chevron" size={14} /><a href={site('help', { cat: a.cat })}>{tr(cat.name)}</a>
-        </nav>
-        <Intro title={tr(a.title)} lead={tr(a.summary)}><p className="muted small">{t.minutes(a.minutes)}</p></Intro>
-        <div className="site-prose">{a.body.map((p) => <p key={p.en}>{tr(p)}</p>)}</div>
-        <div className="site-feedback" aria-live="polite">
-          {vote ? <p>{vote === 'yes' ? c.thanks : c.sorry}</p> : (
+    <div className={cn(pageCls, 'grid gap-12 lg:grid-cols-12')}>
+      <article className="lg:col-span-8">
+        <Crumbs items={[{ href: site('help'), label: c.hEyebrow }, { href: site('help', { cat: a.cat }), label: tr(cat.name) }]} />
+        <Intro title={tr(a.title)} lead={tr(a.summary)}><p className="text-xs text-subtle">{t.minutes(a.minutes)}</p></Intro>
+        <div className="mt-10"><Prose paras={a.body.map(tr)} /></div>
+        <div className="mt-12 flex flex-wrap items-center gap-3 border-t border-border pt-6" aria-live="polite">
+          {vote ? <p className="text-sm text-muted">{vote === 'yes' ? c.thanks : c.sorry}</p> : (
             <>
-              <span className="strong">{c.helpful}</span>
-              <button type="button" className="btn small" onClick={() => setVote('yes')}>{c.yes}</button>
-              <button type="button" className="btn small" onClick={() => setVote('no')}>{c.no}</button>
+              <span className="text-sm font-semibold text-fg">{c.helpful}</span>
+              <Button size="sm" variant="secondary" onClick={() => setVote('yes')}>{c.yes}</Button>
+              <Button size="sm" variant="secondary" onClick={() => setVote('no')}>{c.no}</Button>
             </>
           )}
         </div>
       </article>
-      <aside className="site-aside">
-        <h2 className="site-h4">{c.relatedH}</h2>
-        <ul className="site-aside-list">
-          {related(ARTICLES, a).map((r) => <li key={r.id}><a href={site(`help/${r.id}`)}>{tr(r.title)}</a></li>)}
-        </ul>
-        <h2 className="site-h4">{c.stillNeed}</h2>
-        <a className="btn" href={site('contact', { topic: 'support' })}>{c.contactSupport}</a>
+      <aside className="space-y-8 lg:col-span-4 lg:pt-12">
+        <div>
+          <h2 className="mb-3 text-xs font-semibold tracking-wide text-subtle">{c.relatedH}</h2>
+          <ul className="space-y-2.5">{related(ARTICLES, a).map((r) => <li key={r.id}><a href={site(`help/${r.id}`)} className="text-sm font-medium text-fg hover:text-brand-700 hover:underline dark:hover:text-brand-300">{tr(r.title)}</a></li>)}</ul>
+        </div>
+        <Card className="space-y-3 p-5">
+          <LifeBuoy className="size-5 text-brand-600" aria-hidden="true" />
+          <h2 className="font-semibold text-fg">{c.stillNeed}</h2>
+          <LinkButton variant="secondary" href={site('contact', { topic: 'support' })}>{c.contactSupport}</LinkButton>
+        </Card>
       </aside>
     </div>
   );
@@ -141,9 +169,9 @@ function HelpArticle({ id }: { id: string }) {
 
 function Missing({ title, body, back, backLabel }: { title: string; body: string; back: string; backLabel: string }) {
   return (
-    <div className="site-wrap site-narrow site-pad">
+    <div className={pageCls}>
       <Intro title={title} lead={body} />
-      <a className="btn primary" href={back}>{backLabel}</a>
+      <div className="mt-8"><LinkButton size="lg" href={back}>{backLabel}</LinkButton></div>
     </div>
   );
 }
@@ -151,7 +179,7 @@ function Missing({ title, body, back, backLabel }: { title: string; body: string
 /* ---------------- blog ---------------- */
 
 interface Comment { n: number; name: string; body: string }
-/** Simulated, local-only comments. Reset with the global "Reset data" button. */
+/** Simulated, local-only comments (per tab session). */
 const commentsStore = createStore.key('site.commentsStore')<Record<string, Comment[]>>(() => ({}));
 
 export function Blog({ route, id }: { route: Route; id?: string }) {
@@ -161,38 +189,48 @@ export function Blog({ route, id }: { route: Route; id?: string }) {
 function BlogIndex({ route }: { route: Route }) {
   const { lang, t, tr } = useSite();
   const c = C[lang];
+  const empty = useSiteState() === 'empty';
   const cat = BLOG_CATS.some((b) => b.id === route.query.get('cat')) ? route.query.get('cat')! : '';
-  const posts = POSTS.filter((p) => !cat || p.cat === cat);
+  const posts = (empty ? [] : POSTS).filter((p) => !cat || p.cat === cat);
   const [lead, ...rest] = posts;
   const catName = (id: string) => tr(BLOG_CATS.find((b) => b.id === id)!.name);
+  const chip = (id: string, label: string) => (
+    <a key={id || 'all'} href={site('blog', { cat: id || undefined })} aria-current={cat === id ? 'true' : undefined}
+      className={cn('inline-flex h-9 items-center rounded-full border px-4 text-sm font-medium transition-colors', cat === id ? 'border-brand-600 bg-brand-600 text-white' : 'border-border bg-surface text-muted hover:text-fg')}>{label}</a>
+  );
 
   return (
-    <div className="site-wrap site-pad">
+    <div className={cn(pageCls, 'space-y-10')}>
       <Intro eyebrow={c.bEyebrow} title={c.bTitle} lead={c.bLead} />
       <Pending title={c.bDraft}>{c.bDraftWhy}</Pending>
-      <div className="views site-block" role="group" aria-label={c.blogCats}>
-        <a className="chip" href={site('blog')} aria-current={!cat ? 'true' : undefined}>{t.all}</a>
-        {BLOG_CATS.map((b) => <a key={b.id} className="chip" href={site('blog', { cat: b.id })} aria-current={cat === b.id ? 'true' : undefined}>{tr(b.name)}</a>)}
+      <div role="group" aria-label={c.blogCats} className="flex flex-wrap gap-2">
+        {chip('', t.all)}{BLOG_CATS.map((b) => chip(b.id, tr(b.name)))}
       </div>
-      {lead && (
-        <a className="site-feature" href={site(`blog/${lead.id}`)}>
-          <span className="site-list-meta">{catName(lead.cat)} · {t.minutes(lead.minutes)}</span>
-          <span className="site-feature-title">{tr(lead.title)}</span>
-          <span className="site-lead">{tr(lead.summary)}</span>
-          <span className="site-link">{t.readMore}<Icon name="arrow" size={16} /></span>
-        </a>
+      {!lead ? (
+        <Card><EmptyState as="h2" title={t.emptyBlog}>{t.emptyBlogBody}</EmptyState></Card>
+      ) : (
+        <>
+          <a href={site(`blog/${lead.id}`)} className="group block rounded-3xl border border-border bg-surface p-8 transition-colors hover:border-brand-300 sm:p-12">
+            <span className="text-xs text-subtle">{catName(lead.cat)} · {t.minutes(lead.minutes)}</span>
+            <span className="mt-3 block max-w-3xl text-2xl font-bold leading-snug text-fg group-hover:text-brand-700 sm:text-[34px] dark:group-hover:text-brand-300">{tr(lead.title)}</span>
+            <span className="mt-4 block max-w-2xl leading-relaxed text-muted">{tr(lead.summary)}</span>
+            <span className="mt-6 inline-flex items-center gap-1.5 text-sm font-semibold text-brand-700 dark:text-brand-300">{t.readMore}<Fwd /></span>
+          </a>
+          {rest.length > 0 && (
+            <ul className="grid gap-x-8 gap-y-10 sm:grid-cols-2 lg:grid-cols-3">
+              {rest.map((p) => (
+                <li key={p.id} className="border-t border-border pt-5">
+                  <a href={site(`blog/${p.id}`)} className="group block">
+                    <span className="text-xs text-subtle">{catName(p.cat)} · {t.minutes(p.minutes)}</span>
+                    <span className="mt-2 block text-lg font-semibold leading-snug text-fg group-hover:text-brand-700 dark:group-hover:text-brand-300">{tr(p.title)}</span>
+                    <span className="mt-2 block text-sm leading-relaxed text-muted">{tr(p.summary)}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       )}
-      <ul className="site-list site-list-grid">
-        {rest.map((p) => (
-          <li key={p.id}>
-            <a href={site(`blog/${p.id}`)}>
-              <span className="site-list-meta">{catName(p.cat)} · {t.minutes(p.minutes)}</span>
-              <span className="site-list-title">{tr(p.title)}</span>
-              <span className="muted">{tr(p.summary)}</span>
-            </a>
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }
@@ -218,47 +256,41 @@ function BlogPost({ id }: { id: string }) {
   };
 
   return (
-    <div className="site-wrap site-pad site-article-layout">
-      <article className="site-article">
-        <nav className="site-crumbs" aria-label={t.back}>
-          <a href={site('blog')}>{c.bEyebrow}</a><Icon name="chevron" size={14} /><a href={site('blog', { cat: p.cat })}>{tr(cat.name)}</a>
-        </nav>
+    <div className={cn(pageCls, 'grid gap-12 lg:grid-cols-12')}>
+      <article className="lg:col-span-8">
+        <Crumbs items={[{ href: site('blog'), label: c.bEyebrow }, { href: site('blog', { cat: p.cat }), label: tr(cat.name) }]} />
         <Intro title={tr(p.title)} lead={tr(p.summary)}>
-          <p className="muted small">{c.byline} · {t.minutes(p.minutes)} · <Badge>{c.bDraft}</Badge></p>
+          <p className="flex flex-wrap items-center gap-2 text-xs text-subtle">{c.byline} · {t.minutes(p.minutes)} <Badge tone="amber">{c.bDraft}</Badge></p>
         </Intro>
-        <div className="site-prose">{p.body.map((b) => <p key={b.en}>{tr(b)}</p>)}</div>
+        <div className="mt-10"><Prose paras={p.body.map(tr)} /></div>
 
-        <section className="site-comments" aria-labelledby="site-comments-h">
-          <h2 className="site-h3" id="site-comments-h">{c.comments} <span className="muted">({comments.length})</span></h2>
-          {comments.length === 0 ? <p className="muted">{c.noComments}</p> : (
-            <ul className="site-comment-list">
+        <section aria-labelledby="site-comments-h" className="mt-14 space-y-6 border-t border-border pt-8">
+          <H3 id="site-comments-h">{c.comments} <span className="text-muted tabular-nums">({comments.length})</span></H3>
+          {comments.length === 0 ? <p className="text-sm text-muted">{c.noComments}</p> : (
+            <ul className="space-y-3">
               {comments.map((cm) => (
-                <li key={cm.n}>
-                  <div className="site-comment-head"><span className="strong">{cm.name}</span><Badge tone="warning">{c.moderation}</Badge><Sim /></div>
-                  <p>{cm.body}</p>
+                <li key={cm.n} className="rounded-xl border border-border bg-surface p-4">
+                  <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-semibold text-fg">{cm.name}</span><Badge tone="amber">{c.moderation}</Badge><Simulated /></div>
+                  <p className="mt-2 text-sm leading-relaxed text-fg">{cm.body}</p>
                 </li>
               ))}
             </ul>
           )}
-          <form className="site-form" onSubmit={submit} noValidate>
-            <Field id="site-cm-name" label={c.yourName} error={errors.name && t.errors[errors.name]}>
-              <input id="site-cm-name" className="input" value={draft.name} aria-invalid={!!errors.name} aria-describedby={errors.name ? 'site-cm-name-err' : undefined}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })} autoComplete="name" />
+          <form onSubmit={submit} noValidate className="max-w-xl space-y-4">
+            <Field label={c.yourName} error={errors.name && t.errors[errors.name]}>
+              {(f) => <Input {...f} value={draft.name} autoComplete="name" onChange={(e) => setDraft({ ...draft, name: e.target.value })} />}
             </Field>
-            <Field id="site-cm-body" label={c.yourComment} error={errors.body && t.errors[errors.body]}>
-              <textarea id="site-cm-body" className="input" value={draft.body} aria-invalid={!!errors.body} aria-describedby={errors.body ? 'site-cm-body-err' : undefined}
-                onChange={(e) => setDraft({ ...draft, body: e.target.value })} />
+            <Field label={c.yourComment} error={errors.body && t.errors[errors.body]}>
+              {(f) => <Textarea {...f} value={draft.body} onChange={(e) => setDraft({ ...draft, body: e.target.value })} />}
             </Field>
-            <p className="muted small">{c.moderationNote}</p>
-            <div className="actions"><button type="submit" className="btn primary">{c.post}</button><Sim /></div>
+            <div className="flex flex-wrap items-center gap-3"><Button type="submit">{c.post}</Button><Simulated /></div>
+            <p className="text-xs text-subtle">{c.moderationNote}</p>
           </form>
         </section>
       </article>
-      <aside className="site-aside">
-        <h2 className="site-h4">{c.relatedPosts}</h2>
-        <ul className="site-aside-list">
-          {related(POSTS, p).map((r) => <li key={r.id}><a href={site(`blog/${r.id}`)}>{tr(r.title)}</a></li>)}
-        </ul>
+      <aside className="lg:col-span-4 lg:pt-12">
+        <h2 className="mb-3 text-xs font-semibold tracking-wide text-subtle">{c.relatedPosts}</h2>
+        <ul className="space-y-4">{related(POSTS, p).map((r) => <li key={r.id}><ArrowLink href={site(`blog/${r.id}`)}>{tr(r.title)}</ArrowLink></li>)}</ul>
       </aside>
     </div>
   );

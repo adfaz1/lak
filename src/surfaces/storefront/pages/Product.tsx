@@ -1,20 +1,26 @@
 import { useRef, useState } from 'react';
+import { Check, ChevronDown, Heart, RotateCcw, ShoppingBag, Truck } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
+import { Alert, Select } from '../../../ds/kit';
+import { Button, EmptyState, InfoHint, LinkButton, cn } from '../../../ds/ui';
+import { settingsStore } from '../../merchant/stores';
+import { shopperView } from '../../dashboard/storefront/model';
 import {
-  CATEGORIES, CITIES, COLORS, MERCHANT, SHIP_METHODS, addToCart, deliveryEstimate, findVariant, missingOptions, productById,
+  CATEGORIES, CITIES, COLORS, SHIP_METHODS, addToCart, deliveryEstimate, findVariant, missingOptions, productById,
   stockLevel, type CityId, type ColorId,
 } from '../domain';
-import { Icon, Price, ProductArt, Swatch, sizeLabel, to, useS, variantLabel } from '../kit';
-import { accountStore, cartStore, catalogStore, toggleWish } from '../state';
+import { Crumbs, H2, PANEL, Price, ProductPhoto, Stepper, Swatch, WRAP, sizeLabel, to, useS, variantLabel } from '../kit';
+import { accountStore, cartStore, toggleWish } from '../state';
+import { useCatalog } from '../data';
 import { ProductGrid } from './Listing';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
   const { t, l, lang, dl } = useS();
-  const products = catalogStore.use();
+  const products = useCatalog();
   const cart = cartStore.use();
   const acc = accountStore.use();
+  const canOrder = shopperView(settingsStore.use().status) === 'open';
   const p = productById(products, id);
-  const [view, setView] = useState(0);
   const [qty, setQty] = useState(1);
   const [err, setErr] = useState<('color' | 'size')[]>([]);
   const [added, setAdded] = useState<string | null>(null);
@@ -24,9 +30,8 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
 
   if (!p) {
     return (
-      <div className="sf-wrap sf-section sf-narrow">
-        <h1 className="sf-h1">{t.gone}</h1>
-        <a className="btn primary" href={to('/c/all')}>{t.all}</a>
+      <div className={cn(WRAP, 'py-16')}>
+        <EmptyState as="h1" title={t.gone} action={<LinkButton href={to('/c/all')}>{t.all}</LinkButton>} />
       </div>
     );
   }
@@ -46,6 +51,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const est = deliveryEstimate(std, city, Date.now());
   const price = variant?.price ?? Math.min(...p.variants.map((v) => v.price));
   const related = products.filter((x) => x.cat === p.cat && x.id !== p.id).slice(0, 4);
+  const soldOutVariant = !!variant && variant.stock <= 0;
 
   const pick = (k: 'color' | 'size', v: string) => {
     setErr((e) => e.filter((x) => x !== k));
@@ -61,7 +67,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
       (missing[0] === 'color' ? colorRef : sizeRef).current?.querySelector('input')?.focus();
       return;
     }
-    if (!variant || room <= 0) return;
+    if (!variant || room <= 0 || !canOrder) return;
     cartStore.set((c) => addToCart(c, variant.id, Math.min(qty, room), variant.stock));
     setAdded(variantLabel(p, color, size, lang));
     setQty(1);
@@ -70,126 +76,129 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
   const sizeVariants = (s: string) => p.variants.filter((v) => v.size === s && (!color || v.color === color));
   const colorVariants = (c: ColorId) => p.variants.filter((v) => v.color === c && (!size || v.size === size));
   const soldAll = (vs: { stock: number }[]) => vs.length > 0 && vs.every((v) => v.stock <= 0);
+  const level = variant && stockLevel(variant);
 
   return (
-    <div className="sf-wrap sf-section">
-      <nav className="sf-crumbs small" aria-label={t.home}>
-        <a href={to()}>{t.home}</a><Icon name="chev" size={14} flip /><a href={to(`/c/${cat.id}`)}>{l(cat.name)}</a><Icon name="chev" size={14} flip /><span aria-current="page">{l(p.name)}</span>
-      </nav>
-      <div className="sf-pdp">
-        <div className="sf-gallery">
-          <div className="sf-gallery-main"><ProductArt p={p} color={color} view={view} label={`${l(p.name)} – ${t.views[view]}`} /></div>
-          <div className="sf-thumbs" role="group" aria-label={t.details}>
-            {[0, 1, 2].map((v) => (
-              <button key={v} type="button" className="sf-thumb" aria-pressed={view === v} aria-label={`${t.viewN(String(v + 1))}: ${t.views[v]}`} onClick={() => setView(v)}>
-                <ProductArt p={p} color={color} view={v} />
-              </button>
-            ))}
-          </div>
+    <div className={cn(WRAP, 'py-6 sm:py-10')}>
+      <Crumbs items={[{ label: t.home, href: to() }, { label: l(cat.name), href: to(`/c/${cat.id}`) }, { label: l(p.name) }]} />
+      <div className="grid gap-8 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-14">
+        <div className="md:sticky md:top-24 md:self-start">
+          <ProductPhoto p={p} color={color} variant="hero" eager className="-mx-4 rounded-none sm:mx-0 sm:rounded-3xl" />
         </div>
 
-        <div className="sf-buy">
-          <h1 className="sf-h1 sf-pdp-title">{l(p.name)}</h1>
-          <p className="sf-pdp-price"><Price v={price} compareAt={p.compareAt} from={!variant && new Set(p.variants.map((v) => v.price)).size > 1} /></p>
-          <p className="small sf-muted">{t.inclVat}</p>
-          <p className="sf-lead">{l(p.blurb)}</p>
+        <div className="min-w-0 space-y-6">
+          <div className="space-y-3">
+            <a href={to(`/c/${cat.id}`)} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{l(cat.name)}</a>
+            <h1 className="text-[26px] font-semibold leading-tight tracking-tight sm:text-[34px]">{l(p.name)}</h1>
+            <div className="flex flex-wrap items-baseline gap-3">
+              <Price v={price} compareAt={p.compareAt} from={!variant && new Set(p.variants.map((v) => v.price)).size > 1} className="text-xl" />
+              <span className="text-xs text-muted">{t.inclVat}</span>
+            </div>
+            <p className="max-w-prose leading-relaxed text-muted">{l(p.blurb)}</p>
+          </div>
 
           {p.colors.length > 1 && (
-            <fieldset ref={colorRef} className={`sf-opt${err.includes('color') ? ' has-err' : ''}`} aria-describedby={err.includes('color') ? 'sf-err-color' : undefined}>
-              <legend>{t.color}{color && <span className="sf-muted">: {l(COLORS[color].name)}</span>}</legend>
-              <div className="sf-swatches">
+            <fieldset ref={colorRef} aria-describedby={err.includes('color') ? 'sf-err-color' : undefined}>
+              <legend className="mb-3 text-sm font-semibold">{t.color}{color && <span className="font-normal text-muted"> · {l(COLORS[color].name)}</span>}</legend>
+              <div className="flex flex-wrap gap-2.5">
                 {p.colors.map((c) => {
                   const out = soldAll(colorVariants(c));
                   return (
-                    <label key={c} className={`sf-swatch-opt${out ? ' is-out' : ''}`} title={l(COLORS[c].name)}>
-                      <input type="radio" name="sf-color" className="sr" checked={color === c} onChange={() => pick('color', c)} />
-                      <Swatch c={c} size={30} />
-                      <span className="sr">{l(COLORS[c].name)}{out ? ` – ${t.soldOut}` : ''}</span>
+                    <label key={c} title={l(COLORS[c].name)} className={cn('relative grid size-11 cursor-pointer place-items-center rounded-full ring-1 ring-border transition-shadow has-[:checked]:ring-2 has-[:checked]:ring-fg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500', err.includes('color') && 'ring-red-500')}>
+                      <input type="radio" name="sf-color" className="sr-only" checked={color === c} onChange={() => pick('color', c)} />
+                      <Swatch c={c} size={32} />
+                      {out && <span aria-hidden="true" className="absolute h-px w-9 -rotate-45 bg-fg/70" />}
+                      <span className="sr-only">{l(COLORS[c].name)}{out ? ` – ${t.soldOut}` : ''}</span>
                     </label>
                   );
                 })}
               </div>
-              {err.includes('color') && <p id="sf-err-color" className="error" role="alert">{t.chooseColor}</p>}
+              {err.includes('color') && <p id="sf-err-color" role="alert" className="mt-2 text-[13px] font-medium text-red-600 dark:text-red-400">{t.chooseColor}</p>}
             </fieldset>
           )}
 
           {p.sizes.length > 1 && (
-            <fieldset ref={sizeRef} className={`sf-opt${err.includes('size') ? ' has-err' : ''}`} aria-describedby={err.includes('size') ? 'sf-err-size' : undefined}>
-              <legend>{isPerfume ? t.volume : t.size}</legend>
-              <div className="sf-sizes">
+            <fieldset ref={sizeRef} aria-describedby={err.includes('size') ? 'sf-err-size' : undefined}>
+              <legend className="mb-3 text-sm font-semibold">{isPerfume ? t.volume : t.size}</legend>
+              <div className="flex flex-wrap gap-2">
                 {p.sizes.map((s) => {
                   const out = soldAll(sizeVariants(s));
                   return (
-                    <label key={s} className={`sf-size-opt${out ? ' is-out' : ''}`}>
-                      <input type="radio" name="sf-size" className="sr" checked={size === s} onChange={() => pick('size', s)} />
-                      <span><bdi>{sizeLabel(s, lang)}</bdi></span>
-                      {out && <span className="sr"> – {t.soldOut}</span>}
+                    <label key={s} className={cn('inline-flex h-11 min-w-14 cursor-pointer items-center justify-center rounded-xl border bg-surface px-4 text-sm font-medium transition-colors hover:border-fg/50 has-[:checked]:border-fg has-[:checked]:bg-fg has-[:checked]:text-bg has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-brand-500',
+                      err.includes('size') ? 'border-red-500' : 'border-border', out && 'text-subtle line-through')}>
+                      <input type="radio" name="sf-size" className="sr-only" checked={size === s} onChange={() => pick('size', s)} />
+                      <bdi>{sizeLabel(s, lang)}</bdi>
+                      {out && <span className="sr-only"> – {t.soldOut}</span>}
                     </label>
                   );
                 })}
               </div>
-              {err.includes('size') && <p id="sf-err-size" className="error" role="alert">{isPerfume ? t.chooseVolume : t.chooseSize}</p>}
+              {err.includes('size') && <p id="sf-err-size" role="alert" className="mt-2 text-[13px] font-medium text-red-600 dark:text-red-400">{isPerfume ? t.chooseVolume : t.chooseSize}</p>}
             </fieldset>
           )}
 
-          {variant && (
-            <p className={`sf-stock ${stockLevel(variant)}`} role="status">
-              <span className="sf-stock-dot" aria-hidden="true" />{t.stock[stockLevel(variant)]}
-              {p.colors.length + p.sizes.length > 0 && <span className="sf-muted"> · {variantLabel(p, color, size, lang)}</span>}
+          {variant && level && (
+            <p role="status" className="flex items-center gap-2 text-sm">
+              <span aria-hidden="true" className={cn('size-2 rounded-full', level === 'in' ? 'bg-emerald-500' : level === 'low' ? 'bg-amber-500' : 'bg-red-500')} />
+              <span className="font-medium">{t.stock[level]}</span>
+              {p.colors.length + p.sizes.length > 0 && <span className="text-muted">· {variantLabel(p, color, size, lang)}</span>}
             </p>
           )}
-          {variant && variant.stock <= 0 && <p className="small sf-muted">{t.optSoldOut}</p>}
-          {variant && variant.stock > 0 && room <= 0 && <p className="small sf-muted">{t.maxed}</p>}
+          {soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
+          {variant && variant.stock > 0 && room <= 0 && <p className="text-[13px] text-muted">{t.maxed}</p>}
 
-          <div className="sf-buy-row">
-            <div className="sf-stepper" role="group" aria-label={t.qty}>
-              <button type="button" aria-label={t.dec} onClick={() => setQty((n) => Math.max(1, n - 1))} disabled={qty <= 1}><Icon name="minus" size={18} /></button>
-              <output aria-live="polite" aria-label={t.qty}>{qty}</output>
-              <button type="button" aria-label={t.inc} onClick={() => setQty((n) => Math.min(n + 1, Math.max(1, room), 10))} disabled={!!variant && qty >= room}><Icon name="plus" size={18} /></button>
-            </div>
-            <button type="button" className="btn primary sf-add" onClick={add} disabled={!!variant && room <= 0}>
-              <Icon name="bag" size={20} />{variant && variant.stock <= 0 ? t.soldOut : t.add}
-            </button>
-            <button type="button" className={`sf-wish-lg${wish ? ' on' : ''}`} aria-pressed={wish} aria-label={wish ? t.wishOn : t.wishAdd} onClick={() => toggleWish(p.id)}>
-              <Icon name="heart" />
+          <div className="flex items-center gap-2">
+            <Stepper value={qty} max={Math.max(1, Math.min(room || 10, 10))} onChange={(n) => setQty(Math.max(1, n))} label={t.qty} decLabel={t.dec} incLabel={t.inc} />
+            <Button size="lg" className="h-12 flex-1" onClick={add} disabled={!canOrder || (!!variant && room <= 0)}>
+              <ShoppingBag className="size-5" aria-hidden="true" />{soldOutVariant ? t.soldOut : t.add}
+            </Button>
+            <button type="button" aria-pressed={wish} aria-label={wish ? t.wishOn : t.wishAdd} title={wish ? t.wishOn : t.wishAdd} onClick={() => toggleWish(p.id)}
+              className="grid size-12 shrink-0 place-items-center rounded-xl border border-border bg-surface hover:bg-surface-2">
+              <Heart className={cn('size-5', wish && 'fill-current text-brand-700 dark:text-brand-300')} aria-hidden="true" />
             </button>
           </div>
+          {!canOrder && <p className="text-[13px] text-amber-800 dark:text-amber-300">{t.browseOnly}</p>}
 
           {added && (
-            <div className="sf-added" role="status">
-              <p><Icon name="check" size={18} /> <span className="sf-strong">{t.added}</span> <span className="sf-muted">{l(p.name)}{added ? ` · ${added}` : ''}</span></p>
-              <div className="sf-added-actions">
-                <a className="btn" href={to('/cart')}>{t.viewBag}</a>
-                <a className="btn primary" href={to('/checkout')}>{t.goCheckout}</a>
+            <Alert tone="ok" title={t.added}>
+              <p>{l(p.name)} · {added}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <LinkButton href={to('/checkout')} size="sm">{t.goCheckout}</LinkButton>
+                <LinkButton href={to('/cart')} size="sm" variant="secondary">{t.viewBag}</LinkButton>
               </div>
-            </div>
+            </Alert>
           )}
 
-          <section className="sf-eta" aria-labelledby="sf-eta-h">
-            <h2 id="sf-eta-h" className="sf-h3"><Icon name="truck" size={20} /> {t.delivery}</h2>
-            <label className="sf-inline-field">
-              <span>{t.deliverTo}</span>
-              <select className="input" value={city} onChange={(e) => setCity(e.target.value as CityId)}>
+          <section aria-labelledby="sf-eta-h" className={cn(PANEL, 'space-y-3 p-5')}>
+            <h2 id="sf-eta-h" className="flex items-center gap-2 text-sm font-semibold"><Truck className="size-4 text-muted" aria-hidden="true" />{t.delivery}
+              {est && <InfoHint>{t.basis(String(est.handling), est.transit[0] === est.transit[1] ? String(est.transit[0]) : `${est.transit[0]}–${est.transit[1]}`)}</InfoHint>}
+            </h2>
+            <label className="flex items-center gap-3 text-sm">
+              <span className="shrink-0 text-muted">{t.deliverTo}</span>
+              <Select className="h-10 w-auto" value={city} onChange={(e) => setCity(e.target.value as CityId)}>
                 {CITIES.map((c) => <option key={c.id} value={c.id}>{l(c.name)}</option>)}
-              </select>
+              </Select>
             </label>
-            {est && <p className="sf-strong">{est.from === est.to ? t.estimateSame(dl(est.from)) : t.estimate(dl(est.from), dl(est.to))}</p>}
-            {est && <p className="small sf-muted">{t.basis(String(est.handling), est.transit[0] === est.transit[1] ? String(est.transit[0]) : `${est.transit[0]}–${est.transit[1]}`)}</p>}
-            <p className="small sf-muted">{l(std.note)}</p>
+            {est && <p className="font-semibold">{est.from === est.to ? t.estimateSame(dl(est.from)) : t.estimate(dl(est.from), dl(est.to))}</p>}
+            <p className="text-[13px] text-muted">{l(std.note)}</p>
           </section>
 
-          <section className="sf-details" aria-labelledby="sf-det-h">
-            <h2 id="sf-det-h" className="sf-h3">{t.details}</h2>
-            <ul>{p.details.map((d) => <li key={d.en}>{l(d)}</li>)}</ul>
-            <p className="small sf-muted"><Icon name="return" size={16} /> {isPerfume ? l(p.details[p.details.length - 1]) : t.returnsLine} <a className="sf-link" href={to('/page/returns')}>{t.pReturns}</a></p>
-            <p className="small sf-muted">{l(MERCHANT.name)} · {l(MERCHANT.tagline)}</p>
-          </section>
+          <div className="divide-y divide-border border-y border-border">
+            <details className="group py-1" open>
+              <summary className="flex h-12 cursor-pointer list-none items-center justify-between text-sm font-semibold [&::-webkit-details-marker]:hidden">{t.details}<ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <ul className="space-y-2 pb-4 text-sm text-muted">{p.details.map((d) => <li key={d.en} className="flex gap-2"><Check className="mt-0.5 size-4 shrink-0" aria-hidden="true" />{l(d)}</li>)}</ul>
+            </details>
+            <details className="group py-1">
+              <summary className="flex h-12 cursor-pointer list-none items-center justify-between text-sm font-semibold [&::-webkit-details-marker]:hidden">{t.pReturns}<ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" /></summary>
+              <p className="flex gap-2 pb-4 text-sm text-muted"><RotateCcw className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>{isPerfume ? l(p.details[p.details.length - 1]) : t.returnsLine} <a className="font-semibold text-fg underline-offset-4 hover:underline" href={to('/page/returns')}>{t.pReturns}</a></span></p>
+            </details>
+          </div>
         </div>
       </div>
 
       {related.length > 0 && (
-        <section className="sf-section" aria-labelledby="sf-rel-h">
-          <h2 id="sf-rel-h" className="sf-h2">{t.related}</h2>
+        <section aria-labelledby="sf-rel-h" className="pt-16 sm:pt-20">
+          <h2 id="sf-rel-h" className={cn(H2, 'mb-6')}>{t.related}</h2>
           <ProductGrid products={related} />
         </section>
       )}

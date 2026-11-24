@@ -1,30 +1,42 @@
+// Checkout: one clear column on phones, sticky order summary on desktop. Everything typed is kept in the session store,
+// so a failed payment, a reload or a trip back to the bag never loses it. Payment and delivery are simulated.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Dialog } from '../../../core/ui';
+import { Banknote, Check, ChevronDown, Clock, CreditCard, FlaskConical, Lock, RefreshCw, ShoppingBag, Smartphone, User } from 'lucide-react';
 import { navigate } from '../../../core/router';
+import { Alert, Field, Input, Modal, Select, Textarea } from '../../../ds/kit';
+import { Button, EmptyState, LinkButton, Money, Segmented, cn, useTx } from '../../../ds/ui';
+import { settingsStore } from '../../merchant/stores';
+import { shopperView } from '../../dashboard/storefront/model';
 import {
   CITIES, MERCHANT, SHIP_METHODS, canPay, cityById, cleanPhone, computeTotals, deliveryEstimate, isSettled, payEligibility,
   pricedLines, shipAvailable, shipById, validateAddress, validateCart, variantById,
   type Address, type AddrErr, type CityId, type Order, type PayMethod,
 } from '../domain';
-import { Icon, ProductArt, TestBox, districtLabel, to, useS, variantLabel } from '../kit';
+import { Breakdown, CouponBox, H1, PANEL, ProductPhoto, SimNote, WRAP, districtLabel, to, useS, variantLabel } from '../kit';
 import {
-  CUSTOMER, accountStore, buildDraft, cartStore, catalogStore, checkStatus, checkoutStore, couponResult, ordersStore, openCodCount,
-  payEvent, pendingForSession, signIn, signOut, stripSaved, submit, testStore,
+  CUSTOMER, accountStore, buildDraft, cartStore, checkStatus, checkoutStore, couponResult, ordersStore, openCodCount,
+  payEvent, pendingForSession, signIn, signOut, stripSaved, submit,
 } from '../state';
-import { Breakdown, CouponBox } from './Cart';
+import { useCatalog } from '../data';
+import { simNow, useSim } from '../review';
 
 const FIELD_ORDER: (keyof AddrErr)[] = ['email', 'name', 'phone', 'city', 'district', 'street', 'building', 'nationalCode'];
+const radioCard = 'flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-fg/30 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-500/[.04] has-[:checked]:ring-1 has-[:checked]:ring-brand-600 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:border-border';
+const radio = 'mt-0.5 size-[18px] shrink-0 accent-brand-600';
 
 export default function Checkout() {
   const s = useS();
   const { t, l, lang, m, dl } = s;
+  const tx = useTx();
   const cart = cartStore.use();
-  const products = catalogStore.use();
+  const products = useCatalog();
   const co = checkoutStore.use();
   const acc = accountStore.use();
-  const ts = testStore.use();
+  const sim = useSim();
+  const canOrder = shopperView(settingsStore.use().status) === 'open';
   ordersStore.use();
   const [tried, setTried] = useState(false);
+  const [touched, setTouched] = useState<Partial<Record<keyof AddrErr, boolean>>>({});
   const [busy, setBusy] = useState(false);
   const [challenge, setChallenge] = useState<string | null>(null);
   const [double, setDouble] = useState<string | null>(null);
@@ -41,17 +53,18 @@ export default function Checkout() {
   const signed = co.mode === 'account' && acc.signedIn;
   const openCod = openCodCount();
   const totalsNoCod = computeTotals(lines, { discount, ship });
-  const elig = (pm: PayMethod) => payEligibility(pm, { total: totalsNoCod.total + (pm === 'cod' ? MERCHANT.codFee : 0), applePayDevice: ts.applePay, openCod, ship: co.ship });
+  const elig = (pm: PayMethod) => payEligibility(pm, { total: totalsNoCod.total + (pm === 'cod' ? MERCHANT.codFee : 0), applePayDevice: sim.applePay, openCod, ship: co.ship });
   const methodOk = !elig(co.method);
   const totals = computeTotals(lines, { discount, ship, cod: co.method === 'cod' && methodOk });
   const errs = validateAddress(co.addr, { email: co.email });
   const pending = pendingForSession();
-  const showErr = (k: keyof AddrErr) => (tried ? errs[k] : undefined);
+  const showErr = (k: keyof AddrErr) => (tried || touched[k] ? errs[k] : undefined);
+  const touch = (k: keyof AddrErr) => () => setTouched((x) => ({ ...x, [k]: true }));
 
-  // If Apple Pay disappears (device toggle off) fall back to card rather than leaving an impossible choice selected.
+  // If Apple Pay is not available on this device, fall back to card rather than leaving an impossible choice selected.
   useEffect(() => {
-    if (co.method === 'applepay' && !ts.applePay) checkoutStore.set((c) => ({ ...c, method: 'card' }));
-  }, [co.method, ts.applePay]);
+    if (co.method === 'applepay' && !sim.applePay) checkoutStore.set((c) => ({ ...c, method: 'card' }));
+  }, [co.method, sim.applePay]);
 
   useEffect(() => { if (co.notice) noticeRef.current?.focus(); }, [co.notice]);
 
@@ -66,8 +79,7 @@ export default function Checkout() {
         navigate(to(`/order/${order.ref}`, { new: '1' }));
         return;
       }
-      const outcome = testStore.get().outcome;
-      const after = payEvent(order.ref, { type: 'attempt', outcome }, method);
+      const after = payEvent(order.ref, { type: 'attempt', outcome: simNow(sim.review).outcome }, method);
       lock.current = false;
       setBusy(false);
       if (!after) return;
@@ -80,7 +92,7 @@ export default function Checkout() {
 
   const valid = () => {
     setTried(true);
-    if (issues.length) return false;
+    if (issues.length || !canOrder) return false;
     const first = FIELD_ORDER.find((k) => errs[k]);
     if (first) { document.getElementById(`sf-f-${first}`)?.focus(); return false; }
     if (!shipOk) { document.getElementById('sf-ship-h')?.focus(); return false; }
@@ -104,7 +116,7 @@ export default function Checkout() {
     run(order);
   };
 
-  /** Test: the same submission sent twice in a row. The idempotency key returns the first order for the second call. */
+  /** Review: the same submission sent twice in a row. The idempotency key returns the first order for the second call. */
   const doubleSubmit = () => {
     if (lock.current || pending || !valid()) return;
     const d = buildDraft();
@@ -126,275 +138,288 @@ export default function Checkout() {
     if (o?.pay.state === 'paid') navigate(to(`/order/${ref}`, { new: '1' }));
     else checkoutStore.set((c) => ({ ...c, notice: { kind: 'challenge', ref } }));
   };
-
   const resolveRef = useRef(resolveChallenge);
   resolveRef.current = resolveChallenge;
   const closeChallenge = useCallback(() => resolveRef.current(false), []);
 
   if (!cart.lines.length && !pending) {
     return (
-      <div className="sf-wrap sf-section sf-narrow sf-center">
-        <Icon name="bag" size={40} />
-        <h1 className="sf-h1">{t.emptyCheckout}</h1>
-        <a className="btn primary sf-btn-lg" href={to('/c/all')}>{t.keepShopping}</a>
+      <div className={cn(WRAP, 'py-16')}>
+        <EmptyState as="h1" icon={<ShoppingBag className="size-6" aria-hidden="true" />} title={t.emptyCheckout} action={<LinkButton href={to('/c/all')} size="lg">{t.keepShopping}</LinkButton>} />
       </div>
     );
   }
 
-
-  const methods: { id: PayMethod; label: string; note: ReactNode; icon: string }[] = [
-    { id: 'card', label: t.card, note: t.cardNote, icon: 'card' },
-    ...(ts.applePay ? [{ id: 'applepay' as PayMethod, label: t.apple, note: t.appleNote, icon: 'card' }] : []),
-    { id: 'bnpl', label: t.bnpl, note: <>{t.bnplNote} <span className="sim">{t.sim}</span></>, icon: 'clock' },
-    { id: 'cod', label: t.cod, note: t.codNote(m(MERCHANT.codFee)), icon: 'box' },
+  const methods: { id: PayMethod; label: string; note: ReactNode; icon: ReactNode }[] = [
+    { id: 'card', label: t.card, note: t.cardNote, icon: <CreditCard className="size-5" aria-hidden="true" /> },
+    ...(sim.applePay ? [{ id: 'applepay' as PayMethod, label: t.apple, note: t.appleNote2, icon: <Smartphone className="size-5" aria-hidden="true" /> }] : []),
+    { id: 'bnpl', label: t.bnpl, note: t.bnplNote, icon: <Clock className="size-5" aria-hidden="true" /> },
+    { id: 'cod', label: t.cod, note: t.codNote(m(MERCHANT.codFee)), icon: <Banknote className="size-5" aria-hidden="true" /> },
   ];
 
-  const field = (k: keyof AddrErr, label: string, input: ReactNode, hint?: string) => {
+  const errMsg = (k: keyof AddrErr) => {
     const e = showErr(k);
-    const msg = e === 'required' ? t.eRequired : k === 'phone' ? t.ePhone : k === 'nationalCode' ? t.eNational : k === 'email' ? t.eEmail : t.eRequired;
-    return (
-      <div className={`sf-field${e ? ' has-err' : ''}`}>
-        <label htmlFor={`sf-f-${k}`}>{label}</label>
-        {input}
-        {hint && !e && <span className="hint" id={`sf-f-${k}-hint`}>{hint}</span>}
-        {e && <span className="error" id={`sf-f-${k}-err`}>{msg}</span>}
-      </div>
-    );
+    if (!e) return null;
+    return e === 'required' ? t.eRequired : k === 'phone' ? t.ePhone : k === 'nationalCode' ? t.eNational : k === 'email' ? t.eEmail : t.eRequired;
   };
-  const aria = (k: keyof AddrErr, hint?: boolean) => ({
-    id: `sf-f-${k}`,
-    'aria-invalid': showErr(k) ? true : undefined,
-    'aria-describedby': showErr(k) ? `sf-f-${k}-err` : hint ? `sf-f-${k}-hint` : undefined,
-  });
   const cityObj = cityById(city);
   const saved = signed ? acc.addresses : [];
   const payLabel = co.method === 'cod' ? t.placeCod : t.pay(m(totals.total));
+  const anyErr = Object.keys(errs).length > 0 || !shipOk || !methodOk;
 
   const notice = co.notice && (() => {
     const k = co.notice.kind;
     const [title, body] = k === 'declined' ? [t.declinedT, t.declinedB] : k === 'challenge' ? [t.challengeT, t.challengeB] : [t.verifyFailT, t.verifyFailB(co.notice.ref)];
-    return (
-      <div ref={noticeRef} tabIndex={-1} className={`sf-notice ${k === 'verify_failed' ? 'info' : 'bad'}`} role="alert">
-        <Icon name={k === 'verify_failed' ? 'info' : 'alert'} />
-        <div><p className="sf-strong">{title}</p><p>{body}</p></div>
-      </div>
-    );
+    return <div ref={noticeRef} tabIndex={-1} className="focus:outline-none"><Alert tone={k === 'verify_failed' ? 'info' : 'bad'} title={title}>{body}</Alert></div>;
   })();
 
   const summary = (idp: string) => (
-    <div className="sf-panel">
-      <div className="sf-sec-head"><h2 className="sf-h3">{t.summary}</h2><a className="sf-link small" href={to('/cart')}>{t.editBag}</a></div>
-      <ul className="sf-mini-lines">
+    <div className="space-y-5">
+      <ul className="space-y-4">
         {cart.lines.map((line) => {
           const f = variantById(products, line.vid);
           if (!f) return null;
           return (
-            <li key={line.vid}>
-              <span className="sf-mini-art"><ProductArt p={f.product} color={f.variant.color} /><span className="sf-mini-qty">{line.qty}</span></span>
-              <span className="grow"><span className="sf-strong">{l(f.product.name)}</span><br /><span className="small sf-muted">{variantLabel(f.product, f.variant.color, f.variant.size, lang)}</span></span>
-              <bdi className="small">{m(f.variant.price * line.qty)}</bdi>
+            <li key={line.vid} className="flex items-center gap-3">
+              <span className="relative w-16 shrink-0">
+                <ProductPhoto p={f.product} color={f.variant.color} variant="thumb" />
+                <span className="absolute -top-2 -end-2 grid min-w-5 place-items-center rounded-full bg-fg px-1.5 text-[11px] font-bold leading-5 text-bg tabular-nums">{line.qty}</span>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="line-clamp-1 block text-sm font-medium">{l(f.product.name)}</span>
+                <span className="block text-xs text-muted">{variantLabel(f.product, f.variant.color, f.variant.size, lang)}</span>
+              </span>
+              <Money v={f.variant.price * line.qty} className="text-sm" />
             </li>
           );
         })}
       </ul>
-      <CouponBox idp={idp} />
+      <CouponBox idp={idp} products={products} />
       <Breakdown totals={totals} coupon={coupon?.status === 'valid' ? coupon.code : undefined}
-        shippingLabel={shipOk ? l(ship.name) : t.shipEst} shippingNote={shipOk ? undefined : t.cityFirst} />
+        shippingLabel={shipOk ? l(ship.name) : t.shipping} shippingPending={!shipOk} />
     </div>
   );
 
+  const step = (n: number, id: string, title: string, children: ReactNode, focusable?: boolean) => (
+    <section aria-labelledby={id} className={cn(PANEL, 'space-y-5 p-5 sm:p-6')}>
+      <h2 id={id} tabIndex={focusable ? -1 : undefined} className="flex items-center gap-3 text-[17px] font-semibold focus:outline-none">
+        <span className="grid size-7 place-items-center rounded-full bg-fg text-[13px] font-bold text-bg">{n}</span>{title}
+      </h2>
+      {children}
+    </section>
+  );
+
   return (
-    <div className="sf-wrap sf-section">
-      <header className="sf-list-head"><h1 className="sf-h1">{t.coTitle}</h1></header>
-      <details className="sf-mobile-summary">
-        <summary><span>{t.showSummary}</span><bdi className="sf-strong">{m(totals.total)}</bdi></summary>
-        {summary('sf-coupon-m')}
+    <div className={cn(WRAP, 'py-6 sm:py-10')}>
+      <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <h1 className={H1}>{t.coTitle}</h1>
+        <a href={to('/cart')} className="text-sm font-semibold underline-offset-4 hover:underline">{t.editBag}</a>
+      </header>
+
+      <details className={cn(PANEL, 'group mb-6 lg:hidden')}>
+        <summary className="flex h-14 cursor-pointer list-none items-center gap-3 px-5 text-sm [&::-webkit-details-marker]:hidden">
+          <ShoppingBag className="size-4 text-muted" aria-hidden="true" />
+          <span className="flex-1 font-medium">{t.showSummary}</span>
+          <Money v={totals.total} className="font-bold" />
+          <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+        </summary>
+        <div className="border-t border-border p-5">{summary('sf-coupon-m')}</div>
       </details>
 
-      <div className="sf-two">
-        <div className="sf-two-main sf-co">
-          {issues.length > 0 && (
-            <div className="sf-notice bad" role="alert"><Icon name="alert" /><div><p>{t.blocked}</p><a className="sf-link" href={to('/cart')}>{t.editBag}</a></div></div>
-          )}
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_420px] lg:gap-12">
+        <div className="min-w-0 space-y-5">
+          {issues.length > 0 && <Alert tone="warn" title={t.blocked} action={<LinkButton href={to('/cart')} size="sm" variant="secondary">{t.editBag}</LinkButton>} />}
+          {!canOrder && <Alert tone="warn" title={t.browseOnly} />}
           {pending && (
-            <div className="sf-notice info" role="status">
-              <Icon name="clock" />
-              <div>
-                <p className="sf-strong">{t.pendingT}</p>
-                <p>{t.pendingB(pending.ref)}</p>
-                <div className="sf-row-actions">
-                  <button type="button" className="btn" onClick={() => checkStatus(pending.ref)}><Icon name="refresh" size={18} />{t.checkStatus}</button>
-                  <a className="btn" href={to(`/order/${pending.ref}`)}>{t.openOrder}</a>
-                </div>
+            <Alert tone="info" title={t.pendingT}>
+              <p>{t.pendingB(pending.ref)}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" onClick={() => checkStatus(pending.ref, simNow(sim.review).verify)}><RefreshCw className="size-4" aria-hidden="true" />{t.checkStatus}</Button>
+                <LinkButton size="sm" variant="ghost" href={to(`/order/${pending.ref}`)}>{t.openOrder}</LinkButton>
               </div>
-            </div>
+            </Alert>
           )}
 
-          <section className="sf-step" aria-labelledby="sf-c-h">
-            <h2 id="sf-c-h" className="sf-step-h"><span className="sf-step-n">1</span>{t.sContact}</h2>
-            <div className="sf-seg" role="radiogroup" aria-label={t.sContact}>
-              <label className={co.mode === 'guest' ? 'on' : ''}><input type="radio" name="sf-mode" className="sr" checked={co.mode === 'guest'} onChange={() => checkoutStore.set((c) => ({ ...c, mode: 'guest' }))} />{t.guest}</label>
-              <label className={co.mode === 'account' ? 'on' : ''}><input type="radio" name="sf-mode" className="sr" checked={co.mode === 'account'} onChange={() => { checkoutStore.set((c) => ({ ...c, mode: 'account' })); if (acc.signedIn) signIn(); }} />{t.signIn}</label>
-            </div>
+          {step(1, 'sf-c-h', t.sContact, <>
+            <Segmented label={t.sContact} value={co.mode} onChange={(v) => { checkoutStore.set((c) => ({ ...c, mode: v })); if (v === 'account' && acc.signedIn) signIn(); }}
+              options={[{ value: 'guest', label: t.guest }, { value: 'account', label: t.signIn }]} />
             {co.mode === 'account' && !acc.signedIn && (
-              <div className="sf-signin">
-                <p className="small sf-muted">{t.signInNote}</p>
-                <button type="button" className="btn" onClick={signIn}><Icon name="user" size={18} />{t.signInSim}</button>
+              <div className="space-y-2 rounded-xl bg-surface-2 p-4">
+                <Button variant="secondary" onClick={signIn}><User className="size-4" aria-hidden="true" />{t.signInSim}</Button>
+                <SimNote>{t.signInNote}</SimNote>
               </div>
             )}
             {signed && (
-              <p className="sf-signed"><Icon name="check" size={18} /> {t.signedAs(l(CUSTOMER.name))} <button type="button" className="sf-link-btn" onClick={signOut}>{t.signOut}</button></p>
+              <p className="flex flex-wrap items-center gap-2 text-sm"><Check className="size-4 text-emerald-600" aria-hidden="true" />{t.signedAs(l(CUSTOMER.name))}
+                <button type="button" onClick={signOut} className="font-semibold underline-offset-4 hover:underline">{t.signOut}</button></p>
             )}
-            {field('email', t.email, <input className="input" type="email" dir="ltr" autoComplete="email" value={co.email} onChange={(e) => checkoutStore.set((c) => ({ ...c, email: e.target.value }))} {...aria('email')} />)}
-          </section>
+            <Field id="sf-f-email" label={t.emailL} optional error={errMsg('email')} hint={t.emailHint}>
+              {(p) => <Input {...p} type="email" dir="ltr" autoComplete="email" inputMode="email" value={co.email} onBlur={touch('email')} onChange={(e) => checkoutStore.set((c) => ({ ...c, email: e.target.value }))} className="h-11" />}
+            </Field>
+          </>)}
 
-          <section className="sf-step" aria-labelledby="sf-a-h">
-            <h2 id="sf-a-h" className="sf-step-h"><span className="sf-step-n">2</span>{t.sAddress}</h2>
+          {step(2, 'sf-a-h', t.sAddress, <>
             {saved.length > 0 && (
-              <fieldset className="sf-saved">
-                <legend>{t.saved}</legend>
+              <fieldset className="space-y-2">
+                <legend className="mb-2 text-[13px] font-semibold">{t.saved}</legend>
                 {saved.map((a) => (
-                  <label key={a.id} className="radio sf-radio">
-                    <input type="radio" name="sf-saved" checked={co.savedId === a.id} onChange={() => checkoutStore.set((c) => ({ ...c, savedId: a.id, addr: stripSaved(a) }))} />
-                    <span className="grow">
-                      <span className="sf-strong">{a.name}</span> · <bdi dir="ltr">+966 {a.phone}</bdi><br />
-                      <span className="small sf-muted">{a.street} {a.building}, {districtLabel(a.city, a.district, lang)}, {l(cityById(a.city)!.name)}</span>
+                  <label key={a.id} className={radioCard}>
+                    <input type="radio" name="sf-saved" className={radio} checked={co.savedId === a.id} onChange={() => checkoutStore.set((c) => ({ ...c, savedId: a.id, addr: stripSaved(a) }))} />
+                    <span className="min-w-0 flex-1 text-sm">
+                      <span className="font-semibold">{a.name}</span> · <bdi dir="ltr">+966 {a.phone}</bdi>
+                      <span className="mt-0.5 block text-[13px] text-muted">{a.street} {a.building}، {districtLabel(a.city, a.district, lang)}، {l(cityById(a.city)!.name)}</span>
                     </span>
-                    {a.id === acc.defaultId && <span className="sf-tag">{t.defaultA}</span>}
+                    {a.id === acc.defaultId && <span className="rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-semibold text-muted">{t.defaultA}</span>}
                   </label>
                 ))}
-                <label className="radio sf-radio">
-                  <input type="radio" name="sf-saved" checked={!co.savedId} onChange={() => checkoutStore.set((c) => ({ ...c, savedId: undefined, addr: { phone: c.addr.phone, name: c.addr.name } }))} />
-                  <span className="grow">{t.useNew}</span>
+                <label className={radioCard}>
+                  <input type="radio" name="sf-saved" className={radio} checked={!co.savedId} onChange={() => checkoutStore.set((c) => ({ ...c, savedId: undefined, addr: { phone: c.addr.phone, name: c.addr.name } }))} />
+                  <span className="text-sm font-medium">{t.useNew}</span>
                 </label>
               </fieldset>
             )}
             {!co.savedId && (
-              <div className="sf-form-grid">
-                <div className="sf-field sf-span">
-                  <span className="sf-label">{t.country}</span>
-                  <p className="sf-static">{t.countryVal}</p>
-                  <span className="hint">{t.countryNote}</span>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2 flex items-center justify-between rounded-xl bg-surface-2 px-4 py-3 text-sm">
+                  <span><span className="text-muted">{t.country}: </span><span className="font-medium">{t.countryVal}</span></span>
+                  <span className="text-xs text-muted">{t.countryNote}</span>
                 </div>
-                {field('name', t.name, <input className="input" autoComplete="name" value={co.addr.name ?? ''} onChange={(e) => setAddr({ name: e.target.value })} {...aria('name')} />)}
-                {field('phone', t.phone, (
-                  <div className="sf-phone" dir="ltr">
-                    <span aria-hidden="true">+966</span>
-                    <input className="input" type="tel" inputMode="tel" autoComplete="tel-national" value={co.addr.phone ?? ''} placeholder="5X XXX XXXX"
-                      onChange={(e) => setAddr({ phone: e.target.value })} onBlur={(e) => e.target.value && setAddr({ phone: cleanPhone(e.target.value) })} {...aria('phone', true)} />
-                  </div>
-                ), t.phoneHint)}
-                {field('city', t.city, (
-                  <select className="input" value={city ?? ''} onChange={(e) => setAddr({ city: (e.target.value || undefined) as CityId, district: '' })} {...aria('city')}>
-                    <option value="">{t.pickCity}</option>
-                    {CITIES.map((c) => <option key={c.id} value={c.id}>{l(c.name)}</option>)}
-                  </select>
-                ))}
-                {field('district', t.district, (
-                  <select className="input" value={co.addr.district ?? ''} disabled={!cityObj} onChange={(e) => setAddr({ district: e.target.value })} {...aria('district')}>
-                    <option value="">{t.pickDistrict}</option>
-                    {cityObj?.districts.map((d) => <option key={d.en} value={d.en}>{l(d)}</option>)}
-                  </select>
-                ))}
-                {field('street', t.street, <input className="input" autoComplete="address-line1" value={co.addr.street ?? ''} onChange={(e) => setAddr({ street: e.target.value })} {...aria('street')} />)}
-                {field('building', t.building, <input className="input" inputMode="numeric" dir="ltr" value={co.addr.building ?? ''} onChange={(e) => setAddr({ building: e.target.value })} {...aria('building')} />)}
-                {field('nationalCode', t.national, (
-                  <input className="input" dir="ltr" autoCapitalize="characters" value={co.addr.nationalCode ?? ''} maxLength={8} placeholder="RRRD2929"
-                    onChange={(e) => setAddr({ nationalCode: e.target.value.toUpperCase() })} {...aria('nationalCode', true)} />
-                ), t.nationalHint)}
-                <div className="sf-field sf-span">
-                  <label htmlFor="sf-f-notes">{t.notes}</label>
-                  <textarea id="sf-f-notes" className="input" rows={2} value={co.addr.notes ?? ''} onChange={(e) => setAddr({ notes: e.target.value })} />
-                </div>
+                <Field id="sf-f-name" label={t.name} error={errMsg('name')} className="sm:col-span-2">
+                  {(p) => <Input {...p} autoComplete="name" value={co.addr.name ?? ''} onBlur={touch('name')} onChange={(e) => setAddr({ name: e.target.value })} className="h-11" />}
+                </Field>
+                <Field id="sf-f-phone" label={t.phone} error={errMsg('phone')} hint={t.phoneHint} className="sm:col-span-2">
+                  {(p) => (
+                    <div className="flex" dir="ltr">
+                      <span className="grid h-11 place-items-center rounded-s-xl border border-e-0 border-border bg-surface-2 px-3 text-sm text-muted" aria-hidden="true">+966</span>
+                      <Input {...p} type="tel" inputMode="tel" autoComplete="tel-national" value={co.addr.phone ?? ''} placeholder="5X XXX XXXX" className="h-11 rounded-s-none"
+                        onChange={(e) => setAddr({ phone: e.target.value })} onBlur={(e) => { touch('phone')(); if (e.target.value) setAddr({ phone: cleanPhone(e.target.value) }); }} />
+                    </div>
+                  )}
+                </Field>
+                <Field id="sf-f-city" label={t.city} error={errMsg('city')}>
+                  {(p) => (
+                    <Select {...p} value={city ?? ''} onBlur={touch('city')} onChange={(e) => setAddr({ city: (e.target.value || undefined) as CityId, district: '' })} className="h-11">
+                      <option value="">{t.pickCity}</option>
+                      {CITIES.map((c) => <option key={c.id} value={c.id}>{l(c.name)}</option>)}
+                    </Select>
+                  )}
+                </Field>
+                <Field id="sf-f-district" label={t.district} error={errMsg('district')}>
+                  {(p) => (
+                    <Select {...p} value={co.addr.district ?? ''} disabled={!cityObj} onBlur={touch('district')} onChange={(e) => setAddr({ district: e.target.value })} className="h-11 disabled:opacity-60">
+                      <option value="">{cityObj ? t.pickDistrict : t.cityFirstShort}</option>
+                      {cityObj?.districts.map((d) => <option key={d.en} value={d.en}>{l(d)}</option>)}
+                    </Select>
+                  )}
+                </Field>
+                <Field id="sf-f-street" label={t.street} error={errMsg('street')}>
+                  {(p) => <Input {...p} autoComplete="address-line1" value={co.addr.street ?? ''} onBlur={touch('street')} onChange={(e) => setAddr({ street: e.target.value })} className="h-11" />}
+                </Field>
+                <Field id="sf-f-building" label={t.building} error={errMsg('building')}>
+                  {(p) => <Input {...p} inputMode="numeric" dir="ltr" value={co.addr.building ?? ''} onBlur={touch('building')} onChange={(e) => setAddr({ building: e.target.value })} className="h-11" />}
+                </Field>
+                <Field id="sf-f-nationalCode" label={t.nationalL} optional error={errMsg('nationalCode')} hint={t.nationalHint} className="sm:col-span-2">
+                  {(p) => <Input {...p} dir="ltr" autoCapitalize="characters" maxLength={8} placeholder="RRRD2929" value={co.addr.nationalCode ?? ''} onBlur={touch('nationalCode')} onChange={(e) => setAddr({ nationalCode: e.target.value.toUpperCase() })} className="h-11" />}
+                </Field>
+                <Field id="sf-f-notes" label={t.notesL} optional className="sm:col-span-2">
+                  {(p) => <Textarea {...p} rows={2} className="min-h-20" value={co.addr.notes ?? ''} onChange={(e) => setAddr({ notes: e.target.value })} />}
+                </Field>
               </div>
             )}
-          </section>
+          </>)}
 
-          <section className="sf-step" aria-labelledby="sf-ship-h">
-            <h2 id="sf-ship-h" className="sf-step-h" tabIndex={-1}><span className="sf-step-n">3</span>{t.sShip}</h2>
-            {!city && <p className={tried ? 'error' : 'sf-muted'}>{t.cityFirst}</p>}
-            {city && (
-              <fieldset className="sf-options">
-                <legend className="sr">{t.sShip}</legend>
+          {step(3, 'sf-ship-h', t.sShip, <>
+            {!city ? <p className={cn('text-sm', tried ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted')}>{t.cityFirst}</p> : (
+              <fieldset className="space-y-2">
+                <legend className="sr-only">{t.sShip}</legend>
                 {SHIP_METHODS.map((sm) => {
                   const ok = shipAvailable(sm, city);
                   const est = ok ? deliveryEstimate(sm, city, Date.now()) : undefined;
                   const cost = computeTotals(lines, { discount, ship: sm }).shipping;
                   return (
-                    <label key={sm.id} className={`radio sf-radio${ok ? '' : ' is-off'}`}>
-                      <input type="radio" name="sf-ship" checked={co.ship === sm.id} disabled={!ok} onChange={() => checkoutStore.set((c) => ({ ...c, ship: sm.id, method: sm.id === 'pickup' && c.method === 'cod' ? 'card' : c.method }))} />
-                      <span className="grow">
-                        <span className="sf-strong">{l(sm.name)}</span><br />
-                        <span className="small sf-muted">
+                    <label key={sm.id} className={radioCard}>
+                      <input type="radio" name="sf-ship" className={radio} checked={co.ship === sm.id} disabled={!ok} onChange={() => checkoutStore.set((c) => ({ ...c, ship: sm.id, method: sm.id === 'pickup' && c.method === 'cod' ? 'card' : c.method }))} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-sm font-semibold">{l(sm.name)}</span>
+                        <span className="mt-0.5 block text-[13px] text-muted">
                           {!ok ? t.notForCity : est && (sm.id === 'pickup' ? t.readyFrom(dl(est.from)) : t.etaRange(dl(est.from), dl(est.to)))}
                           {ok && <> · {l(sm.note)}</>}
                         </span>
                       </span>
-                      {ok && <span className="sf-opt-price">{cost === 0 ? t.free : <bdi>{m(cost)}</bdi>}</span>}
+                      {ok && <span className="shrink-0 text-sm font-semibold">{cost === 0 ? <span className="text-emerald-700 dark:text-emerald-400">{t.free}</span> : <Money v={cost} />}</span>}
                     </label>
                   );
                 })}
               </fieldset>
             )}
-            {tried && city && !shipOk && <p className="error">{t.notForCity}</p>}
-          </section>
+            {tried && city && !shipOk && <p className="text-sm font-medium text-red-600 dark:text-red-400">{t.notForCity}</p>}
+            {city && <SimNote>{t.shipSim}</SimNote>}
+          </>, true)}
 
-          <section className="sf-step" aria-labelledby="sf-pay-h">
-            <h2 id="sf-pay-h" className="sf-step-h" tabIndex={-1}><span className="sf-step-n">4</span>{t.sPay}</h2>
+          {step(4, 'sf-pay-h', t.sPay, <>
             {notice}
-            <fieldset className="sf-options">
-              <legend className="sr">{t.sPay}</legend>
+            <fieldset className="space-y-2">
+              <legend className="sr-only">{t.sPay}</legend>
               {methods.map((pm) => {
                 const why = elig(pm.id);
                 return (
-                  <label key={pm.id} className={`radio sf-radio${why ? ' is-off' : ''}`}>
-                    <input type="radio" name="sf-pay" checked={co.method === pm.id} disabled={!!why} onChange={() => checkoutStore.set((c) => ({ ...c, method: pm.id }))} aria-describedby={`sf-pm-${pm.id}`} />
-                    <span className="grow">
-                      <span className="sf-strong">{pm.label}</span><br />
-                      <span id={`sf-pm-${pm.id}`} className="small sf-muted">{why ? t.inel[why] : pm.note}</span>
+                  <label key={pm.id} className={radioCard}>
+                    <input type="radio" name="sf-pay" className={radio} checked={co.method === pm.id} disabled={!!why} onChange={() => checkoutStore.set((c) => ({ ...c, method: pm.id }))} aria-describedby={`sf-pm-${pm.id}`} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">{pm.label}</span>
+                      <span id={`sf-pm-${pm.id}`} className="mt-0.5 block text-[13px] text-muted">{why ? t.inel[why] : pm.note}</span>
                     </span>
-                    <Icon name={pm.icon} />
+                    <span className="shrink-0 text-muted">{pm.icon}</span>
                   </label>
                 );
               })}
             </fieldset>
-            {!ts.applePay && <p className="small sf-muted">{t.appleHidden}</p>}
-            <label className="check"><input type="checkbox" checked={co.gift} onChange={(e) => checkoutStore.set((c) => ({ ...c, gift: e.target.checked }))} />{t.gift}</label>
+            {!sim.applePay && <p className="text-xs text-muted">{t.appleHidden}</p>}
+            <label className="flex items-center gap-2.5 text-sm">
+              <input type="checkbox" className="size-[18px] accent-brand-600" checked={co.gift} onChange={(e) => checkoutStore.set((c) => ({ ...c, gift: e.target.checked }))} />{t.gift}
+            </label>
             {co.gift && (
-              <div className="sf-field sf-span">
-                <label htmlFor="sf-gift">{t.giftMsg}</label>
-                <textarea id="sf-gift" className="input" rows={2} maxLength={200} value={co.giftMsg} onChange={(e) => checkoutStore.set((c) => ({ ...c, giftMsg: e.target.value }))} aria-describedby="sf-gift-h" />
-                <span className="hint" id="sf-gift-h">{t.giftNote}</span>
-              </div>
+              <Field id="sf-gift" label={t.giftMsg} hint={t.giftNote}>
+                {(p) => <Textarea {...p} rows={2} className="min-h-20" maxLength={200} value={co.giftMsg} onChange={(e) => checkoutStore.set((c) => ({ ...c, giftMsg: e.target.value }))} />}
+              </Field>
             )}
-          </section>
+          </>, true)}
 
-          <div className="sf-paybar">
-            {tried && (Object.keys(errs).length > 0 || !shipOk || !methodOk) && <p className="error" role="alert">{t.checkFields}</p>}
-            <button type="button" className="btn primary sf-btn-block sf-btn-lg" onClick={start} disabled={busy || !!pending || issues.length > 0} aria-busy={busy || undefined}>
-              {busy ? t.processing : payLabel}
-            </button>
-            {co.method !== 'cod' && <p className="small sf-muted sf-center-text"><span className="sim">{t.sim}</span> {t.outcomes[ts.outcome]}</p>}
-            <p className="small sf-muted">{t.terms} <a className="sf-link" href={to('/page/terms')}>{t.pTerms}</a> · <a className="sf-link" href={to('/page/returns')}>{t.pReturns}</a></p>
+          <div className="space-y-3">
+            {tried && anyErr && <p role="alert" className="text-sm font-medium text-red-600 dark:text-red-400">{t.checkFields}</p>}
+            <Button size="lg" className="h-13 w-full py-3.5 text-base" onClick={start} disabled={busy || !!pending || issues.length > 0 || !canOrder} aria-busy={busy || undefined}>
+              {busy ? <><RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />{t.processing}</> : <><Lock className="size-4" aria-hidden="true" />{payLabel}</>}
+            </Button>
+            <SimNote className="justify-center text-center">{co.method === 'cod' ? t.codSim : t.paySim}</SimNote>
+            <p className="text-center text-xs text-muted">{t.terms} <a className="underline underline-offset-2" href={to('/page/terms')}>{t.pTerms}</a> · <a className="underline underline-offset-2" href={to('/page/returns')}>{t.pReturns}</a></p>
           </div>
 
-          <TestBox title={t.tpTitle}>
-            <button type="button" className="btn small" onClick={doubleSubmit} disabled={busy || !!pending || issues.length > 0}>{t.tpDouble}</button>
-            {double && <p className="small" role="status">{double}</p>}
-          </TestBox>
+          {sim.review && (
+            <div className="space-y-2 rounded-2xl border border-dashed border-border p-4 text-sm">
+              <p className="flex items-center gap-2 font-semibold"><FlaskConical className="size-4 text-muted" aria-hidden="true" />{tx('وضع المراجعة', 'Review mode')}</p>
+              {co.method !== 'cod' && <p className="text-[13px] text-muted">{t.tpOutcome}: {t.outcomes[simNow(true).outcome]}</p>}
+              <Button size="sm" variant="secondary" onClick={doubleSubmit} disabled={busy || !!pending || issues.length > 0}>{t.tpDouble}</Button>
+              {double && <p className="text-[13px]" role="status">{double}</p>}
+            </div>
+          )}
         </div>
 
-        <aside className="sf-two-side sf-sticky sf-co-side">{summary('sf-coupon-d')}</aside>
+        <aside className="hidden lg:block">
+          <div className={cn(PANEL, 'sticky top-24 p-6')}>
+            <h2 className="mb-5 text-[15px] font-semibold">{t.summary}</h2>
+            {summary('sf-coupon-d')}
+          </div>
+        </aside>
       </div>
 
       {challenge && (
-        <Dialog title={t.tdsTitle} onClose={closeChallenge} footer={<>
-          <button type="button" className="btn" onClick={() => resolveChallenge(false)}>{t.tdsFail}</button>
-          <button type="button" className="btn primary" onClick={() => resolveChallenge(true)}>{t.tdsOk}</button>
+        <Modal title={t.tdsTitle} onClose={closeChallenge} footer={<>
+          <Button variant="secondary" onClick={() => resolveChallenge(false)}>{t.tdsFail}</Button>
+          <Button onClick={() => resolveChallenge(true)}>{t.tdsOk}</Button>
         </>}>
           <p>{t.tdsBody(m(totals.total))}</p>
-          <p className="small sf-muted"><span className="sim">{t.sim}</span></p>
-        </Dialog>
+          <SimNote>{t.paySim}</SimNote>
+        </Modal>
       )}
     </div>
   );

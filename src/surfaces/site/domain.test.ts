@@ -83,3 +83,19 @@ describe('plans & misc', () => {
     expect(simRef('CT', 7)).toBe('CT-SIM-0007');
   });
 });
+
+describe('screenshots and guide', async () => {
+  const { shotSrc, guideIndex } = await import('./domain');
+  it('picks the language capture and dark only where one exists', () => {
+    expect(shotSrc('home', 'ar')).toBe('/site/home-ar.jpg');
+    expect(shotSrc('home', 'en', true)).toBe('/site/home-en-dark.jpg');
+    expect(shotSrc('orders', 'en', true)).toBe('/site/orders-en.jpg');
+  });
+  it('clamps the guide step', () => {
+    expect(guideIndex('3', 6)).toBe(2);
+    expect(guideIndex('0', 6)).toBe(0);
+    expect(guideIndex('9', 6)).toBe(0);
+    expect(guideIndex('x', 6)).toBe(0);
+    expect(guideIndex(null, 6)).toBe(0);
+  });
+});

@@ -1,13 +1,14 @@
+// P01-PAY / P01-MKT / P01-ADS — service landing pages (blueprint P01, PDF p. 4).
 import type { ReactNode } from 'react';
+import { link } from '../../core/router';
+import { Card, cn, LinkButton } from '../../ds/ui';
 import { AD_CHANNELS, MARKETING_TOOLS, PAYMENT_METHODS } from './content';
-import { CampaignFragment, LoyaltyFragment, OrderFragment, PaymentStatesFragment } from './fragments';
-import { Icon, Intro, Pending, Status, site, useSite } from './kit';
-
-/* Service landing pages: payments, marketing and ads (blueprint P01, PDF p. 4). */
+import { shotSrc } from './domain';
+import { ArrowLink, Fwd, H2, H3, Intro, Lead, Pending, Shot, Status, site, useSite, wrap } from './kit';
 
 const C = {
   ar: {
-    plan: 'الباقة', status: 'الحالة', method: 'الطريقة', start: 'ابدأ متجرك', plans: 'قارن الباقات',
+    plan: 'الباقة', status: 'الحالة', method: 'الطريقة', start: 'ابدأ إنشاء متجرك', plans: 'قارن الباقات', shotOrder: 'لوحة التاجر · تفاصيل طلب', shotMkt: 'لوحة التاجر · التسويق والعروض', inDemo: 'الكوبونات تعمل في لوحة التاجر التجريبية الآن.', openMkt: 'افتح التسويق في اللوحة',
     // payments
     pEyebrow: 'المدفوعات',
     pTitle: 'اعرف متى دُفع الطلب فعلًا، قبل أن تجهّزه',
@@ -39,7 +40,7 @@ const C = {
     aAttr: 'أرقام كل منصة تُحسب بطريقتها. نعرضها منفصلة ولا نجمعها في عائد إعلاني واحد كأنها مصدر واحد.',
   },
   en: {
-    plan: 'Plan', status: 'Status', method: 'Method', start: 'Start your store', plans: 'Compare plans',
+    plan: 'Plan', status: 'Status', method: 'Method', start: 'Start your store', plans: 'Compare plans', shotOrder: 'Merchant dashboard · Order detail', shotMkt: 'Merchant dashboard · Marketing', inDemo: 'Coupons already work in the demo merchant dashboard.', openMkt: 'Open marketing in the dashboard',
     pEyebrow: 'Payments',
     pTitle: 'Know when an order is actually paid, before you prepare it',
     pLead: 'Local and international payment methods, with payment states kept separate from fulfilment, shipping and refunds. The decision comes from the provider’s confirmation, not the thank-you page.',
@@ -69,17 +70,46 @@ const C = {
   },
 };
 
+function Page({ children }: { children: ReactNode }) {
+  return <div className={cn(wrap, 'space-y-20 py-14 sm:py-20')}>{children}</div>;
+}
+
 function Split({ copy, visual }: { copy: ReactNode; visual: ReactNode }) {
-  return <div className="site-split"><div className="site-split-copy">{copy}</div><div className="site-split-visual">{visual}</div></div>;
+  return (
+    <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-14">
+      <div className="space-y-5 lg:col-span-5">{copy}</div>
+      <div className="lg:col-span-7">{visual}</div>
+    </div>
+  );
+}
+
+/** A list of capabilities with the plan they start on and their status. */
+function Rows({ items }: { items: { key: string; name: ReactNode; what: ReactNode; plan: string; status?: 'demo' | 'planned' }[] }) {
+  return (
+    <Card>
+      <ul className="divide-y divide-border">
+        {items.map((m) => (
+          <li key={m.key} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-4">
+            <div className="min-w-0 flex-1 basis-56">
+              <p className="font-semibold text-fg">{m.name}</p>
+              <p className="mt-0.5 text-sm text-muted">{m.what}</p>
+            </div>
+            <span className="rounded-md bg-surface-2 px-2 py-0.5 text-xs font-semibold text-muted"><bdi dir="ltr">{m.plan}</bdi></span>
+            <Status s={m.status ?? 'planned'} />
+          </li>
+        ))}
+      </ul>
+    </Card>
+  );
 }
 
 function Closing() {
   const { lang } = useSite();
   const c = C[lang];
   return (
-    <div className="site-cta-row site-block">
-      <a className="btn primary site-btn-lg" href={site('start')}>{c.start}<Icon name="arrow" size={18} /></a>
-      <a className="btn site-btn-lg" href={site('plans')}>{c.plans}</a>
+    <div className="flex flex-wrap gap-3 border-t border-border pt-10">
+      <LinkButton size="lg" href={site('start')}>{c.start}<Fwd /></LinkButton>
+      <LinkButton size="lg" variant="secondary" href={site('plans')}>{c.plans}</LinkButton>
     </div>
   );
 }
@@ -88,31 +118,22 @@ export function Payments() {
   const { lang, tr } = useSite();
   const c = C[lang];
   return (
-    <div className="site-wrap site-pad">
-      <Split copy={<Intro eyebrow={c.pEyebrow} title={c.pTitle} lead={c.pLead} />} visual={<PaymentStatesFragment />} />
+    <Page>
+      <Split copy={<Intro eyebrow={c.pEyebrow} title={c.pTitle} lead={c.pLead} />} visual={<Shot priority src={shotSrc('order', lang)} alt={c.shotOrder} label={c.shotOrder} />} />
 
-      <section className="site-block" aria-labelledby="site-pm">
-        <h2 className="site-h2" id="site-pm">{c.pMethods}</h2>
-        <p className="site-section-lead">{c.pMethodsLead}</p>
-        <ul className="site-rows">
-          {PAYMENT_METHODS.map((m) => (
-            <li key={m.name.en}>
-              <span className="site-rows-main"><span className="strong">{tr(m.name)}</span><span className="muted small">{tr(m.kind)}</span></span>
-              <span className="site-plan-chip"><bdi dir="ltr">{m.plan}</bdi></span>
-              <Status s="planned" />
-            </li>
-          ))}
-        </ul>
+      <section aria-labelledby="site-pm" className="space-y-6">
+        <div className="space-y-2"><H2 id="site-pm">{c.pMethods}</H2><Lead>{c.pMethodsLead}</Lead></div>
+        <Rows items={PAYMENT_METHODS.map((m) => ({ key: m.name.en, name: tr(m.name), what: tr(m.kind), plan: m.plan }))} />
       </section>
 
-      <div className="site-block site-two">
-        <section aria-labelledby="site-cur"><h2 className="site-h3" id="site-cur">{c.pCurrency}</h2><p>{c.pCurrencyBody}</p></section>
-        <section aria-labelledby="site-fraud"><h2 className="site-h3" id="site-fraud">{c.pFraud}</h2><p>{c.pFraudBody}</p></section>
+      <div className="grid gap-10 border-t border-border pt-12 md:grid-cols-3">
+        <section aria-labelledby="site-cur" className="space-y-2"><H3 id="site-cur">{c.pCurrency}</H3><p className="text-sm leading-relaxed text-muted">{c.pCurrencyBody}</p></section>
+        <section aria-labelledby="site-fraud" className="space-y-2"><H3 id="site-fraud">{c.pFraud}</H3><p className="text-sm leading-relaxed text-muted">{c.pFraudBody}</p></section>
+        <section aria-labelledby="site-break" className="space-y-2"><H3 id="site-break">{c.pBreak}</H3><p className="text-sm leading-relaxed text-muted">{c.pBreakBody}</p></section>
       </div>
-
-      <Split copy={<><h2 className="site-h2">{c.pBreak}</h2><p className="site-section-lead">{c.pBreakBody}</p><Pending title={c.pNote} /></>} visual={<OrderFragment />} />
+      <Pending title={c.pNote} />
       <Closing />
-    </div>
+    </Page>
   );
 }
 
@@ -120,33 +141,29 @@ export function Marketing() {
   const { lang, tr } = useSite();
   const c = C[lang];
   return (
-    <div className="site-wrap site-pad">
-      <Intro eyebrow={c.mEyebrow} title={c.mTitle} lead={c.mLead}>
-        <div className="site-cta-row">
-          <a className="btn" href={site('ads')}>{c.mAds}</a>
-          <a className="btn" href={site('guide')}>{c.mGuide}</a>
-        </div>
-      </Intro>
+    <Page>
+      <Split
+        copy={<Intro eyebrow={c.mEyebrow} title={c.mTitle} lead={c.mLead}>
+          <div className="flex flex-wrap gap-3 pt-2">
+            <LinkButton variant="secondary" href={site('ads')}>{c.mAds}</LinkButton>
+            <LinkButton variant="secondary" href={site('guide')}>{c.mGuide}</LinkButton>
+          </div>
+        </Intro>}
+        visual={<div className="space-y-3"><Shot priority src={shotSrc('marketing', lang)} alt={c.shotMkt} label={c.shotMkt} />
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted"><span>{c.inDemo}</span><ArrowLink href={link('/dashboard/marketing')}>{c.openMkt}</ArrowLink></div></div>} />
 
-      <section className="site-block" aria-labelledby="site-mt">
-        <h2 className="site-h2" id="site-mt">{c.mTools}</h2>
-        <ul className="site-rows site-rows-tall">
-          {MARKETING_TOOLS.map((m) => (
-            <li key={m.id}>
-              <span className="site-rows-main">
-                {m.href ? <a className="strong site-link" href={site(m.href)}>{tr(m.name)}<Icon name="arrow" size={16} /></a> : <span className="strong">{tr(m.name)}</span>}
-                <span className="muted">{tr(m.what)}</span>
-              </span>
-              <span className="site-plan-chip"><bdi dir="ltr">{m.plan}</bdi></span>
-              <Status s="planned" />
-            </li>
-          ))}
-        </ul>
+      <section aria-labelledby="site-mt" className="space-y-6">
+        <H2 id="site-mt">{c.mTools}</H2>
+        <Rows items={MARKETING_TOOLS.map((m) => ({ key: m.id, plan: m.plan, what: tr(m.what),
+          name: m.href ? <a href={site(m.href)} className="inline-flex items-center gap-1.5 hover:text-brand-700 hover:underline dark:hover:text-brand-300">{tr(m.name)}<Fwd /></a> : tr(m.name) }))} />
       </section>
 
-      <Split copy={<><h2 className="site-h2">{c.mRule}</h2><p className="site-section-lead">{c.mRuleBody}</p></>} visual={<LoyaltyFragment />} />
+      <section aria-labelledby="site-rule" className="max-w-3xl space-y-3 border-s-2 border-brand-500 ps-6">
+        <H2 id="site-rule">{c.mRule}</H2>
+        <Lead>{c.mRuleBody}</Lead>
+      </section>
       <Closing />
-    </div>
+    </Page>
   );
 }
 
@@ -154,30 +171,27 @@ export function Ads() {
   const { lang, tr } = useSite();
   const c = C[lang];
   return (
-    <div className="site-wrap site-pad">
-      <Split copy={<Intro eyebrow={c.aEyebrow} title={c.aTitle} lead={c.aLead} />} visual={<CampaignFragment />} />
+    <Page>
+      <Intro eyebrow={c.aEyebrow} title={c.aTitle} lead={c.aLead} />
 
-      <section className="site-block" aria-labelledby="site-ch">
-        <h2 className="site-h2" id="site-ch">{c.aChannels}</h2>
-        <ul className="site-rows">
-          {AD_CHANNELS.map((a) => (
-            <li key={a.name}>
-              <span className="site-rows-main"><bdi className="strong" dir="ltr">{a.name}</bdi><span className="muted small">{tr(a.what)}</span></span>
-              <span className="site-plan-chip"><bdi dir="ltr">Plus+</bdi></span>
-              <Status s="planned" />
+      <section aria-labelledby="site-flow" className="space-y-8">
+        <H2 id="site-flow">{c.aFlow}</H2>
+        <ol className="grid gap-px overflow-hidden rounded-2xl border border-border bg-border sm:grid-cols-2 lg:grid-cols-5">
+          {c.aSteps.map((s, i) => (
+            <li key={s} className="space-y-3 bg-surface p-5">
+              <span className="text-3xl font-bold text-brand-500/30 tabular-nums" aria-hidden="true">{i + 1}</span>
+              <p className="text-sm font-medium leading-relaxed text-fg">{s}</p>
             </li>
           ))}
-        </ul>
-      </section>
-
-      <section className="site-block" aria-labelledby="site-flow">
-        <h2 className="site-h2" id="site-flow">{c.aFlow}</h2>
-        <ol className="site-steps">
-          {c.aSteps.map((s, i) => <li key={s}><span className="site-step-n" aria-hidden="true">{i + 1}</span><span>{s}</span></li>)}
         </ol>
         <Pending title={c.aAttr} />
       </section>
+
+      <section aria-labelledby="site-ch" className="space-y-6">
+        <H2 id="site-ch">{c.aChannels}</H2>
+        <Rows items={AD_CHANNELS.map((a) => ({ key: a.name, name: <bdi dir="ltr">{a.name}</bdi>, what: tr(a.what), plan: 'Plus+' }))} />
+      </section>
       <Closing />
-    </div>
+    </Page>
   );
 }

@@ -4,6 +4,10 @@ import type { FieldError } from './domain';
 
 const ar = {
   siteName: 'لك',
+  skip: 'تخطَّ إلى المحتوى', hub: 'كل الواجهات', light: 'الوضع الفاتح', dark: 'الوضع الداكن', loading: 'جارٍ تحميل الصفحة…',
+  loadError: 'تعذّر تحميل هذه الصفحة', loadErrorBody: 'تحقق من اتصالك ثم أعد المحاولة. لم يُفقد شيء كتبته.',
+  emptyHelp: 'لا توجد مقالات منشورة بعد', emptyHelpBody: 'نكتب أول المقالات الآن. حتى ذلك الحين، راسل فريق الدعم.',
+  emptyBlog: 'لا توجد مقالات في المدونة بعد', emptyBlogBody: 'ستظهر هنا أول المقالات بعد مراجعة التحرير.',
   siteNav: 'تنقل موقع لك',
   menu: 'القائمة',
   closeMenu: 'إغلاق القائمة',
@@ -57,6 +61,10 @@ type Strings = typeof ar;
 
 const en: Strings = {
   siteName: 'LAK',
+  skip: 'Skip to content', hub: 'All surfaces', light: 'Light mode', dark: 'Dark mode', loading: 'Loading the page…',
+  loadError: 'We could not load this page', loadErrorBody: 'Check your connection and try again. Nothing you typed was lost.',
+  emptyHelp: 'No help articles are published yet', emptyHelpBody: 'We are writing the first articles now. Until then, message the support team.',
+  emptyBlog: 'No blog articles yet', emptyBlogBody: 'The first articles will appear here after editorial review.',
   siteNav: 'LAK website navigation',
   menu: 'Menu',
   closeMenu: 'Close menu',

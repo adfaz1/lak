@@ -1,4 +1,4 @@
-/* Module-level fixture stores for the storefront. Simulated state: it resets with "Reset data" and on reload. */
+/* Module-level fixture stores for the storefront. Simulated state kept for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
 import {
   DAY, applyPayment, catalogue, computeTotals, coupons, evaluateCoupon, isSettled, pricedLines, shipById, submitOrder,
@@ -167,10 +167,21 @@ export function stripSaved(a: SavedAddress): Partial<Address> {
 }
 
 /** Ask the (simulated) provider for the result of a payment that timed out. */
-export function checkStatus(ref: string): Order | undefined {
+export function checkStatus(ref: string, result: TestState['verify'] = testStore.get().verify): Order | undefined {
   const o = getOrder(ref);
   if (!o || o.pay.state !== 'verifying') return o;
-  const next = payEvent(ref, { type: 'verify', result: testStore.get().verify }, o.pay.method);
+  const next = payEvent(ref, { type: 'verify', result }, o.pay.method);
   if (next?.pay.state === 'declined') checkoutStore.set((c) => ({ ...c, notice: { kind: 'verify_failed', ref } }));
   return next;
 }
+
+/** Review tool: the first item in the bag sells out, to show how the bag and checkout recover. Returns its variant id. */
+export function sellOutFirstInBag(): string | undefined {
+  const first = cartStore.get().lines[0];
+  if (!first) return undefined;
+  catalogStore.set((ps) => ps.map((p) => ({ ...p, variants: p.variants.map((v) => (v.id === first.vid ? { ...v, stock: 0 } : v)) })));
+  return first.vid;
+}
+
+/** Newsletter sign-ups in this preview (no email is sent). */
+export const newsletterStore = createStore.key('storefront.newsletter')<string[]>(() => []);

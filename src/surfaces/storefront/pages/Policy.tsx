@@ -1,5 +1,7 @@
 import type { L } from '../../../core/lang';
-import { Icon, to, useS } from '../kit';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { Badge, cn } from '../../../ds/ui';
+import { Crumbs, H1, PANEL, WRAP, to, useS } from '../kit';
 
 export const POLICY_IDS = ['shipping', 'returns', 'privacy', 'terms'] as const;
 type PolicyId = (typeof POLICY_IDS)[number];
@@ -27,17 +29,18 @@ const BODY: Record<PolicyId, L[]> = {
 };
 
 export default function PolicyPage({ id }: { id: PolicyId }) {
-  const { t, l } = useS();
-  const title = { shipping: t.pShipping, returns: t.pReturns, privacy: t.pPrivacy, terms: t.pTerms }[id];
+  const { t, l, lang } = useS();
+  const name = (x: PolicyId) => ({ shipping: t.pShipping, returns: t.pReturns, privacy: t.pPrivacy, terms: t.pTerms })[x];
+  const Arrow = lang === 'ar' ? ArrowLeft : ArrowRight;
   return (
-    <div className="sf-wrap sf-section sf-narrow-wide">
-      <nav className="sf-crumbs small" aria-label={t.home}><a href={to()}>{t.home}</a><Icon name="chev" size={14} flip /><span aria-current="page">{title}</span></nav>
-      <h1 className="sf-h1">{title}</h1>
-      <p className="small"><span className="sim">{t.sampleText}</span></p>
-      <div className="sf-prose">{BODY[id].map((p) => <p key={p.en}>{l(p)}</p>)}</div>
-      <nav className="sf-policy-links" aria-label={t.policies}>
+    <div className={cn(WRAP, 'max-w-3xl py-6 sm:py-10')}>
+      <Crumbs items={[{ label: t.home, href: to() }, { label: name(id) }]} />
+      <h1 className={H1}>{name(id)}</h1>
+      <p className="mt-2"><Badge>{t.sampleText}</Badge></p>
+      <div className="mt-8 space-y-5 text-[15px] leading-loose text-fg/90">{BODY[id].map((p) => <p key={p.en}>{l(p)}</p>)}</div>
+      <nav aria-label={t.policies} className="mt-12 grid gap-2 border-t border-border pt-6 sm:grid-cols-3">
         {POLICY_IDS.filter((x) => x !== id).map((x) => (
-          <a key={x} href={to(`/page/${x}`)}>{{ shipping: t.pShipping, returns: t.pReturns, privacy: t.pPrivacy, terms: t.pTerms }[x]}<Icon name="chev" size={16} flip /></a>
+          <a key={x} href={to(`/page/${x}`)} className={cn(PANEL, 'flex items-center justify-between gap-2 px-4 py-3 text-sm font-medium hover:border-fg/30')}>{name(x)}<Arrow className="size-4 text-muted" aria-hidden="true" /></a>
         ))}
       </nav>
     </div>

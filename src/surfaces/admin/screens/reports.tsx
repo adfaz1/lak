@@ -1,100 +1,119 @@
-import { useCallback, useState, type ReactNode } from 'react';
-import { formatInt } from '../../../core/format';
-import { Dialog, LinkTabs, Money, PageHeader, Sim } from '../../../core/ui';
-import { can, csvMoney, DATA_AS_OF, gmv, PLAN_NAME, REGION_REVENUE, SUBS_MONTHS, toCsv } from '../domain';
+// Reports (`#/admin/reports?report=merchants|revenue|subs|sales`): one table per report, a chart where it helps,
+// and a real CSV export (built in the browser from the same rows, confirmed, logged).
+import { useState } from 'react';
+import { Download, FileBarChart } from 'lucide-react';
+import { useLang } from '../../../core/lang';
+import { AreaChart } from '../../../ds/charts';
+import { DataTable, Modal, PageHeader, Simulated, Tabs, useToast, type Column } from '../../../ds/kit';
+import { Badge, Button, Card, CardHeader, EmptyState, Money, Ref, useTx } from '../../../ds/ui';
+import { can, DATA_AS_OF, PLAN_NAME, REGION_REVENUE, SUBS_MONTHS, type Store } from '../domain';
 import { STORE_STATUS } from '../i18n';
-import { AsOf, DataList, flash, Icon, Locked, withQuery, type Ctx } from '../kit';
+import { bpText, categorySales, csvName, regionTotal, reportCsv, REPORTS, type ReportId } from '../model';
 import { logExport, storesStore } from '../state';
+import { AsOf, Bars, Locked, qhref, StateGate, useFmt, useViewState } from '../ui';
+import { downloadCsv, STORE_TONE } from './stores';
+import type { ScreenProps } from '../index';
 
-type ReportId = 'merchants' | 'revenue' | 'subs' | 'sales';
-interface Built { title: string; headers: string[]; csv: (string | number)[][]; view: { key: string; cells: ReactNode[] }[]; ends: boolean[] }
+export default function Reports({ role, route }: ScreenProps) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const f = useFmt();
+  const toast = useToast();
+  const state = useViewState();
+  const storesAll = storesStore.use();
+  const stores = state === 'empty' ? [] : storesAll;
+  const raw = route.query.get('report') as ReportId | null;
+  const id: ReportId = raw && REPORTS.includes(raw) ? raw : 'merchants';
+  const [confirm, setConfirm] = useState(false);
+  const title: Record<ReportId, string> = { merchants: tx('تقرير التجار', 'Merchant report'), revenue: tx('إيراد لك حسب المنطقة', 'LAK revenue by region'), subs: tx('حركة الاشتراكات', 'Subscription movements'), sales: tx('المبيعات حسب الفئة', 'Sales by category') };
+  const period = id === 'subs' ? tx('آخر 4 أشهر', 'Last 4 months') : tx(`آخر 30 يومًا حتى ${f.d(DATA_AS_OF)}`, `Last 30 days to ${f.d(DATA_AS_OF)}`);
+  const mayExport = can(role, 'reports.export');
+  const empty = state === 'empty';
+  const header = (
+    <>
+      <PageHeader title={tx('التقارير', 'Reports')} description={tx('الصادرات بيانات مقنّعة فقط وتُسجَّل', 'Exports hold masked data only and are logged')} meta={<AsOf />}
+        actions={mayExport && !empty ? <Button onClick={() => setConfirm(true)}><Download className="size-4" aria-hidden="true" />{tx('صدّر CSV', 'Export CSV')}</Button> : undefined} />
+      <Tabs label={tx('التقارير', 'Reports')} items={REPORTS.map((k) => ({ href: qhref('reports', route, { report: k === 'merchants' ? undefined : k }), label: title[k], current: k === id }))} />
+    </>
+  );
+  if (state === 'loading' || state === 'error') return <StateGate state={state} header={header} what={{ ar: 'التقرير', en: 'The report' }} refCode="SIM-ADM-RPT-503" />;
 
-export default function Reports({ t, lang, role, route }: Ctx) {
-  const stores = storesStore.use();
-  const q = route.query.get('report') as ReportId | null;
-  const id: ReportId = q && ['merchants', 'revenue', 'subs', 'sales'].includes(q) ? q : 'merchants';
-  const [confirming, setConfirming] = useState(false);
-  const close = useCallback(() => setConfirming(false), []);
-  const titles: Record<ReportId, string> = { merchants: t.repMerchants, revenue: t.repRevenue, subs: t.repSubs, sales: t.repSales };
+  const exportNow = () => {
+    const { csv, count } = reportCsv(id, stores, lang);
+    downloadCsv(csvName(id, DATA_AS_OF.slice(0, 10)), csv);
+    logExport(id, { ar: title[id], en: title[id] }, count);
+    toast({ tone: 'ok', text: tx('نُزّل الملف وسُجّل التصدير', 'File downloaded and export logged') });
+    setConfirm(false);
+  };
 
-  const build = (): Built => {
+  const body = () => {
+    if (empty && (id === 'merchants' || id === 'sales')) return <EmptyState icon={<FileBarChart className="size-6" />} title={tx('لا بيانات لهذه الفترة', 'No data for this period')} />;
     if (id === 'merchants') {
-      return {
-        title: titles.merchants, ends: [false, false, false, false, true, true, true],
-        headers: ['ID', t.store, t.plan, t.status, t.orders30, `${t.gmv30} (SAR)`, t.tickets],
-        csv: stores.map((s) => [s.id, s.name[lang], PLAN_NAME[s.plan], STORE_STATUS[s.status][lang], s.orders30, csvMoney(s.gmv30), s.tickets]),
-        view: stores.map((s) => ({ key: s.id, cells: [s.id, s.name[lang], PLAN_NAME[s.plan], STORE_STATUS[s.status][lang], formatInt(s.orders30), <Money key="m" v={s.gmv30} />, s.tickets] })),
-      };
+      const rows = [...stores].sort((a, b) => b.gmv30 - a.gmv30);
+      const cols: Column<Store>[] = [
+        { key: 'name', header: tx('المتجر', 'Store'), cell: (s) => <span className="block max-w-64 truncate">{s.name[lang]}<span className="block text-xs font-normal text-muted"><Ref>{s.id}</Ref></span></span> },
+        { key: 'plan', header: tx('الخطة', 'Plan'), cell: (s) => <bdi>{PLAN_NAME[s.plan]}</bdi>, hideBelow: 'md' },
+        { key: 'status', header: tx('الحالة', 'Status'), cell: (s) => <Badge tone={STORE_TONE[s.status]}>{STORE_STATUS[s.status][lang]}</Badge> },
+        { key: 'orders', header: tx('الطلبات', 'Orders'), align: 'end', cell: (s) => <span className="tabular-nums">{f.n(s.orders30)}</span> },
+        { key: 'tickets', header: tx('التذاكر', 'Tickets'), align: 'end', cell: (s) => <span className="tabular-nums">{s.tickets}</span>, hideBelow: 'md' },
+        { key: 'gmv', header: tx('المبيعات', 'GMV'), align: 'end', cell: (s) => <Money v={s.gmv30} className="font-semibold text-fg" /> },
+      ];
+      return <DataTable label={title[id]} rows={rows} columns={cols} rowKey={(s) => s.id}
+        card={(s) => <div><div className="flex items-baseline justify-between gap-2"><p className="truncate text-sm font-semibold">{s.name[lang]}</p><Money v={s.gmv30} className="text-sm font-semibold" /></div><p className="text-xs text-muted"><bdi>{PLAN_NAME[s.plan]}</bdi> · {tx(`${s.orders30} طلب · ${s.tickets} تذكرة`, `${s.orders30} orders · ${s.tickets} tickets`)}</p></div>} />;
     }
     if (id === 'revenue') {
-      return {
-        title: titles.revenue, ends: [false, true, true, true, true],
-        headers: [t.region, `${t.subs} (SAR)`, `${t.addons} (SAR)`, `${t.oneTime} (SAR)`, `${t.total} (SAR)`],
-        csv: REGION_REVENUE.map((r) => [r.region[lang], csvMoney(r.subscriptions), csvMoney(r.addons), csvMoney(r.oneTime), csvMoney(r.subscriptions + r.addons + r.oneTime)]),
-        view: REGION_REVENUE.map((r) => ({ key: r.region.en, cells: [r.region[lang], <Money key="a" v={r.subscriptions} />, <Money key="b" v={r.addons} />, <Money key="c" v={r.oneTime} />, <Money key="d" v={r.subscriptions + r.addons + r.oneTime} />] })),
-      };
+      const max = Math.max(...REGION_REVENUE.map(regionTotal));
+      return (
+        <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-5">
+          <div className="lg:col-span-2"><Bars rows={REGION_REVENUE.map((r) => ({ key: r.region.en, label: r.region[lang], value: <Money v={regionTotal(r)} />, pct: (regionTotal(r) * 100) / max }))} /></div>
+          <div className="scrollbar-thin overflow-x-auto lg:col-span-3">
+            <table className="w-full min-w-[420px] text-sm" aria-label={title[id]}>
+              <thead><tr className="border-b border-border text-xs text-muted"><th className="py-2 text-start font-semibold">{tx('المنطقة', 'Region')}</th><th className="py-2 text-end font-semibold">{tx('اشتراكات', 'Subscriptions')}</th><th className="py-2 text-end font-semibold">{tx('إضافات', 'Add-ons')}</th><th className="py-2 text-end font-semibold">{tx('لمرة واحدة', 'One-time')}</th></tr></thead>
+              <tbody className="divide-y divide-border">{REGION_REVENUE.map((r) => <tr key={r.region.en}><td className="py-2.5">{r.region[lang]}</td><td className="py-2.5 text-end"><Money v={r.subscriptions} /></td><td className="py-2.5 text-end"><Money v={r.addons} /></td><td className="py-2.5 text-end"><Money v={r.oneTime} /></td></tr>)}</tbody>
+            </table>
+            <p className="mt-3 text-xs text-muted">{tx('لا يشمل مبيعات التجار. التوزيع حسب الخطة غير متاح بعد.', 'Excludes merchant sales. A by-plan split is not available yet.')}</p>
+          </div>
+        </div>
+      );
     }
-    if (id === 'subs') {
-      return {
-        title: titles.subs, ends: [false, true, true, true, true],
-        headers: [t.month, t.signups, t.cancellations, t.upgrades, t.downgrades],
-        csv: SUBS_MONTHS.map((m) => [m.month, m.signups, m.cancellations, m.upgrades, m.downgrades]),
-        view: SUBS_MONTHS.map((m) => ({ key: m.month, cells: [<bdi key="m" dir="ltr">{m.month}</bdi>, m.signups, m.cancellations, m.upgrades, m.downgrades] })),
-      };
-    }
-    const total = gmv(stores);
-    const cats = [...new Set(stores.map((s) => s.category.en))].map((en) => {
-      const list = stores.filter((s) => s.category.en === en);
-      return { label: list[0].category[lang], n: list.length, gmv: list.reduce((a, s) => a + s.gmv30, 0) };
-    }).sort((a, b) => b.gmv - a.gmv);
-    const share = (v: number) => (total ? `${((v * 1000) / total / 10).toFixed(1)}%` : '0.0%');
-    return {
-      title: titles.sales, ends: [false, true, true, true],
-      headers: [t.category, t.storesCount, `${t.gmv30} (SAR)`, t.share],
-      csv: cats.map((c) => [c.label, c.n, csvMoney(c.gmv), share(c.gmv)]),
-      view: cats.map((c) => ({ key: c.label, cells: [c.label, c.n, <Money key="g" v={c.gmv} />, <bdi key="s">{share(c.gmv)}</bdi>] })),
-    };
-  };
-  const r = build();
-
-  const download = () => {
-    const blob = new Blob(['﻿' + toCsv(r.headers, r.csv)], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `lak-${id}-${DATA_AS_OF.slice(0, 10)}.csv`;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-    logExport(id, { ar: titles[id], en: titles[id] }, r.csv.length);
-    flash(t.exportDone);
-    setConfirming(false);
+    if (id === 'subs') return (
+      <div className="grid grid-cols-1 gap-6 p-5 lg:grid-cols-5">
+        <div className="lg:col-span-3"><AreaChart rtl={lang === 'ar'} height={200} points={SUBS_MONTHS.map((m) => ({ key: m.month, label: m.month, value: m.signups }))} format={(v) => tx(`${v} اشتراك جديد`, `${v} sign-ups`)} /></div>
+        <div className="scrollbar-thin overflow-x-auto lg:col-span-2">
+          <table className="w-full text-sm" aria-label={title[id]}>
+            <thead><tr className="border-b border-border text-xs text-muted"><th className="py-2 text-start font-semibold">{tx('الشهر', 'Month')}</th><th className="py-2 text-end font-semibold">{tx('جديد', 'New')}</th><th className="py-2 text-end font-semibold">{tx('إلغاء', 'Cancel')}</th><th className="py-2 text-end font-semibold">{tx('ترقية', 'Up')}</th><th className="py-2 text-end font-semibold">{tx('تخفيض', 'Down')}</th></tr></thead>
+            <tbody className="divide-y divide-border tabular-nums">{SUBS_MONTHS.map((m) => <tr key={m.month}><td className="py-2.5"><bdi dir="ltr">{m.month}</bdi></td><td className="py-2.5 text-end">{m.signups}</td><td className="py-2.5 text-end">{m.cancellations}</td><td className="py-2.5 text-end">{m.upgrades}</td><td className="py-2.5 text-end">{m.downgrades}</td></tr>)}</tbody>
+          </table>
+          <p className="mt-3 text-xs text-muted">{tx('نوفمبر غير مكتمل. معدل الإلغاء يحتاج تعريفًا معتمدًا.', 'November is incomplete. Churn rate needs an approved definition.')}</p>
+        </div>
+      </div>
+    );
+    const cats = categorySales(stores);
+    return (
+      <div className="p-5">
+        <Bars rows={cats.map((c) => ({ key: c.key, label: `${c.label[lang]} · ${tx(`${c.stores} متجر`, `${c.stores} stores`)}`, value: <span><Money v={c.gmv} /> · {bpText(c.shareBp)}</span>, pct: c.shareBp / 100 }))} />
+        <p className="mt-4 text-xs text-muted">{tx('مبيعات التجار (GMV) وليست إيراد لك.', 'Merchant sales (GMV), not LAK revenue.')}</p>
+      </div>
+    );
   };
 
   return (
-    <>
-      <PageHeader title={t.repTitle} sub={t.repSub} actions={<AsOf t={t} lang={lang} at={DATA_AS_OF} />} />
-      <LinkTabs label={t.repTitle} items={(['merchants', 'revenue', 'subs', 'sales'] as ReportId[]).map((k) => ({
-        href: withQuery('/reports', route, { report: k === 'merchants' ? undefined : k }), label: titles[k], current: k === id,
-      }))} />
-      <section className="card">
-        <div className="card-head">
-          <h2>{r.title}</h2>
-          {can(role, 'reports.export')
-            ? <button type="button" className="btn" onClick={() => setConfirming(true)}><Icon name="download" size={18} />&nbsp;{t.exportCsv}</button>
-            : <Locked>{t.noExport}</Locked>}
-        </div>
-        <div className="card-body adm-tight"><p className="muted small">{id === 'subs' ? t.periodMonths : `${t.period} ${DATA_AS_OF.slice(0, 10)}`}</p></div>
-        <DataList label={r.title} rows={r.view} rowKey={(v) => v.key}
-          cols={r.headers.map((h, i) => ({ key: String(i), head: h, primary: i === (id === 'merchants' ? 1 : 0), end: r.ends[i], cell: (v: Built['view'][number]) => v.cells[i] }))} />
-      </section>
-      {confirming && (
-        <Dialog title={t.exportTitle} onClose={close} footer={<>
-          <button type="button" className="btn" onClick={close}>{t.cancel}</button>
-          <button type="button" className="btn primary" onClick={download}>{t.exportCsv}</button>
+    <div className="space-y-6">
+      {header}
+      {!mayExport && <Locked>{tx('دورك يعرض التقارير ولا يصدّرها.', 'Your role can view reports but not export them.')}</Locked>}
+      <Card>
+        <CardHeader title={title[id]} action={<span className="text-xs text-muted">{period}</span>} />
+        <div className="border-t border-border">{body()}</div>
+      </Card>
+      {confirm && (
+        <Modal title={tx('تصدير التقرير CSV', 'Export report as CSV')} onClose={() => setConfirm(false)} footer={<>
+          <Button variant="secondary" onClick={() => setConfirm(false)}>{tx('إلغاء', 'Cancel')}</Button>
+          <Button onClick={exportNow}><Download className="size-4" aria-hidden="true" />{tx(`نزّل ${reportCsv(id, stores, lang).count} صفًا`, `Download ${reportCsv(id, stores, lang).count} rows`)}</Button>
         </>}>
-          <p>{t.exportScope(r.csv.length, r.title)}</p>
-          <p className="small"><Sim /> {t.simData}</p>
-        </Dialog>
+          <p className="text-sm text-fg">{tx(`«${title[id]}» · ${period}. المبالغ بالريال بخانتين عشريتين، بلا بيانات تواصل.`, `“${title[id]}” · ${period}. Amounts in SAR with two decimals, no contact data.`)}</p>
+          <p className="flex items-center gap-2 text-xs text-muted"><Simulated />{tx('يُنشأ الملف في متصفحك من البيانات التجريبية ويُسجَّل في سجل الإجراءات.', 'The file is built in your browser from demo data and recorded in the audit log.')}</p>
+        </Modal>
       )}
-    </>
+    </div>
   );
 }
