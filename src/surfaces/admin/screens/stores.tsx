@@ -222,7 +222,7 @@ function Detail({ role, id }: ScreenProps & { id: string }) {
               {!can(role, 'stores.access') ? <Locked>{tx('دورك لا يبدأ وصولًا مفوّضًا.', 'Your role cannot start supported access.')}</Locked>
                 : liveHere ? <p className="text-sm text-muted">{tx('جلسة نشطة الآن على هذا المتجر.', 'A session is active on this store now.')}</p>
                   : live ? <Locked>{tx('توجد جلسة نشطة على متجر آخر. أنهِها أولًا.', 'Another session is active on a different store. End it first.')}</Locked>
-                    : <Button variant="secondary" onClick={() => setDlg('access')}><ShieldCheck className="size-4" aria-hidden="true" />{tx('ابدأ وصولًا مفوّضًا', 'Start supported access')}</Button>}
+                    : <p className="text-sm text-muted">{tx('لا جلسة نشطة. ابدأها من أعلى الصفحة مع السبب ورقم التذكرة.', 'No active session. Start one from the top of the page with a reason and ticket number.')}</p>}
             </div>
             {mine.length > 0 && <Timeline items={mine.map((s) => ({ key: s.id, when: f.dt(s.startedAt), title: `${ROLE_LABEL[s.by][lang]} · ${s.mode === 'read' ? tx('قراءة فقط', 'Read-only') : tx('قراءة وكتابة', 'Read & write')} · ${tx(`${s.minutes} دقيقة`, `${s.minutes} min`)}`, meta: isLive(s, now) ? tx('نشطة', 'Active') : s.end === 'expired' ? tx('انتهت المدة', 'Expired') : tx('أُنهيت', 'Ended'), note: s.reason }))} />}
           </Card>

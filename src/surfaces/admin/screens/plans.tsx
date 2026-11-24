@@ -39,7 +39,7 @@ function Definitions() {
     <>
       <Alert tone="info" title={tx('لا أسعار هنا', 'No prices here')}>{tx('الأسعار والعمولات والأسعار الإقليمية وقواعد التجديد قرارات تجارية بانتظار الاعتماد. المزايا من سجل واحد يملكه الخادم.', 'Prices, commissions, regional pricing and renewal rules are business decisions awaiting approval. Entitlements come from one registry the backend must own.')}</Alert>
       <Card>
-        <div className="scrollbar-thin max-h-[70vh] overflow-auto">
+        <div className="scrollbar-thin relative max-h-[70vh] overflow-auto">
           <table className="w-full min-w-[640px] text-sm" aria-label={tx('مزايا الخطط', 'Plan entitlements')}>
             <thead className="sticky top-0 z-10 bg-surface">
               <tr className="border-b border-border">

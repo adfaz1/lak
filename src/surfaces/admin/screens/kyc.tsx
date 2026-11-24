@@ -122,8 +122,8 @@ function Detail({ role, id }: ScreenProps & { id: string }) {
       <PageHeader back={back} title={app.store[lang]} description={<>{app.merchant[lang]} · <Ref>{app.id}</Ref> · {tx('قُدّم', 'Submitted')} {f.dt(app.submitted)}</>}
         meta={<><Badge tone={KYC_TONE[app.status]}>{KYC_STATUS[app.status][lang]}</Badge><Badge tone={d.complete ? 'green' : 'amber'}>{tx(`${d.ok} من ${d.total} وثائق سليمة`, `${d.ok} of ${d.total} documents valid`)}</Badge></>}
         actions={!decided && mayDecide ? (d.complete
-          ? <Button onClick={() => setDialog('approve')}><BadgeCheck className="size-4" aria-hidden="true" />{tx('اقبل', 'Approve')}</Button>
-          : <Button onClick={() => setDialog('info')}><MailQuestion className="size-4" aria-hidden="true" />{tx('اطلب استكمالًا', 'Request more info')}</Button>) : undefined} />
+          ? <Button className="lg:hidden" onClick={() => setDialog('approve')}><BadgeCheck className="size-4" aria-hidden="true" />{tx('اقبل', 'Approve')}</Button>
+          : <Button className="lg:hidden" onClick={() => setDialog('info')}><MailQuestion className="size-4" aria-hidden="true" />{tx('اطلب استكمالًا', 'Request more info')}</Button>) : undefined} />
 
       {app.flags.map((fl) => <Alert key={fl.en} tone="warn" title={tx('ملاحظة مراجعة', 'Review note')}>{fl[lang]}</Alert>)}
 
