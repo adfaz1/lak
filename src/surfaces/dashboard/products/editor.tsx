@@ -1,32 +1,35 @@
 // Product editor (`#/dashboard/products/<id>` and `/new`). Typing is kept as a session draft (never counted as saved);
 // "saved" only after the simulated server round trip succeeds, with the new version number.
-import { useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, ImagePlus, PackageSearch, Star, Trash2, X, Plus, Boxes, Copy } from 'lucide-react';
 import { navigate, replace } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
 import { LOCATIONS, LOC_IDS, type Channel, type LocId } from '../../merchant/domain';
-import { colorText, parseMoney, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
+import { colorText, parseMoney, rebuildVariants, takenSkus, variantText, type DraftError, type Product, type ProductDraft } from '../../merchant/catalog';
 import { available, levelOf } from '../../merchant/inventory';
 import { can } from '../../merchant/perms';
 import { categoriesStore, draftsStore, levelsStore, logAction, productsStore } from '../../merchant/stores';
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Segmented, Skeleton, cn, useTx } from '../../../ds/ui';
-import { Alert, Field, Input, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
+import { Alert, Field, Input, Modal, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
 import {
   CHANNELS, TAG_MAX, categoryKey, categoryOptions, checkImage, discountPct, duplicateDraft, fieldId, fromEditDraft, hiddenReason, levelsForNew, makePrimary, mediaSrc,
   moveItem, nextProductId, normaliseTags, orderErrors, previewPrice, profitOf, rebuildEditVariants, rememberUrl, removeMedia, restoreMedia, seoPreview, slugify, toEditDraft,
   validateEdit, type EditDraft, type EditVariant, type FileProblem,
+  checkRemoval, comboKey, fillColumn, imageForColor, removeCombo, restoreCombo, setColorImage, variantStock, variantsWithValue, type FillCol, type RemovalCheck,
 } from './model';
 import { LeaveModal, ReviewTools, STATUS_TONE, phref, roleBadge, useLeaveGuard, useNames, useRole } from './common';
+import { draftInput, quality } from './quality';
+import { QualityList, QualityMeter } from './views-ui';
 
 type SaveState = 'clean' | 'dirty' | 'saving' | 'failed' | 'saved';
 /** The last successful save, so the page can still say "Saved · version n" after a new product gets its id. */
 let lastSaved: { id: string; version: number; at: string } | null = null;
 const draftKey = (id: string) => `dash:${id}`;
 
-export default function Editor({ id }: { id: string }) {
+export default function Editor({ id, focus }: { id: string; focus?: string | null }) {
   const tx = useTx();
   const state = useDashState();
   const products = productsStore.use();
@@ -47,10 +50,10 @@ export default function Editor({ id }: { id: string }) {
       </EmptyState></Card>
     </div>
   );
-  return <Form id={id} product={product} />;
+  return <Form id={id} product={product} focus={focus ?? null} />;
 }
 
-function Form({ id, product }: { id: string; product: Product | undefined }) {
+function Form({ id, product, focus }: { id: string; product: Product | undefined; focus: string | null }) {
   const tx = useTx();
   const { lang } = useLang();
   const names = useNames();
@@ -76,6 +79,8 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const summaryRef = useRef<HTMLDivElement>(null);
+  // Arriving from a quality "Fix" link (`?focus=<field>`): bring that field into view and put the cursor in it.
+  useEffect(() => { if (focus) jumpTo(focus); }, [focus]);
 
   const known = useMemo(() => new Set(levels.map((l) => l.sku)), [levels]);
   const cats = categoriesStore.use();
@@ -192,7 +197,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
             <MediaSection draft={draft} set={set} fe={fe} get={() => draftRef.current} />
             <Pricing draft={draft} set={set} fe={fe} />
             <InventorySection draft={draft} set={set} fe={fe} known={known} />
-            <Variants draft={draft} set={set} fe={fe} known={known} />
+            <Variants draft={draft} set={set} fe={fe} known={known} get={() => draftRef.current} />
             {draft.type === 'physical' && (
               <Card aria-labelledby="pe-h-ship">
                 <CardHeader id="pe-h-ship" title={tx('الشحن', 'Shipping')} />
@@ -207,7 +212,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
               <CardHeader id="pe-h-status" title={tx('الحالة', 'Status')} hint={tx('المسودة والمؤرشف لا يظهران للعملاء.', 'Drafts and archived products are hidden from shoppers.')} />
               <div className="space-y-4 px-5 pb-5">
                 <Field label={tx('حالة المنتج', 'Product status')}>{(p) => <Select {...p} value={draft.status} onChange={(e) => set({ status: e.target.value as EditDraft['status'] })}>{(['active', 'draft', 'archived'] as const).map((s) => <option key={s} value={s}>{names.status(s)}</option>)}</Select>}</Field>
-                <Field label={<span className="flex w-full items-center justify-between gap-2">{tx('الفئة', 'Category')}<a href={phref('categories')} className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('إدارة الفئات', 'Manage')}</a></span>}>{(p) => (
+                <Field id={fieldId('category')} label={<span className="flex w-full items-center justify-between gap-2">{tx('الفئة', 'Category')}<a href={phref('categories')} className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('إدارة الفئات', 'Manage')}</a></span>}>{(p) => (
                   <Select {...p} value={categoryKey(draft.category)} onChange={(e) => set({ category: catOpts.find((c) => c.key === e.target.value)?.name ?? draft.category })}>
                     {[...catOpts, ...(catOpts.some((c) => c.key === categoryKey(draft.category)) ? [] : [{ key: categoryKey(draft.category), name: draft.category, depth: 0 as const, id: null }])].map((c) => <option key={c.key} value={c.key}>{c.depth ? '— ' : ''}{c.name[lang]}</option>)}
                   </Select>
@@ -215,6 +220,7 @@ function Form({ id, product }: { id: string; product: Product | undefined }) {
                 <TagsField tags={draft.tags ?? []} onChange={(t) => set({ tags: t })} />
               </div>
             </Card>
+            <QualityCard draft={draft} />
             <PreviewCard draft={draft} />
             <Card aria-labelledby="pe-h-ch">
               <CardHeader id="pe-h-ch" title={tx('القنوات', 'Channels')} hint={tx('سوق لك يراجع أهلية كل منتج قبل ظهوره.', 'LAK marketplace reviews each product’s eligibility before it appears.')} />
@@ -257,8 +263,8 @@ function Basics({ draft, set, fe }: SecProps) {
       <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
         <Field id={fieldId('nameAr')} label={tx('الاسم بالعربية', 'Name in Arabic')} error={fe('nameAr')}>{(p) => <Input {...p} dir="rtl" lang="ar" value={draft.nameAr} onChange={(e) => set({ nameAr: e.target.value })} />}</Field>
         <Field id={fieldId('nameEn')} label={tx('الاسم بالإنجليزية', 'Name in English')} error={fe('nameEn')}>{(p) => <Input {...p} dir="ltr" lang="en" value={draft.nameEn} onChange={(e) => set({ nameEn: e.target.value })} />}</Field>
-        <Field label={tx('الوصف بالعربية', 'Description in Arabic')} optional>{(p) => <Textarea {...p} dir="rtl" lang="ar" value={draft.descAr} onChange={(e) => set({ descAr: e.target.value })} />}</Field>
-        <Field label={tx('الوصف بالإنجليزية', 'Description in English')} optional>{(p) => <Textarea {...p} dir="ltr" lang="en" value={draft.descEn} onChange={(e) => set({ descEn: e.target.value })} />}</Field>
+        <Field id={fieldId('descAr')} label={tx('الوصف بالعربية', 'Description in Arabic')} optional>{(p) => <Textarea {...p} dir="rtl" lang="ar" value={draft.descAr} onChange={(e) => set({ descAr: e.target.value })} />}</Field>
+        <Field id={fieldId('descEn')} label={tx('الوصف بالإنجليزية', 'Description in English')} optional>{(p) => <Textarea {...p} dir="ltr" lang="en" value={draft.descEn} onChange={(e) => set({ descEn: e.target.value })} />}</Field>
       </div>
     </Card>
   );
@@ -318,7 +324,7 @@ function MediaSection({ draft, set, fe, get }: SecProps & { get: () => EditDraft
   return (
     <Card aria-labelledby="pe-h-media">
       <CardHeader id="pe-h-media" title={tx('الصور', 'Media')} hint={tx('الصورة الأولى هي الرئيسية في المتجر والقوائم. النص البديل مطلوب لكل صورة.', 'The first image is the main one in the store and lists. Every image needs alt text.')}
-        action={<span className="flex items-center gap-2"><InfoHint>{tx('المعاينة محلية في هذه الجلسة؛ الحفظ الدائم يحتاج خادمًا.', 'Previews are local to this session; permanent storage needs a server.')}</InfoHint><Button variant="secondary" size="sm" onClick={() => input.current?.click()}><ImagePlus className="size-4" aria-hidden="true" />{tx('ارفع صورًا', 'Upload images')}</Button></span>} />
+        action={<span className="flex items-center gap-2"><InfoHint>{tx('المعاينة محلية في هذه الجلسة؛ الحفظ الدائم يحتاج خادمًا.', 'Previews are local to this session; permanent storage needs a server.')}</InfoHint><Button id={fieldId('media')} variant="secondary" size="sm" onClick={() => input.current?.click()}><ImagePlus className="size-4" aria-hidden="true" />{tx('ارفع صورًا', 'Upload images')}</Button></span>} />
       <div className="space-y-3 px-5 pb-5">
         <input ref={input} type="file" multiple accept="image/jpeg,image/png,image/webp,image/gif,image/avif" className="sr-only" tabIndex={-1} aria-label={tx('صور المنتج', 'Product images')} onChange={(e) => { if (e.target.files) addFiles(e.target.files); e.target.value = ''; }} />
         <div onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={(e) => { e.preventDefault(); setOver(false); addFiles(e.dataTransfer.files); }}
@@ -398,11 +404,15 @@ function Pricing({ draft, set, fe }: SecProps) {
         <Field id={fieldId('compareAt')} label={tx('السعر قبل الخصم', 'Compare-at price')} optional error={fe('compareAt')}>{(p) => <Input {...p} dir="ltr" inputMode="decimal" value={draft.compareAt} onChange={(e) => set({ compareAt: e.target.value })} />}</Field>
         <Field id={fieldId('cost')} label={tx('تكلفة القطعة', 'Cost per item')} optional error={fe('cost')} hint={tx('لا يراها العملاء', 'Not shown to shoppers')}>{(p) => <Input {...p} dir="ltr" inputMode="decimal" value={draft.cost} onChange={(e) => set({ cost: e.target.value })} />}</Field>
       </div>
-      <dl className="m-5 mt-4 grid grid-cols-3 gap-3 rounded-xl bg-surface-2 p-3 text-sm" aria-live="polite">
+      <dl className="mx-5 my-4 grid grid-cols-3 gap-3 rounded-xl bg-surface-2 p-3 text-sm" aria-live="polite">
         <div><dt className="flex items-center gap-1 text-xs text-muted">{tx('الربح للقطعة', 'Profit per item')}<InfoHint>{tx('السعر − التكلفة، قبل الشحن والرسوم. ليس ربحًا صافيًا.', 'Price − cost, before shipping and fees. Not net profit.')}</InfoHint></dt><dd className="mt-0.5 font-bold text-fg">{profit ? <Money v={profit.amount} /> : <span className="text-xs font-normal text-subtle">{tx('أدخل التكلفة', 'Add a cost')}</span>}</dd></div>
         <div><dt className="text-xs text-muted">{tx('الهامش', 'Margin')}</dt><dd className="mt-0.5 font-bold text-fg tabular-nums">{profit ? <bdi dir="ltr">{profit.pct}%</bdi> : '—'}</dd></div>
         <div><dt className="text-xs text-muted">{tx('الخصم الظاهر', 'Shown discount')}</dt><dd className="mt-0.5 font-bold text-fg tabular-nums">{off !== null ? <bdi dir="ltr">−{off}%</bdi> : '—'}</dd></div>
       </dl>
+      <div className="mx-5 mb-5 flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+        <span className="inline-flex items-center gap-1 text-sm font-medium text-fg">{tx('خاضع لضريبة القيمة المضافة', 'Subject to VAT')}<InfoHint>{tx('أوقفه للمنتجات المعفاة أو بنسبة صفر. يُستخدم في فلاتر المنتجات والتصدير؛ الدفع والفواتير ما زالت تحسب 15٪ على كل المنتجات حتى تُربط قواعد الضريبة.', 'Turn off for exempt or zero-rated products. Used by product filters and export; checkout and invoices still charge 15% on every product until tax rules are connected.')}</InfoHint></span>
+        <Switch checked={draft.taxable !== false} label={tx('خاضع لضريبة القيمة المضافة', 'Subject to VAT')} onChange={(v) => set({ taxable: v })} />
+      </div>
     </Card>
   );
 }
@@ -418,7 +428,7 @@ function InventorySection({ draft, set, fe, known }: SecProps & { known: Set<str
       <CardHeader id="pe-h-inv" title={tx('المخزون', 'Inventory')} hint={tx('الكمية الأولية تُدخل للـSKU الجديد فقط؛ تغيير الموجود يتم من المخزون مع سبب ويُسجَّل.', 'Initial quantity is entered for new SKUs only; changing existing stock happens in Inventory, with a reason, and is logged.')} />
       <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
         <Field id={fieldId('sku')} label="SKU" error={fe('sku')} hint={draft.variants.length ? tx('أساس SKU المتغيرات', 'Base for variant SKUs') : undefined}>{(p) => <Input {...p} dir="ltr" value={draft.sku} onChange={(e) => set({ sku: e.target.value.toUpperCase() })} />}</Field>
-        <Field label={tx('الباركود', 'Barcode')} optional>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={draft.barcode} onChange={(e) => set({ barcode: e.target.value })} />}</Field>
+        <Field id={fieldId('barcode')} label={tx('الباركود', 'Barcode')} optional>{(p) => <Input {...p} dir="ltr" inputMode="numeric" value={draft.barcode} onChange={(e) => set({ barcode: e.target.value })} />}</Field>
         {!physical ? <p className="text-sm text-muted sm:col-span-2">{tx('منتج رقمي: لا مخزون ولا وزن.', 'Digital product: no stock and no weight.')}</p>
           : draft.variants.length ? <p className="text-sm text-muted sm:col-span-2">{tx('المخزون لكل متغير في جدول المتغيرات.', 'Stock is per variant, in the variants table.')}</p>
             : known.has(sku) ? (
@@ -441,12 +451,19 @@ function InventorySection({ draft, set, fe, known }: SecProps & { known: Set<str
   );
 }
 
-function Variants({ draft, set, fe, known }: SecProps & { known: Set<string> }) {
+type RemoveAsk = { title: string; check: RemovalCheck; apply: () => void };
+
+function Variants({ draft, set, fe, known, get }: SecProps & { known: Set<string>; get: () => EditDraft }) {
   const tx = useTx();
   const { lang } = useLang();
+  const toast = useToast();
   const levels = levelsStore.use();
   const [typed, setTyped] = useState<{ colors: string; sizes: string }>({ colors: '', sizes: '' });
+  const [opened, setOpened] = useState<{ colors: boolean; sizes: boolean }>({ colors: draft.colors.length > 0, sizes: draft.sizes.length > 0 });
+  const [ask, setAsk] = useState<RemoveAsk | null>(null);
+  const [fill, setFill] = useState<{ col: FillCol; scope: string; value: string; err: string | null }>({ col: 'price', scope: '', value: '', err: null });
   const physical = draft.type === 'physical';
+  const names = (v: EditVariant) => variantText(v.color, v.size)[lang];
   const add = (kind: 'colors' | 'sizes') => {
     const v = typed[kind].trim();
     if (!v) return;
@@ -454,74 +471,164 @@ function Variants({ draft, set, fe, known }: SecProps & { known: Set<string> }) 
     set({ [kind]: next[kind], variants: rebuildEditVariants(next) });
     setTyped((t) => ({ ...t, [kind]: '' }));
   };
-  const remove = (kind: 'colors' | 'sizes', i: number) => {
-    const next = { ...draft, [kind]: draft[kind].filter((_, j) => j !== i) };
-    set({ [kind]: next[kind], variants: rebuildEditVariants(next) });
+  /** Stock safety first: held or incoming units block; units on the shelf need a confirmation; otherwise remove with undo. */
+  const guarded = (title: string, victims: EditVariant[], apply: () => void, undo: () => void, done: string) => {
+    const check = checkRemoval(levels, victims);
+    const run = () => { apply(); toast({ tone: 'info', text: done, action: { label: tx('تراجع', 'Undo'), run: undo } }); };
+    if (check.blocked.length || check.withStock.length) setAsk({ title, check, apply: run });
+    else run();
+  };
+  const removeValue = (kind: 'colors' | 'sizes', i: number) => {
+    const before = get();
+    const value = before[kind][i];
+    const next = { ...before, [kind]: before[kind].filter((_, j) => j !== i) };
+    guarded(tx(`احذف «${value}»`, `Remove “${value}”`), variantsWithValue(before, kind, i),
+      () => set({ [kind]: next[kind], variants: rebuildEditVariants(next) }),
+      () => set({ colors: before.colors, sizes: before.sizes, variants: before.variants, skip: before.skip }),
+      tx(`حُذف «${value}» ومتغيراته`, `Removed “${value}” and its variants`));
+  };
+  const removeRow = (i: number) => {
+    const before = get();
+    const v = before.variants[i];
+    guarded(tx(`احذف ${names(v)}`, `Remove ${names(v)}`), [v],
+      () => set(removeCombo(get(), i)),
+      () => set(restoreCombo(get(), v)),
+      tx(`حُذف المتغير ${names(v)}`, `Removed variant ${names(v)}`));
   };
   const setV = (i: number, patch: Partial<EditVariant>) => set({ variants: draft.variants.map((v, j) => (j === i ? { ...v, ...patch } : v)) });
   const cellErr = (k: string) => { const m = fe(k); return m ? <p className="mt-1 text-xs font-medium text-red-600 dark:text-red-400">{m}</p> : null; };
+  const doFill = () => {
+    const [kind, value] = fill.scope.split(':');
+    const before = get().variants;
+    const r = fillColumn(get(), fill.col, fill.value, kind === 'c' ? { color: value } : kind === 's' ? { size: value } : {}, known);
+    if (r.error) { setFill({ ...fill, err: r.error === 'money' ? tx('مبلغ أكبر من صفر', 'An amount above zero') : r.error === 'base' ? tx('أدخل SKU أساسيًا صالحًا أولًا', 'Enter a valid base SKU first') : tx('عدد صحيح 0 أو أكثر', 'A whole number, 0 or more') }); return; }
+    set({ variants: r.variants });
+    setFill({ ...fill, err: null });
+    const skippedNote = r.skipped ? (fill.col === 'sku' ? tx(` · ${r.skipped} محفوظة لم تتغير`, ` · ${r.skipped} saved ones kept`) : tx(` · ${r.skipped} لها مخزون: عدّله من المخزون`, ` · ${r.skipped} have stock: change it in Inventory`)) : '';
+    toast({ tone: r.changed ? 'ok' : 'info', text: tx(`عُبّئ ${r.changed}`, `Filled ${r.changed}`) + skippedNote, action: r.changed ? { label: tx('تراجع', 'Undo'), run: () => set({ variants: before }) } : undefined });
+  };
+  const colorImg = (c: string) => imageForColor(draft.media, c);
+  const removed = draft.skip?.filter((k) => draft.colors.some((c) => k.startsWith(`${c.trim().toLowerCase()}|`)) && draft.sizes.some((z) => k.endsWith(`|${z.trim().toLowerCase()}`))) ?? [];
+  const anyFresh = draft.variants.some((v) => !known.has(v.sku.trim()));
+
   return (
     <Card aria-labelledby="pe-h-var">
-      <CardHeader id="pe-h-var" title={tx('المتغيرات', 'Variants')} hint={tx('كل لون × مقاس متغير له SKU وسعر ومخزون. حذف متغير له طلبات سابقة لا يغيّر سجل تلك الطلبات.', 'Each colour × size is a variant with its own SKU, price and stock. Removing a variant with past orders does not change those orders.')} />
-      <div className="grid grid-cols-1 gap-4 px-5 pb-5 sm:grid-cols-2">
-        {(['colors', 'sizes'] as const).map((kind) => (
-          <div key={kind}>
-            <Field id={fieldId(kind)} label={kind === 'colors' ? tx('الألوان', 'Colours') : tx('المقاسات', 'Sizes')} error={fe(kind)}>
-              {(p) => (
-                <div className="flex gap-2">
-                  <input {...p} className={inputClass} value={typed[kind]} placeholder={kind === 'colors' ? tx('مثل: أسود', 'e.g. Black') : tx('مثل: M', 'e.g. M')}
-                    onChange={(e) => setTyped((t) => ({ ...t, [kind]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(kind); } }} />
-                  <Button variant="secondary" onClick={() => add(kind)} aria-label={kind === 'colors' ? tx('أضف اللون', 'Add colour') : tx('أضف المقاس', 'Add size')}><Plus className="size-4" aria-hidden="true" /></Button>
-                </div>
-              )}
-            </Field>
-            {draft[kind].length > 0 && (
-              <ul className="mt-2 flex flex-wrap gap-1.5">
-                {draft[kind].map((v, i) => (
-                  <li key={`${v}-${i}`} className="inline-flex h-7 items-center gap-1 rounded-full bg-surface-2 ps-3 pe-1 text-[13px] font-medium text-fg">
-                    {v}<button type="button" onClick={() => remove(kind, i)} aria-label={tx(`احذف ${v}`, `Remove ${v}`)} className="grid size-5 place-items-center rounded-full text-muted hover:bg-border hover:text-fg"><X className="size-3" aria-hidden="true" /></button>
-                  </li>
-                ))}
-              </ul>
-            )}
+      <CardHeader id="pe-h-var" title={tx('المتغيرات', 'Variants')} hint={tx('كل لون × مقاس متغير له SKU وسعر ومخزون وصورة. حذف متغير له طلبات سابقة لا يغيّر سجل تلك الطلبات.', 'Each colour × size is a variant with its own SKU, price, stock and image. Removing a variant with past orders does not change those orders.')} />
+      <div className="space-y-4 px-5 pb-5">
+        {!opened.colors || !opened.sizes ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-muted">{draft.variants.length ? tx('أضف خيارًا آخر:', 'Add another option:') : tx('هل للمنتج ألوان أو مقاسات؟', 'Does it come in colours or sizes?')}</span>
+            {!opened.colors && <Button variant="secondary" size="sm" onClick={() => setOpened((o) => ({ ...o, colors: true }))}><Plus className="size-3.5" aria-hidden="true" />{tx('خيار اللون', 'Colour option')}</Button>}
+            {!opened.sizes && <Button variant="secondary" size="sm" onClick={() => setOpened((o) => ({ ...o, sizes: true }))}><Plus className="size-3.5" aria-hidden="true" />{tx('خيار المقاس', 'Size option')}</Button>}
+            <InfoHint>{tx('خياران متاحان الآن: اللون والمقاس (حتى 9 قيم لكل خيار يُنصح بها). خيارات بأسماء أخرى مثل الخامة لم تُبنَ بعد.', 'Two options are available now: colour and size. Options with other names, such as material, are not built yet.')}</InfoHint>
           </div>
-        ))}
+        ) : null}
+        {(opened.colors || opened.sizes) && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {(['colors', 'sizes'] as const).filter((k) => opened[k]).map((kind) => (
+              <div key={kind}>
+                <Field id={fieldId(kind)} label={kind === 'colors' ? tx('الألوان', 'Colours') : tx('المقاسات', 'Sizes')} error={fe(kind)}>
+                  {(p) => (
+                    <div className="flex gap-2">
+                      <input {...p} className={inputClass} value={typed[kind]} placeholder={kind === 'colors' ? tx('مثل: أسود ثم Enter', 'e.g. Black, then Enter') : tx('مثل: M ثم Enter', 'e.g. M, then Enter')}
+                        onChange={(e) => setTyped((t) => ({ ...t, [kind]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(kind); } }} />
+                      <Button variant="secondary" onClick={() => add(kind)} aria-label={kind === 'colors' ? tx('أضف اللون', 'Add colour') : tx('أضف المقاس', 'Add size')}><Plus className="size-4" aria-hidden="true" /></Button>
+                    </div>
+                  )}
+                </Field>
+                {draft[kind].length > 0 && (
+                  <ul className="mt-2 flex flex-wrap gap-1.5">
+                    {draft[kind].map((v, i) => (
+                      <li key={`${v}-${i}`} className="inline-flex h-7 items-center gap-1 rounded-full bg-surface-2 ps-3 pe-1 text-[13px] font-medium text-fg">
+                        {kind === 'colors' ? colorText(v, lang) : v}<button type="button" onClick={() => removeValue(kind, i)} aria-label={tx(`احذف ${v}`, `Remove ${v}`)} className="grid size-5 place-items-center rounded-full text-muted hover:bg-border hover:text-fg"><X className="size-3" aria-hidden="true" /></button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        {draft.colors.length > 0 && draft.media.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl bg-surface-2 px-3 py-2.5">
+            <span className="inline-flex items-center gap-1 text-[13px] font-semibold text-fg">{tx('صورة كل لون', 'Image per colour')}<InfoHint>{tx('تظهر في المتجر عند اختيار اللون، وفي الجدول أدناه. بلا اختيار: الصورة الرئيسية.', 'Shown in the store when the colour is picked, and in the table below. None chosen: the main image.')}</InfoHint></span>
+            {draft.colors.map((c) => {
+              const own = draft.media.find((m) => (m.variant ?? '').toLowerCase() === c.toLowerCase());
+              return (
+                <label key={c} className="inline-flex items-center gap-2 text-xs text-muted">
+                  <ProductImage src={colorImg(c) ? mediaSrc(colorImg(c)!) : undefined} alt="" size={28} />{colorText(c, lang)}
+                  <Select className="h-8 w-auto text-xs" value={own?.id ?? ''} aria-label={tx(`صورة اللون ${colorText(c, 'ar')}`, `Image for ${c}`)} onChange={(e) => set({ media: e.target.value ? setColorImage(draft.media, c, e.target.value) : draft.media.map((m) => (m.id === own?.id ? { ...m, variant: undefined } : m)) })}>
+                    <option value="">{tx('الرئيسية', 'Main image')}</option>
+                    {draft.media.map((m, i) => <option key={m.id} value={m.id}>{tx(`صورة ${i + 1}`, `Image ${i + 1}`)}{m.alt ? ` · ${m.alt.slice(0, 24)}` : ''}</option>)}
+                  </Select>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
       {draft.variants.length > 0 ? (
         <>
+          <div className="flex flex-wrap items-end gap-2 border-t border-border px-5 py-3" role="group" aria-label={tx('تعبئة عمود', 'Fill a column')}>
+            <span className="inline-flex h-10 items-center gap-1 text-[13px] font-semibold text-fg">{tx('عبّئ عمودًا', 'Fill a column')}<InfoHint>{tx('يكتب القيمة نفسها في كل المتغيرات أو في لون/مقاس واحد. SKU يُبنى من الأساس للمتغيرات الجديدة فقط، والكمية للـSKU الجديد فقط. تراجع من الإشعار.', 'Writes the same value to every variant, or to one colour or size. SKU is rebuilt from the base for new variants only; quantity for new SKUs only. Undo from the notice.')}</InfoHint></span>
+            <Select className="h-10 w-auto text-[13px]" aria-label={tx('العمود', 'Column')} value={fill.col} onChange={(e) => setFill({ ...fill, col: e.target.value as FillCol, err: null })}>
+              <option value="price">{tx('السعر', 'Price')}</option>
+              <option value="sku">{tx('SKU من الأساس', 'SKU from base')}</option>
+              {physical && anyFresh && LOC_IDS.map((l) => <option key={l} value={`stock.${l}`}>{tx(`الكمية · ${LOCATIONS[l].ar}`, `Quantity · ${LOCATIONS[l].en}`)}</option>)}
+            </Select>
+            <Select className="h-10 w-auto text-[13px]" aria-label={tx('النطاق', 'Scope')} value={fill.scope} onChange={(e) => setFill({ ...fill, scope: e.target.value })}>
+              <option value="">{tx(`كل المتغيرات (${draft.variants.length})`, `All variants (${draft.variants.length})`)}</option>
+              {draft.colors.map((c) => <option key={`c${c}`} value={`c:${c}`}>{tx('اللون: ', 'Colour: ')}{colorText(c, lang)}</option>)}
+              {draft.sizes.map((z) => <option key={`s${z}`} value={`s:${z}`}>{tx('المقاس: ', 'Size: ')}{z}</option>)}
+            </Select>
+            {fill.col !== 'sku' && <div><Input className="w-28" dir="ltr" inputMode={fill.col === 'price' ? 'decimal' : 'numeric'} aria-label={tx('القيمة', 'Value')} aria-invalid={!!fill.err || undefined} placeholder={fill.col === 'price' ? '0.00' : '0'} value={fill.value} onChange={(e) => setFill({ ...fill, value: e.target.value, err: null })} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); doFill(); } }} /></div>}
+            <Button variant="secondary" onClick={doFill}>{tx('عبّئ', 'Fill')}</Button>
+            {fill.err && <p className="basis-full text-xs font-medium text-red-600 dark:text-red-400" role="alert">{fill.err}</p>}
+          </div>
           <div className="scrollbar-thin overflow-x-auto border-t border-border">
-            <table className="w-full min-w-[560px] text-sm" aria-label={tx('مصفوفة المتغيرات', 'Variant matrix')}>
+            <table className="w-full min-w-[640px] text-sm" aria-label={tx('مصفوفة المتغيرات', 'Variant matrix')}>
               <thead><tr className="border-b border-border text-xs text-muted">
                 <th scope="col" className="px-4 py-3 text-start font-semibold">{tx('المتغير', 'Variant')}</th>
                 <th scope="col" className="px-2 py-3 text-start font-semibold">SKU</th>
                 <th scope="col" className="px-2 py-3 text-start font-semibold">{tx('السعر', 'Price')}</th>
-                {physical && <th scope="col" className="px-4 py-3 text-start font-semibold">{tx('المخزون', 'Stock')}{draft.variants.some((v) => !known.has(v.sku.trim())) && <span className="font-normal text-subtle"> · {LOC_IDS.map((l) => LOCATIONS[l][lang]).join(' / ')}</span>}</th>}
+                {physical && <th scope="col" className="px-2 py-3 text-start font-semibold"><span className="inline-flex items-center gap-1">{tx('المخزون لكل موقع', 'Stock per location')}<InfoHint>{tx('للمتغير الجديد: الكمية الأولية لكل موقع. للموجود: المتاح لكل موقع، ويُعدّل من المخزون بسبب.', 'New variant: initial quantity per location. Existing: available per location, changed in Inventory with a reason.')}</InfoHint></span></th>}
+                <th scope="col" className="px-2 py-3"><span className="sr-only">{tx('حذف', 'Remove')}</span></th>
               </tr></thead>
               <tbody className="divide-y divide-border">
                 {draft.variants.map((v, i) => {
-                  const label = variantText(v.color, v.size)[lang];
+                  const label = names(v);
                   const isFresh = !known.has(v.sku.trim());
-                  const total = LOC_IDS.reduce((s, loc) => { const lv = levelOf(levels, v.sku, loc); return s + (lv ? available(lv) : 0); }, 0);
+                  const st = variantStock(levels, v.sku);
+                  const img = v.color ? colorImg(v.color) : draft.media[0];
                   return (
                     <tr key={`${v.color}|${v.size}`} className="align-top">
-                      <th scope="row" className="whitespace-nowrap px-4 py-3 text-start font-semibold text-fg">{label}{v.isNew && <span className="ms-2"><Badge tone="sky" className="h-5 px-2 text-[10px]">{tx('جديد', 'New')}</Badge></span>}</th>
+                      <th scope="row" className="px-4 py-2.5 text-start font-semibold text-fg">
+                        <span className="flex items-center gap-2.5 whitespace-nowrap"><ProductImage src={img ? mediaSrc(img) : undefined} alt="" size={36} />{label}{v.isNew && <Badge tone="sky" className="h-5 px-2 text-[10px]">{tx('جديد', 'New')}</Badge>}</span>
+                      </th>
                       <td className="px-2 py-2"><input id={fieldId(`v.${i}.sku`)} className={inputClass} style={{ width: '10rem' }} dir="ltr" value={v.sku} aria-label={tx(`SKU لـ ${label}`, `SKU for ${label}`)} aria-invalid={!!fe(`v.${i}.sku`) || undefined} onChange={(e) => setV(i, { sku: e.target.value.toUpperCase() })} />{cellErr(`v.${i}.sku`)}</td>
                       <td className="px-2 py-2"><input id={fieldId(`v.${i}.price`)} className={inputClass} style={{ width: '7rem' }} dir="ltr" inputMode="decimal" value={v.price} aria-label={tx(`سعر ${label}`, `Price for ${label}`)} aria-invalid={!!fe(`v.${i}.price`) || undefined} onChange={(e) => setV(i, { price: e.target.value })} />{cellErr(`v.${i}.price`)}</td>
                       {physical && (
-                        <td className="px-4 py-2">
+                        <td className="px-2 py-2">
                           {isFresh ? (
                             <div className="flex gap-2">
                               {LOC_IDS.map((loc) => (
-                                <div key={loc}>
-                                  <input id={fieldId(`v.${i}.stock.${loc}`)} className={inputClass} style={{ width: '4.5rem' }} dir="ltr" inputMode="numeric" value={v.stockBy[loc]} aria-label={tx(`كمية ${label} · ${LOCATIONS[loc].ar}`, `Quantity for ${label} · ${LOCATIONS[loc].en}`)} aria-invalid={!!fe(`v.${i}.stock.${loc}`) || undefined}
+                                <label key={loc} className="block">
+                                  <span className="mb-0.5 block max-w-[4.5rem] truncate text-[10px] text-subtle">{LOCATIONS[loc][lang]}</span>
+                                  <input id={fieldId(`v.${i}.stock.${loc}`)} className={inputClass} style={{ width: '4.5rem' }} dir="ltr" inputMode="numeric" value={v.stockBy[loc] ?? '0'} aria-label={tx(`كمية ${label} · ${LOCATIONS[loc].ar}`, `Quantity for ${label} · ${LOCATIONS[loc].en}`)} aria-invalid={!!fe(`v.${i}.stock.${loc}`) || undefined}
                                     onChange={(e) => setV(i, { stockBy: { ...v.stockBy, [loc]: e.target.value } })} />
                                   {cellErr(`v.${i}.stock.${loc}`)}
-                                </div>
+                                </label>
                               ))}
                             </div>
-                          ) : <span className="inline-block pt-2 text-muted"><span className="font-semibold text-fg tabular-nums">{total}</span> {tx('متاح', 'available')}</span>}
+                          ) : (
+                            <a href={sectionHref('inventory', '', { q: v.sku })} className="inline-flex flex-wrap gap-x-3 gap-y-0.5 pt-2 text-xs text-muted hover:text-fg" title={tx('افتح في المخزون', 'Open in Inventory')}>
+                              {st.byLoc.map((b) => <span key={b.loc}>{LOCATIONS[b.loc][lang]} <span className={cn('font-semibold tabular-nums', b.available <= 0 ? 'text-red-600 dark:text-red-400' : 'text-fg')}>{b.available}</span></span>)}
+                              {st.held > 0 && <span className="text-sky-700 dark:text-sky-300">{tx(`${st.held} محجوز`, `${st.held} held`)}</span>}
+                            </a>
+                          )}
                         </td>
                       )}
+                      <td className="px-2 py-2 text-end"><IconBtn label={tx(`احذف المتغير ${label}`, `Remove variant ${label}`)} onClick={() => removeRow(i)}><Trash2 className="size-4" /></IconBtn></td>
                     </tr>
                   );
                 })}
@@ -529,12 +636,55 @@ function Variants({ draft, set, fe, known }: SecProps & { known: Set<string> }) 
             </table>
           </div>
           <div className="flex flex-wrap items-center gap-3 border-t border-border px-5 py-3">
-            <Button variant="secondary" size="sm" onClick={() => set({ variants: draft.variants.map((v) => ({ ...v, price: draft.price })) })} disabled={!draft.price.trim()}>{tx('طبّق السعر الأساسي على الكل', 'Use the base price for all')}</Button>
-            <span className="text-xs text-muted">{tx(`${draft.variants.length} متغيرات`, `${draft.variants.length} variants`)}{physical && draft.variants.some((v) => !known.has(v.sku.trim())) ? ` · ${tx('أدخل كمية الجديد لكل مستودع', 'enter new stock per warehouse')}` : ''}</span>
+            <span className="text-xs text-muted">{tx(`${draft.variants.length} متغيرات`, `${draft.variants.length} variants`)}{physical && anyFresh ? ` · ${tx('أدخل كمية الجديد لكل موقع', 'enter new stock per location')}` : ''}</span>
+            {removed.length > 0 && (
+              <span className="flex flex-wrap items-center gap-1.5 text-xs text-muted">{tx('محذوفة:', 'Removed:')}
+                {removed.map((k) => {
+                  const [c, z] = k.split('|');
+                  const color = draft.colors.find((x) => x.trim().toLowerCase() === c) ?? c;
+                  const size = draft.sizes.find((x) => x.trim().toLowerCase() === z) ?? z;
+                  const back = () => {
+                    const fresh = rebuildVariants({ ...(get() as unknown as ProductDraft), variants: [] }).find((x) => comboKey(x.color, x.size) === k);
+                    if (fresh) set(restoreCombo(get(), { ...fresh, stockBy: Object.fromEntries(LOC_IDS.map((l) => [l, '0'])) }));
+                  };
+                  return <button key={k} type="button" onClick={back} className="inline-flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1 font-medium text-fg hover:bg-border" aria-label={tx(`أعد ${variantText(color, size).ar}`, `Add back ${variantText(color, size).en}`)}><Plus className="size-3" aria-hidden="true" />{variantText(color, size)[lang]}</button>;
+                })}
+              </span>
+            )}
           </div>
         </>
       ) : <p className="px-5 pb-5 text-sm text-muted">{tx('بلا ألوان أو مقاسات: سعر وSKU واحد.', 'No colours or sizes: one price and one SKU.')}</p>}
+      {ask && <RemoveModal ask={ask} onClose={() => setAsk(null)} />}
     </Card>
+  );
+}
+
+function RemoveModal({ ask, onClose }: { ask: RemoveAsk; onClose: () => void }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const { blocked, withStock } = ask.check;
+  const label = (v: EditVariant) => variantText(v.color, v.size)[lang] || v.sku;
+  return (
+    <Modal title={ask.title} onClose={onClose}
+      description={blocked.length ? tx('لا يمكن الحذف الآن: طلبات أو تحويلات تعتمد على هذه القطع.', 'This can’t be removed yet: orders or transfers depend on these units.') : tx('تبقى القطع في المخزون تحت نفس SKU حتى تُخرجها بتعديل بسبب.', 'The units stay in Inventory under the same SKU until you adjust them out with a reason.')}
+      footer={<><Button variant="secondary" onClick={onClose}>{blocked.length ? tx('حسنًا', 'OK') : tx('إلغاء', 'Cancel')}</Button>{!blocked.length && <Button variant="danger" onClick={() => { ask.apply(); onClose(); }}>{tx('احذف من المنتج', 'Remove from product')}</Button>}</>}>
+      <ul className="divide-y divide-border rounded-xl border border-border text-sm">
+        {blocked.map((b) => (
+          <li key={b.v.sku} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+            <span><span className="font-semibold text-fg">{label(b.v)}</span> <span className="text-xs text-muted"><Ref>{b.v.sku}</Ref></span></span>
+            <span className="text-xs font-medium text-red-700 dark:text-red-300">{b.why === 'held' ? tx(`${b.units} محجوزة لطلبات`, `${b.units} held for orders`) : tx(`${b.units} في تحويل وارد`, `${b.units} in an incoming transfer`)}</span>
+            <a className="basis-full text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300" href={sectionHref('inventory', '', { q: b.v.sku })}>{tx('اعرض حالات المخزون', 'See stock states')}</a>
+          </li>
+        ))}
+        {withStock.map((w) => (
+          <li key={w.v.sku} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+            <span><span className="font-semibold text-fg">{label(w.v)}</span> <span className="text-xs text-muted"><Ref>{w.v.sku}</Ref></span></span>
+            <span className="text-xs text-amber-700 dark:text-amber-300">{tx(`${w.onHand} قطعة على الرف`, `${w.onHand} units on the shelf`)}</span>
+          </li>
+        ))}
+      </ul>
+      {!blocked.length && <p className="text-xs text-muted">{tx('لن يُعرض المتغير للبيع بعد الحفظ. يمكنك إعادته من «محذوفة» قبل الحفظ أو بالتراجع.', 'The variant stops selling once saved. Add it back from “Removed” before saving, or with Undo.')}</p>}
+    </Modal>
   );
 }
 
@@ -552,11 +702,11 @@ function Seo({ draft, set, fe }: SecProps) {
           <p className="mt-1 line-clamp-2 text-[13px] text-muted">{s.desc || tx('بلا وصف.', 'No description.')}</p>
         </figure>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={tx('عنوان الصفحة', 'Page title')} optional hint={<bdi dir="ltr">{draft.seoTitle.length}/70</bdi>}>{(p) => <Input {...p} maxLength={70} value={draft.seoTitle} onChange={(e) => set({ seoTitle: e.target.value })} />}</Field>
+          <Field id={fieldId('seoTitle')} label={tx('عنوان الصفحة', 'Page title')} optional hint={<bdi dir="ltr">{draft.seoTitle.length}/70</bdi>}>{(p) => <Input {...p} maxLength={70} value={draft.seoTitle} onChange={(e) => set({ seoTitle: e.target.value })} />}</Field>
           <Field id={fieldId('slug')} label={tx('الرابط المختصر', 'URL handle')} error={fe('slug')}>
             {(p) => <div className="flex gap-2"><Input {...p} dir="ltr" value={draft.slug} onChange={(e) => set({ slug: e.target.value })} />{!draft.slug && draft.nameEn && <Button variant="secondary" onClick={() => set({ slug: slugify(draft.nameEn) })}>{tx('اقترح', 'Suggest')}</Button>}</div>}
           </Field>
-          <Field className="sm:col-span-2" label={tx('الوصف', 'Description')} optional hint={<bdi dir="ltr">{draft.seoDesc.length}/160</bdi>}>{(p) => <Textarea {...p} maxLength={160} className="min-h-20" value={draft.seoDesc} onChange={(e) => set({ seoDesc: e.target.value })} />}</Field>
+          <Field id={fieldId('seoDesc')} className="sm:col-span-2" label={tx('الوصف', 'Description')} optional hint={<bdi dir="ltr">{draft.seoDesc.length}/160</bdi>}>{(p) => <Textarea {...p} maxLength={160} className="min-h-20" value={draft.seoDesc} onChange={(e) => set({ seoDesc: e.target.value })} />}</Field>
         </div>
       </div>
     </Card>
@@ -625,5 +775,32 @@ function TagsField({ tags, onChange }: { tags: string[]; onChange: (t: string[])
         </div>
       )}
     </Field>
+  );
+}
+
+/** Focus a field by its error/field key, opening nothing: every editor section is always rendered. */
+function jumpTo(field: string) {
+  setTimeout(() => {
+    const el = document.getElementById(fieldId(field));
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    (el as HTMLElement).focus({ preventScroll: true });
+  }, 60);
+}
+
+/** Live quality of what is in the form: exactly what is missing, biggest effect first, each with a jump to its field. */
+function QualityCard({ draft }: { draft: EditDraft }) {
+  const tx = useTx();
+  const cats = categoriesStore.use();
+  const q = quality(draftInput(draft), cats);
+  return (
+    <Card aria-labelledby="pe-h-q">
+      <CardHeader id="pe-h-q" title={<span className="inline-flex items-center gap-2">{tx('جودة المنتج', 'Product quality')}<bdi dir="ltr" className={cn('text-sm tabular-nums', q.level === 'good' ? 'text-emerald-700 dark:text-emerald-400' : q.level === 'fair' ? 'text-amber-700 dark:text-amber-300' : 'text-red-600 dark:text-red-400')}>{q.score}%</bdi></span>}
+        hint={tx('تتحدث وأنت تكتب. الأهم أولًا؛ النسبة بجانب كل بند هي ما يضيفه.', 'Updates as you type. Most important first; the number by each item is what it adds.')} />
+      <div className="space-y-3 px-5 pb-5">
+        <QualityMeter q={q} className="w-full" />
+        <QualityList q={q} onFix={jumpTo} />
+      </div>
+    </Card>
   );
 }

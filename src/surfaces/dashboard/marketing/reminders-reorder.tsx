@@ -1,7 +1,7 @@
 // Reorder (replenishment) reminders: per product or category, "remind N days after purchase", with a template,
 // optional discount, a preview of who would be reminded this week, and results. Sending is simulated.
 import { useEffect, useState } from 'react';
-import { Pause, Play, Plus, RotateCw, Repeat, SearchX, Users } from 'lucide-react';
+import { ArrowLeft, Pause, Play, Plus, RotateCw, Repeat, SearchX, Users } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, navigate, type Route } from '../../../core/router';
 import { couponsStore, customersStore, logAction, ordersStore, productsStore, settingsStore } from '../../merchant/stores';
@@ -142,7 +142,7 @@ function RuleEditor({ id, canManage, canSend, scopeName }: { id: string; canMana
   const problem = existing ? reminderProblems({ ...sequenceStore.get(), steps: [] }, [existing], deliveries, coupons)[0] : undefined;
   const sample = c?.due[0] ?? c?.week[0];
   const vars = {
-    name: sample?.name[lang].split(' ')[0] ?? (lang === 'ar' ? 'سارة' : 'Sara'), store: storeName, items: sample?.item[lang] ?? scopeName(rule),
+    name: sample?.name[lang].split(' ')[0] ?? (lang === 'ar' ? 'سارة' : 'Sara'), store: storeName, items: sample?.item[lang] ?? (d.scope.id ? scopeName(rule) : '…'),
     code: d.discount.kind === 'existing' ? d.discount.code : 'LK7Q2M9X',
     expiry: d.discount.kind === 'generated' ? new Date(Date.parse(`${TODAY}T00:00:00Z`) + d.discount.validDays * 86400000).toISOString().slice(0, 10) : '—',
   };
@@ -207,7 +207,7 @@ function RuleEditor({ id, canManage, canSend, scopeName }: { id: string; canMana
       <Card>
         <div className="flex flex-wrap items-start gap-4 p-5">
           <div className="min-w-0 flex-1">
-            <a href={rhref()} className="text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('← كل تذكيرات إعادة الشراء', '← All reorder reminders')}</a>
+            <a href={rhref()} className="inline-flex items-center gap-1 text-xs font-semibold text-brand-700 hover:underline dark:text-brand-300"><ArrowLeft className="size-3.5 rtl:rotate-180" aria-hidden="true" />{tx('كل تذكيرات إعادة الشراء', 'All reorder reminders')}</a>
             <h2 className="mt-1 flex flex-wrap items-center gap-2 text-base font-bold text-fg">{existing ? scopeName(existing) : tx('تذكير إعادة شراء جديد', 'New reorder reminder')}<StatusBadge status={status} />{dirty && <Badge tone="amber">{tx('تعديلات غير محفوظة', 'Unsaved edits')}</Badge>}</h2>
             {existing && <p className="mt-1 text-sm text-muted"><Ref>{existing.id}</Ref>{existing.by && <> · {tx(`آخر تعديل: ${existing.by} ${existing.at}`, `Last change: ${existing.by} ${existing.at}`)}</>}</p>}
           </div>
@@ -300,7 +300,7 @@ function RuleEditor({ id, canManage, canSend, scopeName }: { id: string; canMana
         </Card>
       )}
 
-      {canManage && <SaveBar dirty={dirty || !existing} onSave={save} onDiscard={() => { reorderDraftStore.set(null); setTried(false); if (!existing) setTimeout(() => navigate(rhref()), 0); }}
+      {canManage && <SaveBar dirty={dirty} onSave={save} onDiscard={() => { reorderDraftStore.set(null); setTried(false); if (!existing) setTimeout(() => navigate(rhref()), 0); }}
         error={tried && nErr ? tx(`صحّح ${nErr} قبل الحفظ`, `Fix ${nErr} before saving`) : undefined}
         saveLabel={existing?.status === 'active' ? tx('راجع ثم احفظ', 'Review and save') : existing ? tx('احفظ', 'Save') : tx('احفظ كمسودة', 'Save as draft')} />}
 

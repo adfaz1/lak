@@ -119,7 +119,7 @@ export default function SimulateTab() {
                       </span>
                       <span className="shrink-0 text-sm font-semibold">
                         {o.price === 0 ? <span className="text-emerald-700 dark:text-emerald-400">{tx('مجاني', 'Free')}</span> : <Money v={o.price} />}
-                        {o.price !== o.base && <span className="block text-end text-xs text-muted line-through"><Money v={o.base} /></span>}
+                        {o.price < o.base && <span className="block text-end text-xs text-muted line-through"><Money v={o.base} /></span>}
                       </span>
                     </li>
                   );

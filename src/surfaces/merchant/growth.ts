@@ -722,7 +722,7 @@ export const unknownPlaceholders = (text: string) => [...text.matchAll(PLACEHOLD
 export type StepError = 'textAr' | 'textEn' | 'long' | 'placeholder' | 'pct' | 'days' | 'coupon' | 'order' | 'codeMissing';
 /**
  * Problems in one step. `maxLen` is the channel limit; the length is checked on the longest rendering (sample values).
- * A step with a discount must show the code ({code}); steps must be in increasing time order.
+ * A step with a discount must show the code ({code}) in both languages; steps must be in increasing time order.
  */
 export function stepErrors(s: ReminderStep, prev: ReminderStep | undefined, maxLen: number, coupons: Coupon[]): StepError[] {
   const e: StepError[] = [];
@@ -737,7 +737,7 @@ export function stepErrors(s: ReminderStep, prev: ReminderStep | undefined, maxL
   }
   const d = s.discount;
   if (d.kind === 'existing' && !coupons.some((c) => c.code === d.code)) e.push('coupon');
-  if (s.discount.kind !== 'none' && !/\{code\}/.test(s.text.ar + s.text.en)) e.push('codeMissing');
+  if (s.discount.kind !== 'none' && !(/\{code\}/.test(s.text.ar) && /\{code\}/.test(s.text.en))) e.push('codeMissing');
   if (prev && s.afterHours <= prev.afterHours) e.push('order');
   return e;
 }
