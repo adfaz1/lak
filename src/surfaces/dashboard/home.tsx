@@ -7,7 +7,7 @@ import { link } from '../../core/router';
 import { formatMoney } from '../../core/format';
 import { ordersStore, levelsStore, productsStore } from '../merchant/stores';
 import { total, type Order } from '../merchant/domain';
-import { analyticsSeries } from '../merchant/growth';
+import { history } from './analytics/model';
 import { Card, CardHeader, Money, Delta, Badge, ProductImage, Avatar, Ref, Skeleton, EmptyState, ErrorState, Segmented, LinkButton, InfoHint, cn, useTx, toneDot, type Tone } from '../../ds/ui';
 import { AreaChart } from '../../ds/charts';
 import { channelsToday, headline, salesToday, stockAlerts, tasks, topProducts, type PeriodDays, type Task, type TaskId } from './model/home';
@@ -24,7 +24,8 @@ export default function Home() {
   const orders = ordersStore.use();
   const levels = levelsStore.use();
   const products = productsStore.use();
-  const series = useMemo(analyticsSeries, []);
+  // Same daily history as Analytics, so a period's comparison is identical on both screens.
+  const series = useMemo(history, []);
   const [period, setPeriod] = useState<PeriodDays>(7);
 
   const empty = state === 'empty';
