@@ -15,6 +15,10 @@
 /* Only the design system and the new dashboard are scanned for class names. */
 @source "./";
 @source "../surfaces/dashboard";
+@source "../surfaces/site";
+@source "../surfaces/admin";
+@source "../surfaces/storefront";
+@source "../surfaces/market";
 @custom-variant dark (&:where(.dark, .dark *));
 
 @font-face { font-family: 'SaudiRiyal'; src: url('/fonts/saudi_riyal.ttf') format('truetype'); font-display: block; }

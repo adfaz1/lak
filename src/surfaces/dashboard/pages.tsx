@@ -19,6 +19,8 @@ export const SECTIONS: Record<string, Page> = {
   apps: lazy(() => import('./apps')),
   settings: lazy(() => import('./settings')),
   help: lazy(() => import('./help')),
+  appmaker: lazy(() => import('./appmaker')),
+  channel: lazy(() => import('./channel')),
 };
 /** Sections rebuilt on the LAK design system and linked from navigation. */
 export const BUILT = new Set<string>(['orders', 'products', 'inventory', 'customers', 'finance', 'analytics', 'marketing', 'automations', 'storefront', 'apps', 'settings', 'help']);

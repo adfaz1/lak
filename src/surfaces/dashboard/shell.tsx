@@ -38,8 +38,8 @@ export function navGroups(counts: { orders: number }): Group[] {
     ] },
     { label: { ar: 'القنوات', en: 'Channels' }, items: [
       { key: 'storefront', label: { ar: 'المتجر الإلكتروني', en: 'Online store' }, icon: Store, href: to('storefront'), built: BUILT.has('storefront') },
-      { key: 'market', label: { ar: 'سوق لك', en: 'LAK marketplace' }, icon: Globe2, href: link('/market/seller'), built: false },
-      { key: 'app', label: { ar: 'تطبيق متجرك', en: 'Your store app' }, icon: Smartphone, href: link('/appmaker'), built: false },
+      { key: 'channel', label: { ar: 'سوق لك', en: 'LAK marketplace' }, icon: Globe2, href: BUILT.has('channel') ? dhref('channel') : link('/market/seller'), built: BUILT.has('channel') },
+      { key: 'appmaker', label: { ar: 'تطبيق متجرك', en: 'Your store app' }, icon: Smartphone, href: BUILT.has('appmaker') ? dhref('appmaker') : link('/appmaker'), built: BUILT.has('appmaker') },
       { key: 'apps', label: { ar: 'التطبيقات', en: 'Apps' }, icon: Blocks, href: to('apps'), built: BUILT.has('apps') },
     ] },
   ];

@@ -50,7 +50,8 @@ export function App() {
     else if (current?.id === 'v2' || current?.id === 'dashboard') fromRedesignStore.set(false);
   }, [route, current?.id]);
   // The redesign is shown as the product: no prototype chrome unless review mode is on.
-  const bare = (current?.id === 'v2' || current?.id === 'dashboard') && !review;
+  // Rebuilt surfaces are shown as the product: no prototype chrome unless review mode is on.
+  const bare = ['v2', 'dashboard', 'site', 'admin', 'store', 'market', 'appmaker'].includes(current?.id ?? '') && !review;
   useEffect(() => {
     document.documentElement.dataset.direction = direction;
     try { localStorage.setItem('lak.direction', direction); } catch { /* preference only */ }
