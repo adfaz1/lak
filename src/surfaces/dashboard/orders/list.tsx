@@ -122,7 +122,7 @@ export default function OrdersList({ route }: { route: Route }) {
     </BulkBar>
   ) : (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="flex w-full md:w-auto md:flex-1 md:max-w-xs"><SearchInput value={lq.q} onChange={(v) => go({ q: v }, 'replace')} placeholder={tx('رقم الطلب أو اسم العميل', 'Order number or customer')} /></div>
+      <div className="flex w-full md:w-auto md:flex-1 md:max-w-xs"><SearchInput value={lq.q} onChange={(v) => go({ q: v }, 'replace')} placeholder={tx('رقم الطلب أو اسم العميل', 'Order number or customer')} autoFocus={route.query.get('focus') === 'search'} /></div>
       <div className="hidden flex-wrap items-center gap-2 md:flex">
         {chips.map((c) => <FilterChip key={c.key} label={c.label} value={lq[c.key] ?? ''} options={c.options} onChange={(v) => go({ [c.key]: v || undefined })} />)}
         {nf > 0 && <Button variant="ghost" size="sm" onClick={() => go({ ch: undefined, pay: undefined, ful: undefined, ship: undefined })}>{tx('مسح المرشحات', 'Clear filters')}</Button>}

@@ -7,7 +7,7 @@ import {
 import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
 import { cn, IconButton, useTx } from '../../ds/ui';
-import { BUILT } from './pages';
+import { BUILT, sectionHref } from './pages';
 import { testStore } from '../merchant/stores';
 
 export const dhref = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard${path ? `/${path}` : ''}`, q);
@@ -135,7 +135,7 @@ export function Shell({ active, counts, store, children }: { active: string; cou
         <div className="flex min-w-0 flex-1 flex-col">
           <header className="glass sticky top-0 z-30 flex h-16 items-center gap-2 border-b border-border px-4 sm:px-6">
             <IconButton label={tx('فتح القائمة', 'Open menu')} onClick={() => setMobile(true)} className="lg:hidden"><Menu className="size-5" aria-hidden="true" /></IconButton>
-            <a href={link('/merchant/orders', { from: 'v2', focus: 'search' })} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface-2/60 px-3 text-sm text-subtle transition-colors hover:border-brand-300 hover:text-muted sm:max-w-sm">
+            <a href={sectionHref('orders', '', { focus: 'search' })} className="flex h-10 min-w-0 flex-1 items-center gap-2.5 rounded-xl border border-border bg-surface-2/60 px-3 text-sm text-subtle transition-colors hover:border-brand-300 hover:text-muted sm:max-w-sm">
               <Search className="size-4 shrink-0" aria-hidden="true" /><span className="truncate">{tx('ابحث عن طلب أو منتج أو عميل', 'Search orders, products, customers')}</span>
             </a>
             <div className="ms-auto flex items-center gap-1">
