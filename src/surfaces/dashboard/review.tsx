@@ -20,7 +20,7 @@ export function ReviewBar() {
   const s = stateStore.use();
   if (!on) return null;
   return (
-    <div className="lak fixed bottom-4 start-4 z-50 flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-border bg-surface p-2 shadow-pop" style={{ minHeight: 0 }} role="region" aria-label={tx('وضع المراجعة', 'Review mode')}>
+    <div className="lak z-50 flex flex-wrap items-center gap-2 rounded-2xl border border-dashed border-border bg-surface p-2 shadow-pop" style={{ minHeight: 0, position: 'fixed', bottom: 16, insetInlineStart: 16 }} role="region" aria-label={tx('وضع المراجعة', 'Review mode')}>
       <span className="px-2 text-xs font-semibold text-muted">{tx('وضع المراجعة', 'Review mode')}</span>
       <Segmented label={tx('حالة الشاشة', 'Screen state')} value={s} onChange={setDashState}
         options={[{ value: 'live', label: tx('بيانات', 'Data') }, { value: 'loading', label: tx('تحميل', 'Loading') }, { value: 'empty', label: tx('فارغ', 'Empty') }, { value: 'error', label: tx('خطأ', 'Error') }]} />
