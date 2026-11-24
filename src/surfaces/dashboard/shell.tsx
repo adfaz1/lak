@@ -8,6 +8,7 @@ import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
 import { cn, IconButton, useTx } from '../../ds/ui';
 import { BUILT } from './pages';
+import { testStore } from '../merchant/stores';
 
 export const dhref = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard${path ? `/${path}` : ''}`, q);
 /** A section that is not rebuilt yet opens the previous workspace, which shows a bar to come back. */
@@ -48,12 +49,15 @@ const FOOT: Item[] = [
   { key: 'help', label: { ar: 'المساعدة', en: 'Help' }, icon: LifeBuoy, href: to('help'), built: BUILT.has('help') },
 ];
 
+const ROLE_LABEL: Record<string, L> = { owner: { ar: 'المالكة', en: 'Owner' }, fulfilment: { ar: 'التجهيز', en: 'Fulfilment' }, finance: { ar: 'المالية', en: 'Finance' }, marketing: { ar: 'التسويق', en: 'Marketing' } };
+
 function readPref(key: string, fallback: string) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
 function writePref(key: string, v: string) { try { localStorage.setItem(key, v); } catch { /* preference only */ } }
 
 export function Shell({ active, counts, store, children }: { active: string; counts: { orders: number }; store: string; children: ReactNode }) {
   const { lang, setLang } = useLang();
   const tx = useTx();
+  const role = testStore.use().role;
   const [collapsed, setCollapsed] = useState(() => readPref('lak.nav', '0') === '1');
   const [mobile, setMobile] = useState(false);
   const [dark, setDark] = useState(() => readPref('lak.theme', 'light') === 'dark');
@@ -139,7 +143,7 @@ export function Shell({ active, counts, store, children }: { active: string; cou
               <IconButton label={lang === 'ar' ? 'English' : 'العربية'} onClick={() => setLang(lang === 'ar' ? 'en' : 'ar')}><Languages className="size-5" aria-hidden="true" /></IconButton>
               <IconButton label={dark ? tx('الوضع الفاتح', 'Light mode') : tx('الوضع الداكن', 'Dark mode')} onClick={() => setDark((d) => !d)}>{dark ? <Sun className="size-5" aria-hidden="true" /> : <Moon className="size-5" aria-hidden="true" />}</IconButton>
               <IconButton label={tx('الإشعارات: لا جديد', 'Notifications: none new')}><Bell className="size-5" aria-hidden="true" /></IconButton>
-              <span className="ms-1 grid size-9 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white" title={tx('سارة · المالكة', 'Sara · Owner')}>{tx('س', 'S')}</span>
+              <span className="ms-1 grid size-9 place-items-center rounded-full bg-brand-gradient text-sm font-bold text-white" title={`${tx('سارة', 'Sara')} · ${ROLE_LABEL[role][lang]}`} aria-label={`${tx('سارة', 'Sara')} · ${ROLE_LABEL[role][lang]}`}>{tx('س', 'S')}</span>
             </div>
           </header>
           <main id="lak-main" className="mx-auto w-full max-w-[1320px] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
