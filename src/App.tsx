@@ -23,9 +23,9 @@ const SURFACES: { id: string; name: L; who: L; C: ComponentType<{ route: Route }
 
 const S = {
   ar: { skip: 'تخطَّ إلى المحتوى', surfaces: 'واجهات المنصة', demo: 'بيانات تجريبية', reset: 'إعادة ضبط البيانات', other: 'English',
-    dirA: 'الاتجاه A · بدّل إلى B', dirB: 'الاتجاه B · بدّل إلى A', hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
+    loading: 'جارٍ تحميل الواجهة…', dirA: 'الاتجاه A · بدّل إلى B', dirB: 'الاتجاه B · بدّل إلى A', hubTitle: 'معاينة تجربة «لك»', hubSub: 'ست واجهات على منظومة واحدة. كل الأرقام والأسماء أمثلة اختبار، والعمليات الخارجية محاكاة ولا تتصل بمنصة لك الحية.', open: 'افتح' },
   en: { skip: 'Skip to content', surfaces: 'Platform surfaces', demo: 'Demo data', reset: 'Reset data', other: 'العربية',
-    dirA: 'Direction A · switch to B', dirB: 'Direction B · switch to A', hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
+    loading: 'Loading this surface…', dirA: 'Direction A · switch to B', dirB: 'Direction B · switch to A', hubTitle: 'LAK experience preview', hubSub: 'Six surfaces on one platform. All numbers and names are test examples; external operations are simulated and never reach the live LAK platform.', open: 'Open' },
 };
 
 export function App() {
@@ -66,7 +66,7 @@ export function App() {
         </div>
       </header>
       <main id="main" tabIndex={-1}>
-        {current ? <Suspense fallback={<div className="main" aria-busy="true" />}><current.C route={sub(route, 1)} /></Suspense> : (
+        {current ? <Suspense fallback={<div className="main" aria-busy="true"><p className="muted" role="status">{t.loading}</p></div>}><current.C route={sub(route, 1)} /></Suspense> : (
           <div className="main hub">
             <header><h1>{t.hubTitle}</h1><p className="muted">{t.hubSub}</p></header>
             <ul className="hub-grid">
