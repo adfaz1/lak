@@ -72,7 +72,7 @@ export function SortSelect({ value, onChange }: { value: SortKey; onChange: (s: 
   const tx = useTx();
   const n = useListNames();
   return (
-    <span className="block w-52 shrink-0">
+    <span className="block min-w-0 flex-1 sm:w-52 sm:flex-none">
       <Select className={cn('h-10 text-[13px] font-medium', value !== 'catalogue' && 'border-brand-300 text-brand-700 dark:text-brand-300')} aria-label={tx('الترتيب', 'Sort')} value={value} onChange={(e) => onChange(e.target.value as SortKey)}>
         {SORTS.map((s) => <option key={s} value={s}>{tx('ترتيب: ', 'Sort: ')}{n.sort(s)}</option>)}
       </Select>
