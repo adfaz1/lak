@@ -7,10 +7,13 @@ import {
 import { useLang, type L } from '../../core/lang';
 import { link } from '../../core/router';
 import { cn, IconButton, useTx } from '../../ds/ui';
+import { BUILT } from './pages';
 
 export const dhref = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard${path ? `/${path}` : ''}`, q);
 /** A section that is not rebuilt yet opens the previous workspace, which shows a bar to come back. */
 const legacy = (page: string) => link(`/merchant/${page}`, { from: 'v2' });
+/** New page when rebuilt, otherwise the previous workspace. */
+const to = (key: string, legacyPage = key) => (BUILT.has(key) ? dhref(key) : legacy(legacyPage));
 
 type Item = { key: string; label: L; icon: ComponentType<{ className?: string }>; href: string; built: boolean; count?: number };
 type Group = { label: L; items: Item[] };
@@ -19,30 +22,30 @@ export function navGroups(counts: { orders: number }): Group[] {
   return [
     { label: { ar: 'التشغيل', en: 'Operate' }, items: [
       { key: 'home', label: { ar: 'الرئيسية', en: 'Home' }, icon: LayoutDashboard, href: dhref(), built: true },
-      { key: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, icon: ShoppingBag, href: legacy('orders'), built: false, count: counts.orders },
-      { key: 'products', label: { ar: 'المنتجات', en: 'Products' }, icon: Package, href: legacy('products'), built: false },
-      { key: 'inventory', label: { ar: 'المخزون', en: 'Inventory' }, icon: Warehouse, href: legacy('inventory'), built: false },
-      { key: 'customers', label: { ar: 'العملاء', en: 'Customers' }, icon: Users, href: legacy('customers'), built: false },
+      { key: 'orders', label: { ar: 'الطلبات', en: 'Orders' }, icon: ShoppingBag, href: to('orders'), built: BUILT.has('orders'), count: counts.orders },
+      { key: 'products', label: { ar: 'المنتجات', en: 'Products' }, icon: Package, href: to('products'), built: BUILT.has('products') },
+      { key: 'inventory', label: { ar: 'المخزون', en: 'Inventory' }, icon: Warehouse, href: to('inventory'), built: BUILT.has('inventory') },
+      { key: 'customers', label: { ar: 'العملاء', en: 'Customers' }, icon: Users, href: to('customers'), built: BUILT.has('customers') },
     ] },
     { label: { ar: 'الأداء', en: 'Performance' }, items: [
-      { key: 'analytics', label: { ar: 'التحليلات', en: 'Analytics' }, icon: BarChart3, href: legacy('analytics'), built: false },
-      { key: 'finance', label: { ar: 'المالية', en: 'Finance' }, icon: Wallet, href: legacy('finance'), built: false },
+      { key: 'analytics', label: { ar: 'التحليلات', en: 'Analytics' }, icon: BarChart3, href: to('analytics'), built: BUILT.has('analytics') },
+      { key: 'finance', label: { ar: 'المالية', en: 'Finance' }, icon: Wallet, href: to('finance'), built: BUILT.has('finance') },
     ] },
     { label: { ar: 'النمو', en: 'Growth' }, items: [
-      { key: 'marketing', label: { ar: 'التسويق والعروض', en: 'Marketing' }, icon: Megaphone, href: legacy('marketing'), built: false },
-      { key: 'automations', label: { ar: 'الأتمتة', en: 'Automations' }, icon: Workflow, href: legacy('automations'), built: false },
+      { key: 'marketing', label: { ar: 'التسويق والعروض', en: 'Marketing' }, icon: Megaphone, href: to('marketing'), built: BUILT.has('marketing') },
+      { key: 'automations', label: { ar: 'الأتمتة', en: 'Automations' }, icon: Workflow, href: to('automations'), built: BUILT.has('automations') },
     ] },
     { label: { ar: 'القنوات', en: 'Channels' }, items: [
-      { key: 'storefront', label: { ar: 'المتجر الإلكتروني', en: 'Online store' }, icon: Store, href: legacy('storefront'), built: false },
+      { key: 'storefront', label: { ar: 'المتجر الإلكتروني', en: 'Online store' }, icon: Store, href: to('storefront'), built: BUILT.has('storefront') },
       { key: 'market', label: { ar: 'سوق لك', en: 'LAK marketplace' }, icon: Globe2, href: link('/market/seller'), built: false },
       { key: 'app', label: { ar: 'تطبيق متجرك', en: 'Your store app' }, icon: Smartphone, href: link('/appmaker'), built: false },
-      { key: 'apps', label: { ar: 'التطبيقات', en: 'Apps' }, icon: Blocks, href: legacy('apps'), built: false },
+      { key: 'apps', label: { ar: 'التطبيقات', en: 'Apps' }, icon: Blocks, href: to('apps'), built: BUILT.has('apps') },
     ] },
   ];
 }
 const FOOT: Item[] = [
-  { key: 'settings', label: { ar: 'الإعدادات', en: 'Settings' }, icon: Settings, href: legacy('settings'), built: false },
-  { key: 'help', label: { ar: 'المساعدة', en: 'Help' }, icon: LifeBuoy, href: legacy('help'), built: false },
+  { key: 'settings', label: { ar: 'الإعدادات', en: 'Settings' }, icon: Settings, href: to('settings'), built: BUILT.has('settings') },
+  { key: 'help', label: { ar: 'المساعدة', en: 'Help' }, icon: LifeBuoy, href: to('help'), built: BUILT.has('help') },
 ];
 
 function readPref(key: string, fallback: string) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }

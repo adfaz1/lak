@@ -13,8 +13,9 @@ import { AreaChart } from '../../ds/charts';
 import { channelsToday, headline, salesToday, stockAlerts, tasks, topProducts, type PeriodDays, type Task, type TaskId } from './model/home';
 import { productPhoto, skuPhoto } from './model/media';
 import { useDashState, setDashState } from './review';
+import { sectionHref } from './pages';
 
-const ordersLink = (view?: string) => link('/merchant/orders', { view, from: 'v2' });
+const ordersLink = (view?: string) => sectionHref('orders', '', { view });
 
 export default function Home() {
   const { lang } = useLang();
@@ -146,7 +147,7 @@ export default function Home() {
         </Card>
 
         <Card aria-labelledby="h-top">
-          <CardHeader id="h-top" title={tx('الأكثر مبيعًا', 'Best sellers')} action={<a href={link('/merchant/products', { from: 'v2' })} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المنتجات', 'Products')}</a>} />
+          <CardHeader id="h-top" title={tx('الأكثر مبيعًا', 'Best sellers')} action={<a href={sectionHref('products')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المنتجات', 'Products')}</a>} />
           {top.length === 0 ? <EmptyState icon={<PackageOpen className="size-6" />} title={tx('لا مبيعات بعد', 'No sales yet')} /> : (
             <ol className="space-y-1 px-3 pb-4">
               {top.map((p, i) => (
@@ -177,7 +178,7 @@ export default function Home() {
 
         <Card aria-labelledby="h-stock">
           <CardHeader id="h-stock" title={tx('مخزون يقترب من النفاد', 'Running low')} hint={tx('المتاح = الموجود − المحجوز. يظهر الصنف حين يصل المتاح إلى حدّ إعادة الطلب في أي مستودع.', 'Available = on hand − reserved. A SKU appears when available reaches its reorder point in any warehouse.')}
-            action={<a href={link('/merchant/inventory', { from: 'v2' })} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المخزون', 'Inventory')}</a>} />
+            action={<a href={sectionHref('inventory')} className="text-[13px] font-semibold text-brand-700 hover:underline dark:text-brand-300">{tx('المخزون', 'Inventory')}</a>} />
           {alerts.length === 0 ? <EmptyState icon={<Boxes className="size-6" />} title={tx('المخزون بخير', 'Stock is healthy')} /> : (
             <ul className="space-y-1 px-3 pb-4">
               {alerts.map((a) => {
@@ -214,7 +215,7 @@ function TaskRow({ t, first, ago }: { t: Task; first: boolean; ago: (h: number) 
   const tx = useTx();
   const { lang } = useLang();
   const d = TASK[t.id];
-  const href = d.href ? link(`/merchant/${d.href}`, { from: 'v2' }) : ordersLink(d.view);
+  const href = d.href ? sectionHref(d.href) : ordersLink(d.view);
   const meta = [
     t.id === 'stock' ? tx(`${t.count} صنف`, `${t.count} SKUs`) : tx(`${t.count} طلب`, `${t.count} orders`),
     t.oldestHours !== null ? tx(`الأقدم ${ago(t.oldestHours)}`, `oldest ${ago(t.oldestHours)}`) : null,
@@ -249,7 +250,7 @@ function OrderRow({ o, ago }: { o: Order; ago: (h: number) => string }) {
           : ['brand', tx('للتجهيز', 'To fulfil')];
   return (
     <li>
-      <a href={link(`/merchant/orders/${o.ref}`, { from: 'v2' })} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-surface-2/60">
+      <a href={sectionHref('orders', o.ref)} className="flex items-center gap-3 px-5 py-3 transition-colors hover:bg-surface-2/60">
         <ProductImage src={skuPhoto(o.items[0].sku)} alt={o.items[0].name[lang]} size={40} />
         <span className="hidden sm:block"><Avatar name={o.customer[lang]} /></span>
         <div className="min-w-0 flex-1">
