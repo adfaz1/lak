@@ -6,7 +6,7 @@ import { LOCATIONS, LOC_IDS, refundQuote, refundable, refundedQty, requestRefund
 import { refundTx } from '../../merchant/finance';
 import { customersStore, financeStore, levelsStore, stockLogStore } from '../../merchant/stores';
 import { Alert, Field, Input, Modal, Simulated, Switch, Textarea } from '../../../ds/kit';
-import { Button, Money, ProductImage, Segmented, cn, useTx } from '../../../ds/ui';
+import { Button, Money, ProductImage, Ref, Segmented, cn, useTx } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { REFUND_REASONS, applyRestock, refundFromNextPayout, type RefundReason } from './model';
 import { Qty, Row, saveOrder, useActor } from './ui';
@@ -59,7 +59,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
 
   if (step === 'confirm') return (
     <Modal title={tx('تأكيد طلب الاسترداد', 'Confirm the refund request')} onClose={() => onClose()}
-      footer={<><Button variant="secondary" onClick={() => setStep('form')}>{tx('رجوع', 'Back')}</Button><Button onClick={submit}>{tx('اطلب استرداد', 'Request refund of')}&nbsp;<Money v={q.amount} /></Button></>}>
+      footer={<><Button variant="secondary" onClick={() => setStep('form')}>{tx('رجوع', 'Back')}</Button><Button onClick={submit}>{toWallet ? tx('أضف للمحفظة', 'Credit wallet with') : tx('اطلب استرداد', 'Request refund of')}&nbsp;<Money v={q.amount} /></Button></>}>
       <div className="rounded-xl bg-surface-2 p-5 text-center">
         <p className="text-xs text-muted">{toWallet ? tx('إلى محفظة العميل في متجرك', 'To the customer’s store wallet') : tx('إلى وسيلة الدفع الأصلية', 'To the original payment method')}</p>
         <p className="mt-1 text-3xl font-bold tracking-tight text-fg"><Money v={q.amount} /></p>
@@ -68,10 +68,10 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
       <dl className="divide-y divide-border !rounded-xl !border !border-border !px-4">
         <Row label={tx('السبب', 'Reason')}>{reason}</Row>
         <Row label={tx('إعادة للمخزون', 'Restock')}>{restockUnits ? tx(`${restockUnits} في ${LOCATIONS[loc].ar}`, `${restockUnits} at ${LOCATIONS[loc].en}`) : tx('لا شيء', 'Nothing')}</Row>
-        {refundFromNextPayout(o) && <Row label={tx('من', 'From')}>{tx('التحويل القادم', 'Next payout')}</Row>}
+        {refundFromNextPayout(o) && !toWallet && <Row label={tx('من', 'From')}>{tx('التحويل القادم', 'Next payout')}</Row>}
       </dl>
       {toWallet ? <Alert tone="info" title={tx('يُضاف للمحفظة فورًا', 'Credited to the wallet at once')}>
-        <span className="flex flex-wrap items-center gap-2">{tx(`لا يُعاد للبطاقة ولا يُخصم من تحويلك؛ يصبح رصيدًا قائمًا للعميل ${wExpires ? `ينتهي ${wExpires}` : 'بلا انتهاء'}، مربوطًا بهذا الاسترداد.`, `Not returned to the card or taken from your payout; it becomes outstanding customer credit ${wExpires ? `expiring ${wExpires}` : 'with no expiry'}, tied to this refund.`)}<Simulated /></span>
+        <span className="flex flex-wrap items-center gap-2">{tx('لا يُعاد للبطاقة ولا يُخصم من تحويلك؛ يصبح رصيدًا قائمًا للعميل مربوطًا بهذا الاسترداد،', 'Not returned to the card or taken from your payout; it becomes outstanding customer credit tied to this refund,')} {wExpires ? <>{tx('ينتهي', 'expiring')} <Ref>{wExpires}</Ref></> : tx('بلا انتهاء', 'with no expiry')}.<Simulated /></span>
       </Alert> : <Alert tone="info" title={tx('يبقى «بانتظار المزوّد» حتى يؤكده', 'Stays “awaiting provider” until confirmed')}>
         <span className="flex flex-wrap items-center gap-2">{tx('لا تتغير حالة الدفع قبل التأكيد. تصل العميل رسالة «تم الاسترداد» عند تأكيد المزوّد.', 'Payment state changes only on confirmation. The customer gets the “Refunded” message once the provider confirms.')}<Simulated /></span>
       </Alert>}
@@ -91,7 +91,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
       {refundable(o) === 0 && <Alert tone="info" title={o.pay !== 'failed' ? tx('رُدّ المبلغ كاملًا من قبل', 'Already fully refunded') : tx('لا مبلغ للاسترداد: الدفع لم يكتمل', 'Nothing to refund: payment was not completed')}>
         {o.pay !== 'failed' ? tx('يمكنك فتح مرتجع لإعادة القطع إلى المخزون دون رد مبلغ.', 'You can still open a return to restock items without refunding money.') : tx('لم يُحصَّل من العميل شيء. إن أردت إنهاء الطلب فاستخدم «إلغاء الطلب».', 'Nothing was collected from the customer. To close the order, use “Cancel order”.')}
       </Alert>}
-      {refundFromNextPayout(o) && <Alert tone="info">{tx('سُوّي هذا الطلب في تحويل سابق؛ يُخصم الاسترداد من التحويل القادم.', 'This order was already paid out; the refund comes from your next payout.')}</Alert>}
+      {refundFromNextPayout(o) && !toWallet && <Alert tone="info">{tx('سُوّي هذا الطلب في تحويل سابق؛ يُخصم الاسترداد من التحويل القادم.', 'This order was already paid out; the refund comes from your next payout.')}</Alert>}
 
       <fieldset>
         <legend className="mb-2 text-[13px] font-semibold text-fg">{tx('ما الذي تردّه؟', 'What are you refunding?')}</legend>
