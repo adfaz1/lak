@@ -71,13 +71,13 @@ export default function Preorders({ route }: { route: Route }) {
         return (
           <Card key={c.id} aria-labelledby={`pc-${c.id}`}>
             <CardHeader id={`pc-${c.id}`} title={<span className="flex flex-wrap items-center gap-2">{c.name[lang]}<Badge tone={TONE[st]}>{stateName(st)}</Badge></span>}
-              hint={`${day(c.starts)} – ${day(c.ends)} · ${tx('الشحن نحو', 'ships around')} ${day(c.shipDate)} · ${c.pay === 'deposit' ? tx(`دفعة ${c.depositPct}٪`, `${c.depositPct}% deposit`) : tx('دفع كامل', 'paid in full')}`}
               action={canEdit && <span className="flex items-center gap-1">
                 {st !== 'ended' && <Button size="sm" variant="ghost" onClick={() => pause(c)}>{c.paused ? <Play className="size-4" aria-hidden="true" /> : <Pause className="size-4" aria-hidden="true" />}{c.paused ? tx('استأنف', 'Resume') : tx('أوقف', 'Pause')}</Button>}
                 <Button size="sm" variant="ghost" onClick={() => setForm({ c, isNew: false })}><Pencil className="size-4" aria-hidden="true" />{tx('عدّل', 'Edit')}</Button>
                 {c.taken === 0 && <Button size="sm" variant="ghost" onClick={() => remove(c)} aria-label={tx('احذف', 'Delete')}><Trash2 className="size-4" aria-hidden="true" /></Button>}
               </span>} />
             <div className="space-y-4 px-5 pb-5">
+              <p className="text-sm font-medium text-fg">{day(c.starts)} – {day(c.ends)} · {tx('الشحن نحو', 'ships around')} {day(c.shipDate)} · {c.pay === 'deposit' ? tx(`دفعة ${c.depositPct}٪`, `${c.depositPct}% deposit`) : tx('دفع كامل', 'paid in full')}</p>
               <p className="text-sm text-muted">{c.productIds.map((id) => products.find((p) => p.id === id)?.name[lang] ?? id).join(lang === 'ar' ? '، ' : ', ')}</p>
               <div>
                 <div className="flex items-baseline justify-between text-sm"><span className="font-semibold text-fg">{tx(`${c.taken} قطعة مطلوبة`, `${c.taken} units ordered`)}</span><span className="text-muted">{c.cap ? tx(`الحد ${c.cap}`, `cap ${c.cap}`) : tx('بلا حد', 'no cap')}</span></div>

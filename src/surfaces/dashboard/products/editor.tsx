@@ -15,6 +15,7 @@ import { catalogXStore, categoriesStore, draftsStore, levelsStore, logAction, pr
 import { Badge, Button, Card, CardHeader, EmptyState, ErrorState, InfoHint, Money, ProductImage, Ref, Skeleton, cn, useTx } from '../../../ds/ui';
 import { Alert, Field, Input, Modal, PageHeader, SaveBar, Select, Simulated, Switch, Textarea, inputClass, useToast } from '../../../ds/kit';
 import { useDashState, setDashState } from '../review';
+import { discardUnsaved } from '../unsaved';
 import { sectionHref } from '../pages';
 import {
   CHANNELS, TAG_MAX, categoryKey, categoryOptions, checkImage, discountPct, duplicateDraft, fieldId, fromEditDraft, hiddenReason, levelsForNew, makePrimary, mediaSrc,
@@ -144,7 +145,8 @@ function Form({ id, product, focus, newType }: { id: string; product: Product | 
       setShowErr(false);
       setRestored(false);
       toast({ tone: 'ok', text: tx(`حُفظ المنتج · الإصدار ${version}`, `Product saved · version ${version}`) });
-      if (isNew) replace(phref(newId));
+      // Saved: nothing is unsaved any more, so moving to the new product's address must not ask to leave.
+      if (isNew) { discardUnsaved(); replace(phref(newId)); }
     }, 900);
   };
 

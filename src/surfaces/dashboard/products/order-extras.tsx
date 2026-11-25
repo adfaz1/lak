@@ -19,9 +19,9 @@ export function OrderExtrasCard({ o, canSeeCodes = true }: { o: Order; canSeeCod
       {e.preorder && <p className={cn(row, 'bg-brand-500/10')}><CalendarClock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span><b>{tx('طلب مسبق', 'Pre-order')}</b> · {e.preorder.name[lang]} · {tx(`الشحن نحو ${day(e.preorder.shipDate)}`, `ships around ${day(e.preorder.shipDate)}`)}
         {e.preorder.pay === 'deposit' && <span className="block">{tx('دفعة مقدمة ', 'Deposit ')}<Money v={e.preorder.deposit} />{tx(' · الباقي ', ' · balance ')}<Money v={e.preorder.balance} />{tx(' يُحصَّل قبل الشحن', ' due before shipping')}</span>}</span></p>}
       {e.fields && e.fields.length > 0 && (
-        <div className={cn(row, 'block bg-surface-2')}>
-          <p className="mb-1 flex items-center gap-1.5 font-semibold"><ListChecks className="size-3.5" aria-hidden="true" />{tx('إجابات العميل', 'Customer’s answers')}</p>
-          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5">{e.fields.map((f) => <div key={f.id} className="contents"><dt className="text-muted">{f.label[lang]}</dt><dd className="min-w-0 break-words font-medium">{f.value[lang]}</dd></div>)}</dl>
+        <div className="rounded-xl bg-surface-2 px-3 py-2 text-xs text-fg">
+          <p className="mb-1.5 flex items-center gap-1.5 font-semibold"><ListChecks className="size-3.5" aria-hidden="true" />{tx('إجابات العميل', 'Customer’s answers')}</p>
+          <dl className="space-y-1">{e.fields.map((f) => <div key={f.id}><dt className="text-muted">{f.label[lang]}</dt><dd className="break-words font-medium"><bdi>{f.value[lang]}</bdi></dd></div>)}</dl>
         </div>
       )}
       {e.bookings?.map((b, i) => <p key={i} className={cn(row, 'bg-surface-2')}><CalendarClock className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" /><span>{tx('حجز', 'Booking')} · {day(b.date, true)} <bdi dir="ltr">{b.time}</bdi> · {tx(`${b.qty} مقعد`, `${b.qty} place(s)`)}</span></p>)}
