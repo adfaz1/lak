@@ -8,9 +8,11 @@ describe('sales channels', () => {
     const rows = channelRows(facts);
     expect(rows.map((r) => r.id)).toEqual(['online', 'app', 'market', 'pos', 'wholesale', 'tiktok', 'snapchat', 'ads']);
     const pos = rows.find((r) => r.id === 'pos')!;
-    expect(pos.build).toBe('notBuilt');
-    expect(pos.href).toBeUndefined();
-    expect(pos.needs.length).toBeGreaterThan(0);
+    // Phase D (owner request 2026-11-25): POS, wholesale and ads are built as simulated tools with a pending decision.
+    expect(pos.build).toBe('built');
+    expect(pos.href).toEqual({ section: 'pos' });
+    expect(pos.decision).toBeDefined();
+    expect(rows.find((r) => r.id === 'tiktok')!.build).toBe('notBuilt');
     expect(rows.find((r) => r.id === 'app')!.state).toBe('setup');
   });
   it('reflects the store status and filters by build state or decision', () => {

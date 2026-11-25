@@ -1,5 +1,6 @@
 // Every sales channel in the blueprint, in one list, with an honest status: built in this demo (and its live state),
 // not built yet, or waiting on an owner decision; plus what each one needs. Pure rules, no React.
+// Phase D (2026-11-25): POS, wholesale and ads are built as simulated tools (dashboard/pos, /wholesale, /ads).
 // Source: skill §08 "Sales Channels" (marketplace, wholesale, App Maker, TikTok/Snapchat catalogue sync),
 // §03 IA ("POS when available"), ecosystem (Lak Ads, POS as a separate platform).
 import type { L } from '../../../core/lang';
@@ -32,6 +33,10 @@ export interface ChannelFacts {
   onlineProducts: number;
   app: { addon: string; published: boolean; inApp: number };
   market: { state: 'live' | 'paused' | 'blocked'; listed: number };
+  /** Phase D (channels group): POS shifts open, approved wholesale buyers, connected ad platforms. Optional for older callers. */
+  pos?: { openShifts: number; pins: number };
+  wholesale?: { approved: number; listed: number };
+  ads?: { connected: number; live: number };
 }
 
 export function channelRows(f: ChannelFacts): ChannelRow[] {
@@ -44,19 +49,22 @@ export function channelRows(f: ChannelFacts): ChannelRow[] {
     { id: 'market', name: { ar: 'سوق «لك»', en: 'LAK marketplace' }, what: { ar: 'منتجاتك في سوق المتسوقين عبر المتاجر', en: 'Your products in the cross-store shopper marketplace' }, build: 'built', state: f.market.state,
       decision: { ar: 'المصدر يقول «إدراج تلقائي»، والمنفّذ «مراجعة قبل الظهور»؛ والعمولة غير معتمدة', en: 'Source says “auto-listed”, built as “review first”; commission not approved' },
       needs: f.market.state === 'blocked' ? [{ ar: 'أكمل شروط الأهلية', en: 'Complete the eligibility checks' }] : [], href: { section: 'channel' }, products: f.market.listed, plan: 'All' },
-    { id: 'pos', name: { ar: 'نقاط البيع (POS)', en: 'Point of sale (POS)' }, what: { ar: 'البيع في المحل بنفس المخزون', en: 'Sell in-store from the same stock' }, build: 'notBuilt',
-      decision: { ar: 'المخطط يذكره كمنصة منفصلة؛ النطاق والأجهزة غير محددة', en: 'Listed as a separate platform; scope and hardware not defined' },
-      needs: [{ ar: 'قرار نطاق: أجهزة، تزامن المخزون دون اتصال، الدفع الحضوري', en: 'Scope decision: hardware, offline stock sync, in-person payments' }] },
-    { id: 'wholesale', name: { ar: '«لك» للجملة (B2B)', en: 'LAK Wholesale (B2B)' }, what: { ar: 'كتالوج بأسعار الجملة وطلبات بالكميات', en: 'Wholesale-price catalogue and bulk orders' }, build: 'notBuilt',
-      decision: { ar: 'الباقة متناقضة في المصدر (كل الباقات / Plus+)', en: 'Plan conflicts in the source (all plans / Plus+)' },
-      needs: [{ ar: 'قاعدة باقة رسمية، ثم شرائح الأسعار وحد الطلب والفواتير B2B', en: 'An official plan rule, then price tiers, minimums and B2B invoices' }] },
+    { id: 'pos', name: { ar: 'نقاط البيع (POS)', en: 'Point of sale (POS)' }, what: { ar: 'البيع في المحل بنفس المخزون', en: 'Sell in-store from the same stock' }, build: 'built',
+      state: !f.pos ? 'setup' : f.pos.openShifts ? 'live' : f.pos.pins ? 'paused' : 'setup',
+      decision: { ar: 'أجهزة الدفع ورسوم العمليات الحضورية وسعر POS في الباقات غير معتمدة', en: 'Terminals, in-person fees and POS plan price not approved' },
+      needs: [{ ar: 'ربط جهاز دفع حقيقي والعمل دون اتصال بعد قرار النطاق', en: 'A real card terminal and offline mode, after the scope decision' }], href: { section: 'pos' } },
+    { id: 'wholesale', name: { ar: 'الجملة (B2B)', en: 'Wholesale (B2B)' }, what: { ar: 'مشترو منشآت بأسعار بالكمية وعروض أسعار وفاتورة ضريبية', en: 'Business buyers with quantity pricing, quotes and tax invoices' }, build: 'built',
+      state: !f.wholesale ? 'setup' : f.wholesale.approved ? 'live' : 'setup',
+      decision: { ar: 'سوق «لك» للجملة بين المتاجر وباقته (المصدر متناقض) وعمولته غير معتمدة', en: 'LAK cross-store wholesale marketplace, its plan (source conflicts) and commission not approved' },
+      needs: [{ ar: 'استضافة نموذج طلب الحساب في المتجر', en: 'Host the buyer application form on the storefront' }], href: { section: 'wholesale' }, products: f.wholesale?.listed },
     { id: 'tiktok', name: { ar: 'كتالوج TikTok', en: 'TikTok catalogue' }, what: { ar: 'مزامنة المنتجات مع TikTok Shop', en: 'Sync products to TikTok Shop' }, build: 'notBuilt',
       needs: [{ ar: 'اعتماد شريك من TikTok وربط حساب بتفويض', en: 'TikTok partner approval and account authorisation' }] },
     { id: 'snapchat', name: { ar: 'كتالوج Snapchat', en: 'Snapchat catalogue' }, what: { ar: 'مزامنة المنتجات مع إعلانات Snapchat', en: 'Sync products to Snapchat ads' }, build: 'notBuilt',
       needs: [{ ar: 'اعتماد شريك من Snap وربط حساب بتفويض', en: 'Snap partner approval and account authorisation' }] },
-    { id: 'ads', name: { ar: 'إعلانات «لك»', en: 'LAK Ads' }, what: { ar: 'حملات Google وTikTok وSnapchat وMeta وX من مكان واحد', en: 'Google, TikTok, Snapchat, Meta and X campaigns in one place' }, build: 'notBuilt',
-      decision: { ar: 'رسوم «لك» منفصلة عن إنفاق المنصات لم تُحدد', en: 'LAK fees, separate from platform spend, not set' },
-      needs: [{ ar: 'عقود المنصات وفصل الميزانية عن الرسوم', en: 'Platform agreements and budget separated from fees' }] },
+    { id: 'ads', name: { ar: 'الإعلانات', en: 'Ads' }, what: { ar: 'تتبع وحملات Google وTikTok وSnapchat وMeta وX من مكان واحد', en: 'Tracking and Google, TikTok, Snapchat, Meta and X campaigns in one place' }, build: 'built',
+      state: !f.ads ? 'setup' : f.ads.live ? 'live' : 'setup',
+      decision: { ar: 'رسوم «لك» لإدارة الحملات ورصيد الإعلانات غير محددة', en: 'LAK campaign-management fees and ad credit not set' },
+      needs: [{ ar: 'عقود المنصات وواجهاتها الرسمية (الربط والإطلاق الآن محاكاة)', en: 'Platform agreements and official APIs (connection and launch are simulated now)' }], href: { section: 'ads' } },
   ];
 }
 

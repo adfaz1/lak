@@ -16,6 +16,9 @@ import { catalogSummary } from '../appmaker/model';
 import { appStore } from '../appmaker/state';
 import { buildRows, channelState, storeChecks } from './model';
 import { channelStore } from './state';
+import { posStore } from '../pos/state';
+import { wsStore } from '../wholesale/state';
+import { adsStore } from '../ads/state';
 import { listPhoto, stockOf } from '../products/model';
 import { channelCounts, channelRows, filterChannels, type ChannelFilter, type ChannelRow, type LiveState } from './channels';
 
@@ -31,6 +34,9 @@ export default function ChannelsOverview({ route }: { route: Route }) {
   const levels = levelsStore.use();
   const fx = channelStore.use();
   const am = appStore.use();
+  const pos = posStore.use();
+  const ws = wsStore.use();
+  const ads = adsStore.use();
   if (!canSee(role, 'storefront') && !canSee(role, 'products')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('القنوات غير متاحة لدورك', 'Channels are not available for your role')} /></div>;
   const checks = storeChecks({ verified: fx.verified, status: settings.status, providers: settings.providers, zones: settings.zones, policies: settings.policies });
   const mState = channelState(fx.enabled, checks);
@@ -39,6 +45,9 @@ export default function ChannelsOverview({ route }: { route: Route }) {
     status: settings.status, onlineProducts: toStoreProducts(products, levels).length,
     app: { addon: am.addon, published: am.releases.some((r) => Object.values(r.platforms).some((p) => p.state === 'published')), inApp: catalogSummary(products, levels).inApp },
     market: { state: mState, listed },
+    pos: { openShifts: pos.shifts.filter((x) => !x.closed).length, pins: Object.keys(pos.pins).length },
+    wholesale: { approved: ws.buyers.filter((b) => b.status === 'approved').length, listed: ws.lists.reduce((n, l) => n + l.rows.length, 0) },
+    ads: { connected: Object.values(ads.tracking).filter((t) => t.state === 'connected').length, live: ads.campaigns.filter((c) => c.status === 'live').length },
   });
   const qf = route.query.get('f') as ChannelFilter | null;
   const f: ChannelFilter = qf && ['built', 'notBuilt', 'decision'].includes(qf) ? qf : 'all';
