@@ -152,7 +152,7 @@ export function CatalogNav() {
     { href: phref('restrictions'), label: tx('قيود الشراء', 'Purchase limits'), icon: ShieldCheck, on: here.startsWith('#/dashboard/products/restrictions') },
   ];
   return (
-    <nav aria-label={tx('أقسام الكتالوج', 'Catalogue sections')} className="scrollbar-thin -mx-1 flex gap-1 overflow-x-auto px-1">
+    <nav aria-label={tx('أقسام الكتالوج', 'Catalogue sections')} className="scrollbar-thin -mx-1 flex w-full min-w-0 max-w-full gap-1 overflow-x-auto px-1">
       {items.map((i) => (
         <a key={i.href} href={i.href} aria-current={i.on ? 'page' : undefined}
           className={cn('inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-colors', i.on ? 'bg-fg text-bg' : 'bg-surface text-muted ring-1 ring-border hover:text-fg')}>
