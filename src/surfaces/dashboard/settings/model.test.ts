@@ -94,7 +94,7 @@ describe('payments', () => {
   });
   it('shows shoppers only active methods inside the plan', () => {
     const list = applyProvider(providerFixtures(), 'mada', 'approve');
-    expect(visibleAtCheckout(list, 'plus').map((p) => p.id)).toEqual(['cod', 'bank', 'mada']);
+    expect(visibleAtCheckout(list, 'plus').map((p) => p.id)).toEqual(['cod', 'bank', 'mada', 'cards']);
     expect(visibleAtCheckout(list, 'basic').map((p) => p.id)).toEqual(['cod', 'bank']);
   });
   it('parses COD limits in riyals and requires max above min', () => {

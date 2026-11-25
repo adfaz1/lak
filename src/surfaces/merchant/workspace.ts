@@ -99,7 +99,7 @@ export function providerFixtures(): Provider[] {
     { id: 'cod', name: k('الدفع عند الاستلام', 'Cash on delivery'), kind: k('يدوي', 'Manual'), minPlan: 'basic', state: 'active' },
     { id: 'bank', name: k('تحويل بنكي', 'Bank transfer'), kind: k('يدوي', 'Manual'), minPlan: 'basic', state: 'active' },
     { id: 'mada', name: k('مدى', 'Mada'), kind: k('بطاقات محلية', 'Local cards'), minPlan: 'plus', state: 'pending' },
-    { id: 'cards', name: k('فيزا / ماستركارد', 'Visa / Mastercard'), kind: k('بطاقات دولية', 'International cards'), minPlan: 'plus', state: 'not_connected' },
+    { id: 'cards', name: k('فيزا / ماستركارد', 'Visa / Mastercard'), kind: k('بطاقات دولية', 'International cards'), minPlan: 'plus', state: 'active' },
     { id: 'applepay', name: k('Apple Pay', 'Apple Pay'), kind: k('محفظة', 'Wallet'), minPlan: 'plus', state: 'not_connected' },
     { id: 'stcpay', name: k('STC Pay', 'STC Pay'), kind: k('محفظة', 'Wallet'), minPlan: 'plus', state: 'action_required' },
     { id: 'tabby', name: k('تابي', 'Tabby'), kind: k('اشترِ الآن وادفع لاحقًا', 'Buy now, pay later'), minPlan: 'plus', state: 'not_connected' },

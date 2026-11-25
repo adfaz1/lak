@@ -49,7 +49,7 @@ describe('catalogue from the merchant', () => {
 describe('settings', () => {
   const settings = { store: { name: 'دار نُوى' }, providers: providerFixtures(), plan: 'plus' as const, cod: { min: 0, max: 200000 }, policies: policyFixtures(), zones: zoneFixtures() };
   it('offers only connected payment providers, mapped to store methods', () => {
-    expect(storeConfig(settings, { guest: true, codPerCustomer: 2 }).methods).toEqual(['cod']);
+    expect(storeConfig(settings, { guest: true, codPerCustomer: 2 }).methods).toEqual(['card', 'cod']); // the demo store accepts Visa/Mastercard and cash on delivery
     const more = { ...settings, providers: settings.providers.map((p) => (p.id === 'mada' || p.id === 'applepay' ? { ...p, state: 'active' as const } : p)) };
     expect(storeConfig(more, { guest: true, codPerCustomer: null }).methods).toEqual(['card', 'applepay', 'cod']);
   });
