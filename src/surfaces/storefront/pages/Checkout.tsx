@@ -1,7 +1,7 @@
 // Checkout: one clear column on phones, sticky order summary on desktop. Everything typed is kept in the session store,
 // so a failed payment, a reload or a trip back to the bag never loses it. Payment and delivery are simulated.
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Banknote, Check, ChevronDown, Clock, CreditCard, Landmark, FlaskConical, Lock, RefreshCw, ShoppingBag, Smartphone, User } from 'lucide-react';
+import { Banknote, Check, ChevronDown, Clock, CreditCard, Landmark, FlaskConical, Lock, Mail, RefreshCw, ShoppingBag, Smartphone, Truck, User } from 'lucide-react';
 import { navigate } from '../../../core/router';
 import { Alert, Field, Input, Modal, Select, Textarea } from '../../../ds/kit';
 import { Button, EmptyState, LinkButton, Money, Segmented, cn, useTx } from '../../../ds/ui';
@@ -9,7 +9,7 @@ import { locationsStore, settingsStore } from '../../merchant/stores';
 import { shopperView } from '../../dashboard/storefront/model';
 import {
   CITIES, canPay, cityById, cleanPhone, computeTotals, deliveryEstimate, isSettled, payEligibility,
-  pricedLines, validateAddress, validateCart, variantById,
+  pricedLines, validateAddress, validateCart, validateContact, variantById,
   type Address, type AddrErr, type CityId, type Order, type PayMethod,
 } from '../domain';
 import { Breakdown, CouponBox, H1, PANEL, ProductPhoto, SimNote, WRAP, districtLabel, to, useS, variantLabel } from '../kit';
@@ -21,6 +21,7 @@ import { useCatalog, useConfig } from '../data';
 import { shipOptions } from '../bridge';
 import { simNow, useSim } from '../review';
 import { CheckoutQuestions, useCheckoutExtras } from '../../dashboard/products/storefront-parts';
+import { bagNeeds } from '../../merchant/catalog-extras';
 
 const FIELD_ORDER: (keyof AddrErr)[] = ['email', 'name', 'phone', 'city', 'district', 'street', 'building', 'nationalCode'];
 const radioCard = 'flex cursor-pointer items-start gap-3 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-fg/30 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-500/[.04] has-[:checked]:ring-1 has-[:checked]:ring-brand-600 has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 has-[:disabled]:hover:border-border';
@@ -51,12 +52,15 @@ export default function Checkout() {
   const coupon = couponResult(cart, products);
   const discount = coupon?.status === 'valid' ? coupon.discount : 0;
   const freeShip = coupon?.status === 'valid' && coupon.freeShip;
-  const city = co.addr.city as CityId | undefined;
+  // Downloads, codes, services and bookings need no address: a bag of only those asks for contact details alone.
+  const needs = bagNeeds(lines);
+  const noAddr = !needs.address;
+  const city = noAddr ? undefined : (co.addr.city as CityId | undefined);
   // Delivery methods from the merchant's shipping setup (methods, rules, promises) for this city and bag; the shopper picks one.
   const locations = locationsStore.use();
   const shipList = shipOptions(cfg, city, lines, { now: Date.now(), goods: lines.reduce((a, x) => a + x.amount, 0) - discount, cod: co.method === 'cod', locations });
   const ship = shipList.find((x) => x.id === co.ship) ?? shipList[0];
-  const shipOk = !!city && !!ship;
+  const shipOk = !!ship && (noAddr || !!city);
   const signed = co.mode === 'account' && acc.signedIn;
   const needSignIn = !cfg.guest && !signed;
   const openCod = openCodCount();
@@ -69,7 +73,10 @@ export default function Checkout() {
   const offered = cfg.methods.filter((pm) => pm !== 'applepay' || sim.applePay);
   const methodOk = offered.includes(co.method) && !elig(co.method);
   const totals = computeTotals(lines, { discount, ship, freeShip, cod: co.method === 'cod' && methodOk, codFee: cfg.codFee });
-  const errs = validateAddress(co.addr, { email: co.email });
+  const errs = noAddr ? validateContact(co.addr, { email: co.email, needEmail: needs.email })
+    : { ...validateAddress(co.addr, { email: co.email }), ...(needs.email && !co.email.trim() ? { email: 'required' as const } : {}) };
+  // Which items ship and which do not (shown on a mixed bag, and as the note on a bag that needs no delivery).
+  const split = cart.lines.flatMap((x) => { const f = variantById(products, x.vid); return f ? [{ name: l(f.product.name), ships: f.product.x?.ships !== false, type: f.product.x?.type }] : []; });
   // Store questions (order custom fields), purchase limits, age confirmation and pre-order terms (dashboard → Products).
   const cx = useCheckoutExtras(lines, products, city);
   const pending = pendingForSession();
@@ -283,12 +290,37 @@ export default function Checkout() {
               <p className="flex flex-wrap items-center gap-2 text-sm"><Check className="size-4 text-emerald-600" aria-hidden="true" />{t.signedAs(l(CUSTOMER.name))}
                 <button type="button" onClick={signOut} className="font-semibold underline-offset-4 hover:underline">{t.signOut}</button></p>
             )}
-            <Field id="sf-f-email" label={t.emailL} optional error={errMsg('email')} hint={t.emailHint}>
+            <Field id="sf-f-email" label={t.emailL} optional={!needs.email} error={errMsg('email')} hint={needs.email ? tx('الأكواد وروابط التنزيل تصلك عليه', 'Codes and download links are sent here') : t.emailHint}>
               {(p) => <Input {...p} type="email" dir="ltr" autoComplete="email" inputMode="email" value={co.email} onBlur={touch('email')} onChange={(e) => checkoutStore.set((c) => ({ ...c, email: e.target.value }))} className="h-11" />}
             </Field>
           </>)}
 
-          {step(2, 'sf-a-h', t.sAddress, <>
+          {noAddr && step(2, 'sf-a-h', tx('بياناتك', 'Your details'), <>
+            <p className="flex items-start gap-2 rounded-xl bg-surface-2 px-4 py-3 text-sm"><Mail className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden="true" />
+              <span>{tx('لا يحتاج توصيلًا: ', 'No delivery needed: ')}{split.map((x) => x.name).join(t.listSep)}. {needs.email ? tx('يصلك بالبريد بعد الدفع.', 'Sent by email after payment.') : tx('نؤكد موعدك بعد الدفع.', 'We confirm your appointment after payment.')}</span></p>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field id="sf-f-name" label={t.name} error={errMsg('name')} className="sm:col-span-2">
+                {(p) => <Input {...p} autoComplete="name" value={co.addr.name ?? ''} onBlur={touch('name')} onChange={(e) => setAddr({ name: e.target.value })} className="h-11" />}
+              </Field>
+              <Field id="sf-f-phone" label={t.phone} error={errMsg('phone')} hint={t.phoneHint} className="sm:col-span-2">
+                {(p) => (
+                  <div className="flex" dir="ltr">
+                    <span className="grid h-11 place-items-center rounded-s-xl border border-e-0 border-border bg-surface-2 px-3 text-sm text-muted" aria-hidden="true">+966</span>
+                    <Input {...p} type="tel" inputMode="tel" autoComplete="tel-national" value={co.addr.phone ?? ''} placeholder="5X XXX XXXX" className="h-11 rounded-s-none"
+                      onChange={(e) => setAddr({ phone: e.target.value })} onBlur={(e) => { touch('phone')(); if (e.target.value) setAddr({ phone: cleanPhone(e.target.value) }); }} />
+                  </div>
+                )}
+              </Field>
+            </div>
+          </>)}
+
+          {!noAddr && step(2, 'sf-a-h', t.sAddress, <>
+            {needs.mode === 'mixed' && (
+              <div className="space-y-1 rounded-xl bg-surface-2 px-4 py-3 text-sm">
+                <p className="flex items-start gap-2"><Truck className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden="true" /><span><span className="font-semibold">{tx('يُشحن لهذا العنوان: ', 'Ships to this address: ')}</span>{split.filter((x) => x.ships).map((x) => x.name).join(t.listSep)}</span></p>
+                <p className="flex items-start gap-2 text-muted"><Mail className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span><span className="font-semibold">{tx('لا يحتاج توصيلًا: ', 'No delivery needed: ')}</span>{split.filter((x) => !x.ships).map((x) => x.name).join(t.listSep)}</span></p>
+              </div>
+            )}
             {saved.length > 0 && (
               <fieldset className="space-y-2">
                 <legend className="mb-2 text-[13px] font-semibold">{t.saved}</legend>
@@ -358,7 +390,7 @@ export default function Checkout() {
             )}
           </>)}
 
-          {step(3, 'sf-ship-h', t.sShip, <>
+          {!noAddr && step(3, 'sf-ship-h', t.sShip, <>
             {!city ? <p className={cn('text-sm', tried ? 'font-medium text-red-600 dark:text-red-400' : 'text-muted')}>{t.cityFirst}</p> : (
               <fieldset className="space-y-2">
                 <legend className="sr-only">{t.sShip}</legend>
@@ -391,7 +423,7 @@ export default function Checkout() {
             </section>
           )}
 
-          {step(4, 'sf-pay-h', t.sPay, <>
+          {step(noAddr ? 3 : 4, 'sf-pay-h', t.sPay, <>
             {notice}
             {!methods.length && <Alert tone="warn" title={t.noMethods} />}
             <fieldset className="space-y-2">

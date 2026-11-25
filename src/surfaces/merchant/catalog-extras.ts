@@ -606,6 +606,37 @@ export function bookSlots(products: Product[], bookings: { productId: string; da
   });
 }
 
+/* ───────────── Delivery of a bag (checkout, manual orders, the order page) ───────────── */
+
+/** Types that need no delivery address: sent by email (download, code) or done at an appointment (service, booking). */
+export type NoShipKind = 'digital' | 'code' | 'service' | 'booking';
+export const noShipKind = (t: ProductType | undefined): NoShipKind | undefined => (t && !traits(t).ships ? (t as NoShipKind) : undefined);
+/** After payment a download or code is delivered at once (simulated email); a service or booking is scheduled. */
+export const noShipState = (k: NoShipKind): 'delivered' | 'scheduled' => (k === 'digital' || k === 'code' ? 'delivered' : 'scheduled');
+/**
+ * What a bag asks the shopper for: an address only when something ships; an email when a download or code is sent by
+ * email. `mode` = everything ships, nothing ships, or both (the address is for the shippable part only).
+ */
+export function bagNeeds(lines: { ships?: boolean; type?: ProductType }[]): { address: boolean; email: boolean; mode: 'ship' | 'none' | 'mixed' } {
+  const ship = lines.filter((l) => l.ships !== false).length;
+  const none = lines.length - ship;
+  const email = lines.some((l) => l.ships === false && (l.type === 'digital' || l.type === 'code'));
+  return { address: ship > 0 || !lines.length, email, mode: !none ? 'ship' : ship ? 'mixed' : 'none' };
+}
+/** The codes and download links of an order as message text (what the simulated delivery email carries). */
+export function deliveryText(e: OrderExtras | undefined, ref: string, lang: 'ar' | 'en'): string {
+  if (!e) return '';
+  const out: string[] = [];
+  for (const c of e.codes ?? []) if (c.codes.length) out.push(`${lang === 'ar' ? 'الأكواد' : 'Codes'}: ${c.codes.join(', ')}`);
+  for (const d of e.downloads ?? []) {
+    const terms = [d.limit ? (lang === 'ar' ? `${d.limit} تنزيلات` : `${d.limit} downloads`) : '', d.expiryDays ? (lang === 'ar' ? `صالح ${d.expiryDays} يومًا` : `valid ${d.expiryDays} days`) : ''].filter(Boolean).join(lang === 'ar' ? '، ' : ', ');
+    out.push(`${lang === 'ar' ? 'رابط التنزيل' : 'Download'} ${d.file}: https://dl.example/SIM-${ref}/${encodeURIComponent(d.file)}${terms ? ` (${terms})` : ''}`);
+  }
+  return out.join(' · ');
+}
+/** True when an order carries codes or download links the customer receives on payment. */
+export const hasDigitalDelivery = (e: OrderExtras | undefined) => !!e && ((e.codes ?? []).some((c) => c.codes.length > 0) || (e.downloads ?? []).length > 0);
+
 /* ───────────── What the online store reads (storefront/bridge.ts) ───────────── */
 
 /** Everything the store shows or enforces for one product beyond name, price and stock. */

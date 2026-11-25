@@ -18,7 +18,7 @@ import {
   type Actor, type PayView, type StockEffect,
 } from '../../merchant/ops';
 import { available, type Level, type StockLog } from '../../merchant/inventory';
-import { orderExtrasText } from '../../merchant/catalog-extras';
+import { assignCodes, bookSlots, bundleStock, noShipKind, openSlots, orderExtrasText, riyadhToday, slotLeft, type BundleItem, type NoShipKind, type OrderExtras } from '../../merchant/catalog-extras';
 
 /* ---------- List query (lives in the URL) ---------- */
 
@@ -163,7 +163,9 @@ export function ageOf(hours: number): Age {
 
 export type NextKind = 'fulfil' | 'fulfilRest' | 'contact' | 'ship' | 'deliver' | 'cancelRequest' | 'returns' | 'transfer' | 'none';
 export type NextReason = 'payFailed' | 'late' | 'ready' | 'partial' | 'refundPending' | 'labelIssued' | 'inTransit' | 'delivered' | 'refunded'
-  | 'verifying' | 'link' | 'cancelled' | 'cancelRequest' | 'returnOpen' | 'bankDue';
+  | 'verifying' | 'link' | 'cancelled' | 'cancelRequest' | 'returnOpen' | 'bankDue'
+  /** Nothing ships: downloads/codes were sent on payment, or a service/booking is scheduled. */
+  | 'digital' | 'scheduled';
 export interface Next { kind: NextKind; reason: NextReason; remaining: number }
 
 /**
@@ -188,7 +190,20 @@ export function nextAction(o: Order): Next {
   if (o.pay === 'refunded') return { kind: 'none', reason: 'refunded', remaining };
   if (o.ship === 'label') return { kind: 'ship', reason: 'labelIssued', remaining };
   if (o.ship === 'transit') return { kind: 'deliver', reason: 'inTransit', remaining };
+  const d = deliveryOf(o);
+  if (d === 'digital' || d === 'scheduled') return { kind: 'none', reason: d, remaining };
   return { kind: 'none', reason: 'delivered', remaining };
+}
+
+/**
+ * How an order reaches its customer: every line ships, nothing ships (`digital` = downloads/codes sent on payment;
+ * `scheduled` = a service or booking among them), or both (`mixed`: only the shippable lines are fulfilled and shipped).
+ */
+export function deliveryOf(o: Pick<Order, 'items'>): 'ship' | 'digital' | 'scheduled' | 'mixed' {
+  const none = o.items.filter((it) => it.noShip);
+  if (!none.length) return 'ship';
+  if (none.length < o.items.length) return 'mixed';
+  return none.some((it) => it.noShip === 'service' || it.noShip === 'booking') ? 'scheduled' : 'digital';
 }
 
 /** Exceptions shown beside the three states in the list: late, refund awaiting provider. */
@@ -459,19 +474,43 @@ export const withoutLiveStock = (orig: Order, next: Order): Order => ({ ...next,
 
 /* ---------- Catalogue choices (manual orders, exchanges) ---------- */
 
-export interface SkuOption { productId: string; sku: string; name: L; variant?: L; unit: number; weight: number; avail: Partial<Record<LocId, number>>; total: number }
+export interface SkuOption {
+  productId: string; sku: string; name: L; variant?: L; unit: number; weight: number; avail: Partial<Record<LocId, number>>; total: number;
+  /** Product types (catalog-extras): no warehouse and no shipping for downloads, codes, services and bookings. */
+  noShip?: NoShipKind;
+  /** Booking: open slots with places left; the line picks one. */
+  slots?: { id: string; date: string; time: string; left: number }[];
+  /** Bundle: its components (stock held per component). */
+  bundle?: BundleItem[];
+  /** No stock limit (download, service). */
+  unlimited?: boolean;
+}
 const variantLabel = (v: { color: string; size: string }): L | undefined => {
   const s = [v.color, v.size].filter(Boolean).join(' · ');
   return s ? { ar: s, en: s } : undefined;
 };
-/** Sellable SKUs of active physical products with what each location can still sell (on hand − reserved). */
-export function skuOptions(products: Product[], levels: Level[]): SkuOption[] {
-  return products.filter((p) => p.status === 'active' && p.type !== 'digital').flatMap((p) => {
-    const vs = p.variants.length ? p.variants.map((v) => ({ sku: v.sku, unit: v.price, variant: variantLabel(v) })) : [{ sku: p.sku, unit: p.price, variant: undefined }];
+/**
+ * Sellable SKUs of active products with what each location can still sell (on hand − reserved). Other types sell by
+ * their own measure: unsold codes, open booking places (per slot), the scarcest bundle component; downloads and
+ * services have no limit. `physicalOnly` keeps the warehouse products (exchanges).
+ */
+export function skuOptions(products: Product[], levels: Level[], today = riyadhToday(), physicalOnly = false): SkuOption[] {
+  return products.filter((p) => p.status === 'active' && (!physicalOnly || (p.type !== 'digital' && !noShipKind(p.type) && p.type !== 'bundle'))).flatMap((p) => {
+    const ns = noShipKind(p.type);
+    const typed = !!ns || p.type === 'bundle';
+    const vs = p.variants.length && !typed ? p.variants.map((v) => ({ sku: v.sku, unit: v.price, variant: variantLabel(v) })) : [{ sku: p.sku, unit: p.price, variant: undefined }];
     return vs.map((v) => {
       const avail: Partial<Record<LocId, number>> = {};
-      levels.filter((l) => l.sku === v.sku).forEach((l) => { avail[l.loc] = Math.max(0, available(l)); });
-      return { productId: p.id, sku: v.sku, name: p.name, variant: v.variant, unit: v.unit, weight: p.weight ?? 0, avail, total: Object.values(avail).reduce<number>((a, b) => a + (b ?? 0), 0) };
+      if (!typed) levels.filter((l) => l.sku === v.sku).forEach((l) => { avail[l.loc] = Math.max(0, available(l)); });
+      const base = { productId: p.id, sku: v.sku, name: p.name, variant: v.variant, unit: v.unit, weight: typed ? 0 : p.weight ?? 0, avail };
+      if (ns === 'digital' || ns === 'service') return { ...base, noShip: ns, total: Number.POSITIVE_INFINITY, unlimited: true };
+      if (ns === 'code') return { ...base, noShip: ns, total: (p.spec?.codes ?? []).filter((c) => !c.ref).length };
+      if (ns === 'booking') {
+        const slots = openSlots(p.spec?.slots, today).map((x) => ({ id: x.id, date: x.date, time: x.time, left: slotLeft(x) }));
+        return { ...base, noShip: ns, slots, total: slots.reduce((a, x) => a + x.left, 0) };
+      }
+      if (p.type === 'bundle') return { ...base, bundle: p.spec?.bundle ?? [], total: bundleStock(p.spec?.bundle ?? [], levels) };
+      return { ...base, total: Object.values(avail).reduce<number>((a, b) => a + (b ?? 0), 0) };
     });
   });
 }
@@ -508,20 +547,25 @@ export type ManualPay = 'cash' | 'transfer' | 'cod' | 'link';
 export interface ManualDraft {
   customerId: string; newName: string; newPhone: string; newEmail: string;
   city: string; address: string; addressNote: string; customerNote: string;
-  lines: { sku: string; qty: string }[];
+  /** `slot`: the booking slot id for a booking line. */
+  lines: { sku: string; qty: string; slot?: string }[];
   freeShipping: boolean; discount: string; pay: ManualPay;
 }
 export const emptyManual = (): ManualDraft => ({ customerId: '', newName: '', newPhone: '', newEmail: '', city: '', address: '', addressNote: '', customerNote: '', lines: [], freeShipping: false, discount: '', pay: 'cash' });
 
-export type DraftError = 'customer' | 'phone' | 'email' | 'city' | 'address' | 'lines' | 'qty' | 'stock' | 'discount' | 'zone';
+export type DraftError = 'customer' | 'phone' | 'email' | 'city' | 'address' | 'lines' | 'qty' | 'stock' | 'discount' | 'zone'
+  /** A booking line without a slot; cash on delivery for an order with nothing to deliver. */
+  | 'slot' | 'codNoShip';
 const normDigits = (s: string) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660));
 const intOf = (s: string) => (/^\d+$/.test(normDigits(s.trim())) ? Number(normDigits(s.trim())) : NaN);
 const moneyOf = (s: string): number | null => { const t = normDigits(s.trim()).replace(/[,،\s]/g, '').replace('٫', '.'); return /^\d+(\.\d{1,2})?$/.test(t) ? Math.round(Number(t) * 100) : null; };
 export const validPhone = (s: string) => /^(\+?966|0)?5\d{8}$/.test(normDigits(s).replace(/[\s-]/g, ''));
 
 export interface ManualQuote {
-  lines: { opt: SkuOption; qty: number; amount: number; error: 'qty' | 'stock' | null }[];
+  lines: { opt: SkuOption; qty: number; amount: number; error: 'qty' | 'stock' | 'slot' | null; slot?: { id: string; date: string; time: string; left: number } }[];
   subtotal: number; discount: number; shipping: number; total: number; vat: number; weightKg: number; zone?: Zone; errors: DraftError[];
+  /** An address and delivery are asked only when a line ships. */
+  ships: boolean;
 }
 
 /** Totals and errors for a manual order draft. Prices are VAT-inclusive; shipping comes from the merchant's zones. */
@@ -530,30 +574,36 @@ export function manualQuote(d: ManualDraft, options: SkuOption[], zones: Zone[],
   const lines = d.lines.map((l) => {
     const opt = options.find((o) => o.sku === l.sku)!;
     const qty = intOf(l.qty);
-    const error = !opt || !Number.isInteger(qty) || qty < 1 ? 'qty' as const : qty > opt.total ? 'stock' as const : null;
-    return { opt, qty: Number.isInteger(qty) ? qty : 0, amount: opt ? opt.unit * (Number.isInteger(qty) ? qty : 0) : 0, error };
+    const slot = opt?.slots?.find((x) => x.id === l.slot);
+    const error = !opt || !Number.isInteger(qty) || qty < 1 ? 'qty' as const : opt.slots && !slot ? 'slot' as const : qty > (slot ? slot.left : opt.total) ? 'stock' as const : null;
+    return { opt, qty: Number.isInteger(qty) ? qty : 0, amount: opt ? opt.unit * (Number.isInteger(qty) ? qty : 0) : 0, error, ...(slot ? { slot } : {}) };
   }).filter((l) => l.opt);
+  // Downloads, codes, services and bookings need no address; an order of only those asks for none.
+  const ships = !lines.length || lines.some((l) => !l.opt.noShip);
   const subtotal = lines.reduce((s, l) => s + l.amount, 0);
   const disc = d.discount.trim() ? moneyOf(d.discount) : 0;
   const discount = disc ?? 0;
   const city = CITIES_LIST.find((c) => c.en === d.city);
   const zone = city ? zoneOf(zones, city) : undefined;
   const weightKg = lines.reduce((s, l) => s + l.qty * l.opt.weight, 0) / 1000;
-  const shipping = d.freeShipping || !zone ? 0 : quoteZone(zone, subtotal - discount, weightKg);
+  const shipping = d.freeShipping || !zone || !ships ? 0 : quoteZone(zone, subtotal - discount, weightKg);
   const total = Math.max(0, subtotal - discount) + shipping;
   if (!d.customerId) {
     if (!d.newName.trim()) errors.push('customer');
     if (!validPhone(d.newPhone)) errors.push('phone');
     if (d.newEmail.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.newEmail.trim())) errors.push('email');
   } else if (!customers.some((c) => c.id === d.customerId)) errors.push('customer');
-  if (!city) errors.push('city');
-  else if (!zone && !d.freeShipping) errors.push('zone');
-  if (!d.address.trim()) errors.push('address');
+  if (ships) {
+    if (!city) errors.push('city');
+    else if (!zone && !d.freeShipping) errors.push('zone');
+    if (!d.address.trim()) errors.push('address');
+  } else if (d.pay === 'cod') errors.push('codNoShip');
   if (!lines.length) errors.push('lines');
   if (lines.some((l) => l.error === 'qty')) errors.push('qty');
+  if (lines.some((l) => l.error === 'slot')) errors.push('slot');
   if (lines.some((l) => l.error === 'stock')) errors.push('stock');
   if (disc === null || discount > subtotal) errors.push('discount');
-  return { lines, subtotal, discount, shipping, total, vat: Math.round((total * 15) / 115), weightKg, zone, errors };
+  return { lines, subtotal, discount, shipping, total, vat: Math.round((total * 15) / 115), weightKg, zone, errors, ships };
 }
 
 /**
@@ -561,11 +611,11 @@ export function manualQuote(d: ManualDraft, options: SkuOption[], zones: Zone[],
  * warehouse where possible), payment as chosen. A payment link leaves it unpaid (simulated; real links need a server).
  */
 export function createManual(
-  d: ManualDraft, book: { orders: Order[]; levels: Level[]; customers: Customer[] }, options: SkuOption[], zones: Zone[], who: Actor, now: number,
-): { order?: Order; levels: Level[]; customers: Customer[]; errors: DraftError[] } {
+  d: ManualDraft, book: { orders: Order[]; levels: Level[]; customers: Customer[]; /** Needed for codes and bookings. */ products?: Product[] }, options: SkuOption[], zones: Zone[], who: Actor, now: number,
+): { order?: Order; levels: Level[]; customers: Customer[]; errors: DraftError[]; /** Products with codes given and booking places taken. */ products?: Product[]; /** Codes the pool could not cover. */ short?: number } {
   const q = manualQuote(d, options, zones, book.customers);
   if (q.errors.length) return { levels: book.levels, customers: book.customers, errors: q.errors };
-  const city = CITIES_LIST.find((c) => c.en === d.city)!;
+  const city = CITIES_LIST.find((c) => c.en === d.city) ?? { ar: '', en: '' };
   let customers = book.customers;
   let customer = customers.find((c) => c.id === d.customerId);
   if (!customer) {
@@ -573,25 +623,48 @@ export function createManual(
     customers = m.customers; customer = m.customer;
   }
   let levels = book.levels;
-  const items = q.lines.map((l) => {
+  // Lines that need no shipping hold no stock; a bundle holds each component and lists it under the bundle at no price.
+  const items = q.lines.flatMap((l) => {
+    if (l.opt.noShip) return [{ name: l.opt.name, variant: l.slot ? { ar: `${l.slot.date} ${l.slot.time}`, en: `${l.slot.date} ${l.slot.time}` } : l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, noShip: l.opt.noShip }];
+    if (l.opt.bundle) {
+      const parts = l.opt.bundle.map((b) => {
+        const r = reserve(levels, b.sku, l.qty * b.qty);
+        levels = r.levels;
+        const own = options.find((o) => o.sku === b.sku);
+        return { name: own?.name ?? { ar: b.sku, en: b.sku }, variant: { ar: `ضمن «${l.opt.name.ar}»`, en: `Part of “${l.opt.name.en}”` }, qty: l.qty * b.qty, unit: 0, sku: b.sku, reserved: r.picks };
+      });
+      return [{ name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, noShip: undefined, reserved: {} }, ...parts];
+    }
     const r = reserve(levels, l.opt.sku, l.qty);
     levels = r.levels;
-    return { name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, reserved: r.picks };
-  });
+    return [{ name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, reserved: r.picks }];
+  }).map(({ noShip, ...it }) => (noShip ? { ...it, noShip } : it));
   const paid = d.pay !== 'link';
   const ref = nextOrderRef(book.orders);
+  // Codes are given when the order is paid; booking places are taken at once (the slot is promised).
+  let products = book.products;
+  let short = 0;
+  const extras: OrderExtras = {};
+  const bookings = q.lines.filter((l) => l.slot).map((l) => ({ productId: l.opt.productId, sku: l.opt.sku, date: l.slot!.date, time: l.slot!.time, qty: l.qty }));
+  if (bookings.length) { extras.bookings = bookings.map(({ productId: _p, ...b }) => b); if (products) products = bookSlots(products, bookings); }
+  const codeLines = q.lines.filter((l) => l.opt.noShip === 'code').map((l) => ({ productId: l.opt.productId, sku: l.opt.sku, qty: l.qty }));
+  if (codeLines.length && paid && products) { const g = assignCodes(products, codeLines, ref); products = g.products; short = g.short; extras.codes = g.codes; }
+  const downloads = q.lines.filter((l) => l.opt.noShip === 'digital').map((l) => { const f = book.products?.find((p) => p.id === l.opt.productId)?.spec?.file; return f ? { sku: l.opt.sku, file: f.name, limit: f.limit, expiryDays: f.expiryDays } : null; }).filter((x): x is NonNullable<typeof x> => !!x);
+  if (downloads.length) extras.downloads = downloads;
+  const nothingShips = !q.ships;
   let order: Order = {
-    ref, customer: customer.name, city, hoursAgo: 0, pay: paid ? 'paid' : 'failed', ful: 'none', ship: 'none', fee: q.shipping, items,
+    ref, customer: customer.name, city, hoursAgo: 0, pay: paid ? 'paid' : 'failed', ful: paid && nothingShips ? 'done' : 'none', ship: 'none', fee: q.shipping, items,
     log: [{ when: 'now', who: 'you', kind: 'created', actor: who.name, role: who.role, at: now }],
     confirmed: true, channel: 'online', fulfilments: [], refunds: [], slips: 0, settled: false, customerId: customer.id,
     discount: q.discount || undefined, placedAt: now, manual: { pay: d.pay },
     ...(d.pay === 'cod' ? { payment: { method: 'cod' as const, state: 'cod_due' as const } } : {}),
     contact: { phone: d.customerId ? customer.phone : normDigits(d.newPhone).replace(/[\s-]/g, ''), email: (d.customerId ? customer.email : d.newEmail.trim()) || undefined },
-    address: { name: customer.name.ar, line: d.address.trim(), city, notes: d.addressNote.trim() || undefined },
+    ...(nothingShips ? {} : { address: { name: customer.name.ar, line: d.address.trim(), city, notes: d.addressNote.trim() || undefined } }),
     customerNote: d.customerNote.trim() || undefined,
+    ...(Object.keys(extras).length ? { extras } : {}),
   };
   order = act(order, 'manualCreated', who, now, { text: d.pay });
-  const held = items.reduce((s, it) => s + Object.values(it.reserved).reduce<number>((a, b) => a + (b ?? 0), 0), 0);
+  const held = items.reduce((s, it) => s + Object.values(('reserved' in it && it.reserved) || {}).reduce<number>((a, b) => a + (b ?? 0), 0), 0);
   if (held) order = act(order, 'stockReserved', who, now, { units: held });
-  return { order, levels, customers, errors: [] };
+  return { order, levels, customers, errors: [], ...(products ? { products, short } : {}) };
 }

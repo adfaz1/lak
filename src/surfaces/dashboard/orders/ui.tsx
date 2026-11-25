@@ -9,7 +9,7 @@ import type { Channel, Ful, Order, Pay, Ship } from '../../merchant/domain';
 import { payView, type Actor, type PayView, type ReturnStage, type StockEffect } from '../../merchant/ops';
 import { applyStockEffects } from '../../merchant/inventory';
 import { Badge, buttonClass, cn, useTx, type Tone } from '../../../ds/ui';
-import { actorFor, ageOf, type ListView, type OpsIneligible, type PayMethodFilter, type Sort } from './model';
+import { actorFor, ageOf, deliveryOf, type ListView, type OpsIneligible, type PayMethodFilter, type Sort } from './model';
 
 /** Links inside this section. Always the rebuilt page, whatever the navigation registry says. */
 export const ohref = (path = '', query?: Record<string, string | undefined>) => link(`/dashboard/orders${path ? `/${path}` : ''}`, query);
@@ -92,9 +92,17 @@ export function PayBadge({ o }: { o: Order }) { const L = useLabels(); const v =
 export function FulBadge({ o }: { o: Order }) {
   const L = useLabels(); const tx = useTx();
   if (o.cancelled) return <Badge tone="gray">{tx('ملغى', 'Cancelled')}</Badge>;
+  // Nothing ships: done on payment (downloads, codes) or scheduled (services, bookings).
+  const d = deliveryOf(o);
+  if (o.pay !== 'failed' && o.ful === 'done' && (d === 'digital' || d === 'scheduled')) return <Badge tone={d === 'digital' ? 'green' : 'sky'}>{d === 'digital' ? tx('سُلّم رقميًا', 'Delivered digitally') : tx('مجدول', 'Scheduled')}</Badge>;
   return <Badge tone={o.pay === 'failed' ? 'gray' : FUL_TONE[o.ful]}>{L.ful(o.ful)}</Badge>;
 }
-export function ShipBadge({ o }: { o: Order }) { const L = useLabels(); return <Badge tone={SHIP_TONE[o.ship]}>{L.ship(o.ship)}</Badge>; }
+export function ShipBadge({ o }: { o: Order }) {
+  const L = useLabels(); const tx = useTx();
+  const d = deliveryOf(o);
+  if (d === 'digital' || d === 'scheduled') return <Badge tone="gray">{tx('لا يحتاج شحنًا', 'No shipping needed')}</Badge>;
+  return <Badge tone={SHIP_TONE[o.ship]}>{L.ship(o.ship)}</Badge>;
+}
 
 export function useAge() {
   const tx = useTx();

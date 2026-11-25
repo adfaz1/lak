@@ -5,6 +5,7 @@ import {
   refundable, refundedQty, shippingRefunded, total,
   type CarrierId, type L, type LocId, type Order, type Refund, type Ship,
 } from './domain';
+import { deliveryText, hasDigitalDelivery } from './catalog-extras';
 
 /* ---------- Actors and the activity log ---------- */
 
@@ -450,7 +451,9 @@ export type NoticeEvent =
   /** A custom sub-status the merchant marked «notify the customer» was set on the order. */
   | 'subStatus'
   /** A reply written by hand in the service inbox (dashboard/inbox). Never sent automatically; not in NOTICE_EVENTS. */
-  | 'caseReply';
+  | 'caseReply'
+  /** Codes and download links sent when an order with digital items is paid (catalog-extras). Automatic; not in NOTICE_EVENTS. */
+  | 'digitalDelivered';
 export const ORDER_NOTICES: NoticeEvent[] = ['placed', 'paid', 'payFailed', 'ready', 'shipped', 'delivered', 'cancelled', 'refunded'];
 export const RETURN_NOTICES: NoticeEvent[] = ['returnRequested', 'returnApproved', 'returnRejected', 'returnReceived'];
 export const MANUAL_NOTICES: NoticeEvent[] = ['payLink', 'payReminder', 'invoice'];
@@ -460,7 +463,8 @@ export const NOTICE_EVENTS: NoticeEvent[] = [...ORDER_NOTICES, ...RETURN_NOTICES
 export type NoticeChannel = 'email' | 'sms' | 'whatsapp';
 export const NOTICE_CHANNELS: NoticeChannel[] = ['email', 'sms', 'whatsapp'];
 export const NOTICE_VARS = ['customer', 'order', 'total', 'refund', 'tracking', 'payLink', 'deadline', 'returnRef', 'store', 'status'] as const;
-export type NoticeVar = (typeof NOTICE_VARS)[number];
+/** `delivery` (codes and download links) is filled for the digital-delivery message only; it is not offered in the template editor. */
+export type NoticeVar = (typeof NOTICE_VARS)[number] | 'delivery';
 /** Variables a template should carry for its message to make sense. */
 export const NOTICE_NEEDS: Partial<Record<NoticeEvent, NoticeVar[]>> = { shipped: ['tracking'], payFailed: ['payLink'], payLink: ['payLink'], payReminder: ['payLink', 'deadline'], refunded: ['refund'], subStatus: ['status'] };
 
@@ -493,6 +497,7 @@ export const DEFAULT_TEMPLATES: Record<NoticeEvent, NoticeTemplate> = {
   invoice: { subject: { ar: 'فاتورة الطلب {order}', en: 'Invoice for {order}' }, body: { ar: 'فاتورتك الضريبية للطلب {order} ({total}) مرفقة. شكرًا لتسوقك من {store}.', en: 'Your tax invoice for {order} ({total}) is attached. Thank you for shopping with {store}.' } },
   subStatus: { subject: { ar: 'تحديث على طلبك {order}', en: 'Update on your order {order}' }, body: { ar: 'تحديث على طلبك {order}: {status}. {store}', en: 'Update on your order {order}: {status}. {store}' } },
   caseReply: { subject: { ar: 'بخصوص طلبك {order}', en: 'About your order {order}' }, body: { ar: '{customer}', en: '{customer}' } },
+  digitalDelivered: { subject: { ar: 'مشترياتك الرقمية من الطلب {order}', en: 'Your digital items from order {order}' }, body: { ar: '{customer}، هذه مشترياتك من الطلب {order}: {delivery}', en: '{customer}, here are your items from order {order}: {delivery}' } },
 };
 export function noticeFixture(): NoticeConfig {
   return {
@@ -500,6 +505,7 @@ export function noticeFixture(): NoticeConfig {
       placed: ch(true, true), paid: ch(true, false), payFailed: ch(true, true), ready: ch(false, false), shipped: ch(true, true, true), delivered: ch(false, true),
       cancelled: ch(true, true), refunded: ch(true, false), returnRequested: ch(true, false), returnApproved: ch(true, true), returnRejected: ch(true, false), returnReceived: ch(true, false),
       payLink: ch(false, true, true), payReminder: ch(false, true), invoice: ch(true, false), subStatus: ch(false, true), caseReply: ch(false, false),
+      digitalDelivered: ch(true, true),
     },
     templates: DEFAULT_TEMPLATES, defaultLang: 'ar', simFail: null,
   };
@@ -549,7 +555,7 @@ export function noticeVars(o: Order, ctx: NoticeCtx, lang: 'ar' | 'en', extra: N
     customer: lang === 'ar' ? o.customer.ar.split(' ')[0] : o.customer.en.split(' ')[0],
     order: `#${o.ref}`, total: money(total(o), lang), refund: money(lastRefund?.amount ?? refundableNow(o), lang),
     tracking: `${ctx.trackBase}${o.ref}${parcel?.tracking ? `?t=${parcel.tracking}` : ''}`, payLink: payLinkOf(o), deadline: fmt.format(payDeadline(o, ctx.now)),
-    returnRef: [...(o.returns ?? [])].reverse()[0]?.id ?? '', store: ctx.store, status: o.sub?.name[lang] ?? '', ...extra,
+    returnRef: [...(o.returns ?? [])].reverse()[0]?.id ?? '', store: ctx.store, status: o.sub?.name[lang] ?? '', delivery: deliveryText(o.extras, o.ref, lang), ...extra,
   };
 }
 
@@ -568,10 +574,13 @@ export function noticeEvents(before: Order | undefined, after: Order): { event: 
   const pv = payView(after);
   if (!before) {
     out.push({ event: pv === 'failed' ? 'payFailed' : 'placed' });
+    if (pv === 'paid' && hasDigitalDelivery(after.extras)) out.push({ event: 'digitalDelivered' });
     return out;
   }
   const was = payView(before);
   if (was !== 'paid' && pv === 'paid' && !after.cancelled) out.push({ event: 'paid' });
+  // Codes and download links go out once, when the order is first paid (or when codes are given to an already-paid order).
+  if (!after.cancelled && pv === 'paid' && hasDigitalDelivery(after.extras) && (was !== 'paid' || !hasDigitalDelivery(before.extras))) out.push({ event: 'digitalDelivered' });
   if (was !== 'failed' && pv === 'failed' && !after.cancelled) out.push({ event: 'payFailed' });
   const labelled = (o: Order) => (o.fulfilments.length ? o.fulfilments.filter((f) => !f.voided).length : o.ship !== 'none' ? 1 : 0);
   if (!after.cancelled && labelled(after) > labelled(before) && after.ship !== 'transit' && after.ship !== 'delivered') out.push({ event: 'ready' });

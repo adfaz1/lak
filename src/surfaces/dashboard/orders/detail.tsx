@@ -2,7 +2,7 @@
 import { useState, type ReactNode } from 'react';
 import {
   AlarmClock, Ban, CheckCircle2, Copy, CreditCard, ExternalLink, FileText, Gift, Hourglass, Mail, MapPin, MessageSquare, MoreHorizontal, PackageCheck, PackageOpen,
-  Phone, Printer, RotateCcw, SearchX, StickyNote, Tag, Truck, Lock, Boxes, UserRound, X,
+  Phone, Printer, RotateCcw, SearchX, StickyNote, Tag, Truck, Lock, Boxes, UserRound, X, CalendarClock,
 } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { link, navigate, type Route } from '../../../core/router';
@@ -17,7 +17,7 @@ import { Input, PageHeader, Simulated, useToast } from '../../../ds/kit';
 import { Avatar, Badge, Button, Card, CardHeader, EmptyState, ErrorState, IconButton, InfoHint, LinkButton, Money, ProductImage, Ref, Skeleton, cn, toneDot, useTx, type Tone } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { setDashState, useDashState } from '../review';
-import { canRefundOrder, contactOf, customerOrderCount, lineViews, moneyBreakdown, nextAction, orderPerms, readQuery, toParams, type Next } from './model';
+import { canRefundOrder, contactOf, customerOrderCount, deliveryOf, lineViews, moneyBreakdown, nextAction, orderPerms, readQuery, toParams, type Next } from './model';
 import { FulBadge, Menu, MenuButtonLabel, MenuItem, MenuNote, PayBadge, ReviewOnly, Row, ShipBadge, SHIP_TONE, ohref, saveOrder, useActor, useAge, useLabels, useRoleLabel } from './ui';
 import { FulfilModal } from './fulfil';
 import { ContactModal, RefundModal } from './refund';
@@ -97,7 +97,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
     <Menu label={tx('إجراءات أخرى', 'More actions')} up={up} button={<MenuButtonLabel icon={<MoreHorizontal className="size-4" aria-hidden="true" />}>{!compact && tx('المزيد', 'More')}</MenuButtonLabel>}>
       {(close) => <>
         {o.pay !== 'failed' && <MenuItem icon={<FileText className="size-4" />} onClick={() => { close(); navigate(printHref('invoice', [o.ref])); }}>{tx('اطبع الفاتورة الضريبية', 'Print tax invoice')}</MenuItem>}
-        {o.pay !== 'failed' && !o.cancelled && <MenuItem icon={<Printer className="size-4" />} onClick={() => { close(); navigate(printHref('slip', [o.ref])); }}>{tx('اطبع قائمة التعبئة', 'Print packing slip')}</MenuItem>}
+        {o.pay !== 'failed' && !o.cancelled && (deliveryOf(o) === 'ship' || deliveryOf(o) === 'mixed') && <MenuItem icon={<Printer className="size-4" />} onClick={() => { close(); navigate(printHref('slip', [o.ref])); }}>{tx('اطبع قائمة التعبئة', 'Print packing slip')}</MenuItem>}
         {o.ship !== 'none' && !o.cancelled && <MenuItem icon={<Printer className="size-4" />} onClick={() => { close(); navigate(printHref('label', [o.ref])); }}>{tx('اطبع ملصق الشحن', 'Print shipping label')}</MenuItem>}
         {perms.fulfil && next.kind !== 'ship' && o.fulfilments.some((_, i) => parcelShip(o, i) === 'label') && <MenuItem icon={<Truck className="size-4" />} onClick={() => { close(); setDialog('ship'); }}>{tx('سُلّم للناقل', 'Mark as shipped')}</MenuItem>}
         {perms.fulfil && next.kind !== 'deliver' && o.fulfilments.some((_, i) => parcelShip(o, i) === 'transit') && <MenuItem icon={<CheckCircle2 className="size-4" />} onClick={() => { close(); setDialog('deliver'); }}>{tx('سُلّم للعميل', 'Mark as delivered')}</MenuItem>}
@@ -171,7 +171,8 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
                       <p className="text-xs text-muted">{it.variant && <>{it.variant[lang]} · </>}<Ref>{it.sku}</Ref></p>
                       {(lv.stock.length > 0 || lv.fulfilled > 0 || lv.refunded > 0 || held.length > 0) && (
                         <div className="mt-2 flex flex-wrap gap-1.5">
-                          {lv.fulfilled > 0 && <Badge tone={lv.remaining === 0 ? 'green' : 'amber'}>{tx(`مجهّز ${lv.fulfilled} من ${it.qty}`, `${lv.fulfilled} of ${it.qty} fulfilled`)}</Badge>}
+                          {it.noShip && <Badge tone={o.pay === 'failed' ? 'gray' : it.noShip === 'service' || it.noShip === 'booking' ? 'sky' : 'green'}>{it.noShip === 'service' || it.noShip === 'booking' ? tx('مجدول · بلا شحن', 'Scheduled · no shipping') : o.pay === 'failed' ? tx('يُرسل بالبريد بعد الدفع', 'Emailed after payment') : tx('أُرسل بالبريد · بلا شحن', 'Emailed · no shipping')}</Badge>}
+                          {lv.fulfilled > 0 && !it.noShip && <Badge tone={lv.remaining === 0 ? 'green' : 'amber'}>{tx(`مجهّز ${lv.fulfilled} من ${it.qty}`, `${lv.fulfilled} of ${it.qty} fulfilled`)}</Badge>}
                           {lv.refunded > 0 && <Badge tone="gray">{tx(`مسترد ${lv.refunded}`, `${lv.refunded} refunded`)}</Badge>}
                           {held.map(([loc, n]) => <Badge key={`h${loc}`} tone="brand" icon={<Lock className="size-3" aria-hidden="true" />}>{tx(`محجوز ${n} · ${LOCATIONS[loc].ar}`, `${n} held · ${LOCATIONS[loc].en}`)}</Badge>)}
                           {lv.stock.map((s) => <Badge key={s.loc} tone={s.n ? 'sky' : 'gray'} icon={<MapPin className="size-3" aria-hidden="true" />}>{LOCATIONS[s.loc][lang]} <b className="tabular-nums">{s.n}</b></Badge>)}
@@ -429,6 +430,8 @@ function NextCard({ o, next, allowed, onDecline }: { o: Order; next: Next; allow
     labelIssued: ['sky', <Printer className="size-5" />, tx('صدر الملصق: سلّم الطرد للناقل', 'Label issued: hand the parcel to the carrier'), tx('صدور الملصق لا يعني استلام الناقل للطرد.', 'An issued label does not mean the carrier has collected it.')],
     inTransit: ['sky', <Truck className="size-5" />, tx('في الطريق مع الناقل', 'On its way with the carrier'), tx('سجّل التسليم إن كان الناقل غير مربوط.', 'Mark delivered if the carrier is not connected.')],
     delivered: ['green', <CheckCircle2 className="size-5" />, tx('سُلّم للعميل', 'Delivered'), tx('لا شيء مطلوب منك.', 'Nothing needed from you.')],
+    digital: ['green', <CheckCircle2 className="size-5" />, tx('سُلّم رقميًا عند الدفع', 'Delivered digitally on payment'), tx('الأكواد وروابط التنزيل أُرسلت للعميل (محاكاة)؛ تجدها في رسائل الطلب. لا شحنة.', 'Codes and download links were sent to the customer (simulated); see the order’s messages. No shipment.')],
+    scheduled: ['sky', <CalendarClock className="size-5" />, tx('مجدول: لا يحتاج شحنًا', 'Scheduled: no shipping needed'), tx('خدمة أو حجز يتم في موعده. الموعد في تفاصيل الطلب أدناه.', 'A service or booking that happens at its time. The date is in the order details below.')],
   };
   const [tone, icon, title, hint] = T[next.reason];
   const TINT: Record<Tone, string> = { red: 'bg-red-500/10 text-red-600 dark:text-red-400', brand: 'bg-brand-500/10 text-brand-600 dark:text-brand-300', amber: 'bg-amber-500/12 text-amber-700 dark:text-amber-300', sky: 'bg-sky-500/10 text-sky-700 dark:text-sky-300', green: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400', gray: 'bg-surface-2 text-muted' };

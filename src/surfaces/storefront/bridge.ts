@@ -11,7 +11,7 @@ import { SOCIAL_IDS, normPolicy, type Customer, type Policy, type Provider, type
 import { isServed, type LinkContext, type StorePage, type StoreSeo } from '../dashboard/storefront/content';
 import type { BankDetails, Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
-import { hiddenOnline, openSlots, riyadhToday, slotKey, slotLeft, stockFor, storeX, traits, type CatalogX, type OrderExtras } from '../merchant/catalog-extras';
+import { hiddenOnline, noShipKind, openSlots, riyadhToday, slotKey, slotLeft, stockFor, storeX, traits, type CatalogX, type OrderExtras } from '../merchant/catalog-extras';
 import { quote, setupOf, warehouseFor, zoneForCity, type CartIn } from '../dashboard/settings/shipping-model';
 import type { Location } from '../merchant/domain';
 import type { ShippingSetup } from '../merchant/workspace';
@@ -187,16 +187,19 @@ export function shipOptions(
   o: { now: number; goods?: number; cod?: boolean; locations?: Location[] },
 ): ShipMethod[] {
   const c = cityById(city);
-  if (!c) return [];
-  // Nothing to deliver (downloads, codes, services, bookings): one free "no delivery" option.
+  // Nothing to deliver (downloads, codes, services, bookings): one free "no delivery" option; no city is asked for.
   if (lines.length && lines.every((l) => l.ships === false)) {
-    return [{ id: 'none', name: { ar: 'لا يحتاج توصيلًا', en: 'No delivery needed' }, cost: 0, freeFrom: null, zones: [c.zone], transit: { [c.zone]: [0, 0] }, handling: 0, codOk: false, note: { ar: 'يصلك بالبريد أو في موعدك', en: 'By email or at your appointment' } }];
+    const zones = c ? [c.zone] : [0, 1, 2];
+    return [{ id: 'none', name: { ar: 'لا يحتاج توصيلًا', en: 'No delivery needed' }, cost: 0, freeFrom: null, zones, transit: Object.fromEntries(zones.map((z) => [z, [0, 0]])), handling: 0, codOk: false, note: { ar: 'يصلك بالبريد أو في موعدك', en: 'By email or at your appointment' } }];
   }
+  if (!c) return [];
+  // A mixed bag: weight, categories and the perishable rule come from the items that ship; the goods value is the whole bag.
+  const shipping = lines.filter((l) => l.ships !== false);
   // Perishable food travels only chilled, same day, or is picked up.
-  const perishable = lines.some((l) => l.perishable);
+  const perishable = shipping.some((l) => l.perishable);
   const cart: CartIn = {
-    goods: o.goods ?? lines.reduce((s, l) => s + l.amount, 0), weightG: cartWeight(lines),
-    cats: [...new Set(lines.map((l) => l.cat))], productIds: [...new Set(lines.map((l) => l.productId))],
+    goods: o.goods ?? lines.reduce((s, l) => s + l.amount, 0), weightG: cartWeight(shipping),
+    cats: [...new Set(shipping.map((l) => l.cat))], productIds: [...new Set(shipping.map((l) => l.productId))],
   };
   const q = quote(setupOf(cfg.shipping), cfg.zones, { country: 'SA', city: c.id }, cart, { now: o.now, cod: o.cod, locations: o.locations });
   return q.offers.filter((x) => !perishable || x.cat === 'cold' || x.cat === 'sameday' || x.cat === 'pickup').map((x) => {
@@ -352,7 +355,7 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
   const city = cityById(after.address?.city);
   const cityL: L = city ? { ar: `${city.name.ar}${after.address?.district ? `، ${districtL(after.address.city, after.address.district).ar}` : ''}`, en: `${city.name.en}${after.address?.district ? `, ${after.address.district}` : ''}` } : { ar: '', en: '' };
   if (!existing) {
-    const m = matchCustomer(customers, { id: after.customerId, name: after.address?.name ?? '', phone: after.contact.phone, email: after.contact.email, city: city?.name ?? { ar: '', en: '' } }, riyadhDate(ctx.now));
+    const m = matchCustomer(customers, { id: after.customerId, name: after.address?.name ?? after.contact.name ?? '', phone: after.contact.phone, email: after.contact.email, city: city?.name ?? { ar: '', en: '' } }, riyadhDate(ctx.now));
     customers = m.customers;
     customerId = m.customer.id;
     customerName = m.customer.name;
@@ -389,7 +392,10 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
     const pk = line.sku && (part || !p?.x?.bundle) ? picks[line.sku] : undefined;
     const prev = existing?.items[i];
     const slot = p?.x?.type === 'booking' ? ctx.products.find((x) => x.id === p.id)?.variants.find((v) => v.id === line.vid)?.size ?? slotOf(line.vid) : undefined;
+    // Downloads, codes, services and bookings never go through a warehouse or a carrier.
+    const noShip = part || !p ? undefined : noShipKind(p.x?.type) ?? (p.digital ? 'digital' as const : undefined);
     return {
+      ...(noShip ? { noShip } : {}),
       ...(variant ? { variant } : slot ? { variant: { ar: slot, en: slot } } : {}),
       name: p?.name ?? line.name ?? prev?.name ?? { ar: line.sku ?? '', en: line.sku ?? '' }, qty: line.qty, unit: line.unit, sku: line.sku ?? '',
       // Stock per warehouse is only listed when the line was split, so the dashboard offers per-location fulfilment.
@@ -405,8 +411,11 @@ export function syncOrder(book: Book, before: Order | undefined, after: Order, c
     confirmed: false, channel: 'online', fulfilments: [], refunds: [], slips: 0, settled: false, placedAt: after.at,
   };
   const log = existing && existing.pay !== pay && pay === 'paid' ? [...existing.log, { when: 'now' as const, who: 'system' as const, kind: 'created' as const }] : base.log;
+  // Nothing to ship: paid means done (downloads and codes are sent, services and bookings are scheduled); no shipment step.
+  const nothingShips = items.length > 0 && items.every((it) => it.noShip);
   const order: MOrder = {
     ...base, pay, items, log, customerId,
+    ...(becamePaid && nothingShips ? { ful: 'done' as const, confirmed: true } : {}),
     fee: after.totals.shipping + after.totals.codFee, discount: after.totals.discount || undefined, coupon: after.coupon,
     payment: { method: after.pay.method, state: paymentState(after.pay.state) },
     // Contact, address and notes for the dashboard (shown by role there).

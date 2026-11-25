@@ -4,7 +4,7 @@
    attempts, address, returns). Simulated state for the tab session; "Reset data" clears it. */
 import { createStore } from '../../core/store';
 import { catalogXStore, couponsStore, customersStore, financeStore, levelsStore, locationsStore, ordersStore as merchantOrders, productsStore, settingsStore, wishEventsStore } from '../merchant/stores';
-import { assignCodes, bookSlots, campaignTake, type OrderExtras } from '../merchant/catalog-extras';
+import { assignCodes, bagNeeds, bookSlots, campaignTake, type OrderExtras } from '../merchant/catalog-extras';
 import { addWish } from '../merchant/demand';
 import { CUSTOMER as CUSTOMER_ACTOR, cancelBlock, cancelOrder, requestCancel } from '../merchant/ops';
 import { applyStockEffects } from '../merchant/inventory';
@@ -107,7 +107,9 @@ export function buildDraft(): Draft {
   const lines = pricedLines(cart, products);
   const c = couponResult(cart, products);
   const signed = co.mode === 'account' && acc.signedIn;
-  const city = co.addr.city as CityId | undefined;
+  // Nothing ships (downloads, codes, services, bookings): no address and no city, only contact details.
+  const needs = bagNeeds(lines);
+  const city = needs.address ? (co.addr.city as CityId | undefined) : undefined;
   // The delivery method the shopper picked among those the merchant's shipping setup offers for this city and bag.
   const discount = c?.status === 'valid' ? c.discount : 0;
   const opts = shipOptions(cfg, city, lines, { now: Date.now(), goods: lines.reduce((s, l) => s + l.amount, 0) - discount, cod: co.method === 'cod', locations: locationsStore.get() });
@@ -115,7 +117,8 @@ export function buildDraft(): Draft {
   return {
     sessionId: co.sessionId, lines, coupon: c?.status === 'valid' ? c.code : undefined, discount: c?.status === 'valid' ? c.discount : 0,
     freeShip: c?.status === 'valid' && c.freeShip, ship: chosen?.id ?? co.ship, city, method: co.method,
-    address: co.addr as Address, contact: { phone: co.addr.phone ?? '', email: co.email || undefined },
+    address: needs.address ? (co.addr as Address) : undefined,
+    contact: { phone: co.addr.phone ?? '', email: co.email || undefined, ...(needs.address ? {} : { name: co.addr.name?.trim() || undefined }) },
     customerId: signed ? CUSTOMER.id : undefined, codFee: cfg.codFee,
     shipMethod: chosen,
     ref: nextStoreRef(merchantOrders.get(), ordersStore.get()),

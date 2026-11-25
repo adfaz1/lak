@@ -221,13 +221,13 @@ export function validateCart(cart: Cart, products: Product[]): LineIssue[] {
   return out;
 }
 
-export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number; sku?: string; weight?: number; /** Needs delivery (false for downloads, codes, services, bookings). */ ships?: boolean; perishable?: boolean }
+export interface PricedLine { vid: string; productId: string; cat: CatId; qty: number; unit: number; amount: number; sku?: string; weight?: number; /** Needs delivery (false for downloads, codes, services, bookings). */ ships?: boolean; perishable?: boolean; /** Merchant product type (catalog-extras). */ type?: import('../merchant/catalog').ProductType }
 
 export function pricedLines(cart: Cart, products: Product[]): PricedLine[] {
   return cart.lines.flatMap((l) => {
     const f = variantById(products, l.vid);
     if (!f) return [];
-    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty, sku: f.variant.sku, weight: f.product.weight, ...(f.product.x ? { ships: f.product.x.ships, perishable: f.product.x.perishable } : {}) }];
+    return [{ vid: l.vid, productId: f.product.id, cat: f.product.cat, qty: l.qty, unit: f.variant.price, amount: f.variant.price * l.qty, sku: f.variant.sku, weight: f.product.weight, ...(f.product.x ? { ships: f.product.x.ships, perishable: f.product.x.perishable, type: f.product.x.type } : {}) }];
   });
 }
 
@@ -434,7 +434,8 @@ export interface Order {
   key: string;
   at: number;
   customerId?: string;
-  contact: { email?: string; phone: string };
+  /** `name`: the shopper's name when the order has no delivery address (nothing in the bag ships). */
+  contact: { email?: string; phone: string; name?: string };
   lines: OrderLine[];
   coupon?: string;
   totals: Totals;
@@ -464,7 +465,7 @@ export interface Draft {
   city?: CityId;
   method: PayMethod;
   address?: Address;
-  contact: { email?: string; phone: string };
+  contact: { email?: string; phone: string; name?: string };
   customerId?: string;
   /** The delivery method offered for this city (live store); falls back to the rule fixtures by id. */
   shipMethod?: ShipMethod;
@@ -602,5 +603,20 @@ export function validateAddress(a: Partial<Address>, contact?: { email?: string 
   if (!a.building?.trim()) e.building = 'required';
   if (a.nationalCode?.trim() && !NATIONAL_RE.test(a.nationalCode.trim().toUpperCase())) e.nationalCode = 'format';
   if (contact?.email?.trim() && !EMAIL_RE.test(contact.email.trim())) e.email = 'format';
+  return e;
+}
+
+/**
+ * Contact details only, for a bag where nothing ships (downloads, codes, services, bookings): name and mobile, and an
+ * email when a download or code is sent by email. Same error keys as the address form.
+ */
+export function validateContact(a: Partial<Address>, contact: { email?: string; needEmail?: boolean }): AddrErr {
+  const e: AddrErr = {};
+  if (!a.name?.trim()) e.name = 'required';
+  if (!a.phone?.trim()) e.phone = 'required';
+  else if (!PHONE_RE.test(cleanPhone(a.phone))) e.phone = 'format';
+  const email = contact.email?.trim() ?? '';
+  if (!email && contact.needEmail) e.email = 'required';
+  else if (email && !EMAIL_RE.test(email)) e.email = 'format';
   return e;
 }

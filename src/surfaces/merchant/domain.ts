@@ -101,6 +101,8 @@ export interface Item {
   reserved?: Partial<Record<LocId, number>>;
   /** Variant label (size/colour) when the line is a variant. */
   variant?: L;
+  /** Needs no shipment (download, code, service, booking: catalog-extras.ts). Counts as fulfilled; never picked from a warehouse. */
+  noShip?: 'digital' | 'code' | 'service' | 'booking';
 }
 export interface Fulfilment {
   ref: string; loc: LocId; qty: number[];
@@ -389,7 +391,7 @@ export function runBulk(all: Order[], refs: string[], action: BulkAction, fails:
 
 /* ---------- Partial, multi-location fulfilment (QA03) ---------- */
 
-export const fulfilledQty = (o: Order, idx: number) => o.fulfilments.reduce((s, f) => s + (f.qty[idx] ?? 0), 0);
+export const fulfilledQty = (o: Order, idx: number) => (o.items[idx]?.noShip ? o.items[idx].qty : o.fulfilments.reduce((s, f) => s + (f.qty[idx] ?? 0), 0));
 export const remainingQty = (o: Order, idx: number) => o.items[idx].qty - fulfilledQty(o, idx);
 export const canFulfilPartial = (o: Order) => o.pay === 'paid' && o.ful !== 'done' && !o.cancelled;
 export const nextFulfilmentRef = (o: Order) => `SIM-${o.ref}-${o.fulfilments.length + 1}`;
