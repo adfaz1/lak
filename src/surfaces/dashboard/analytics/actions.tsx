@@ -91,6 +91,7 @@ export function SearchFixModal({ term, onClose }: { term: string; onClose: () =>
             </Select>
           )}
         </Field>
+        <p className="mt-2 text-xs text-muted">{tx('يُحفظ في «روابط مخصصة» ← «من بحث المتجر»، وتعدّله أو تحذفه من هناك.', 'Saved in Custom URLs → “From store search”, where you can edit or delete it.')} <a className="font-semibold text-brand-700 hover:underline dark:text-brand-300" href={link('/dashboard/storefront/redirects', { src: 'search' })}>{tx('كل توجيهات البحث', 'All search redirects')}</a></p>
         {name && (
           <div className="mt-3 rounded-xl bg-surface-2 p-3">
             <p className="text-xs font-semibold text-muted">{tx('معاينة ما يراه المتسوق', 'What the shopper sees')}</p>

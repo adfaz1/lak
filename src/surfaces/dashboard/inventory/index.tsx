@@ -1,7 +1,7 @@
 // Inventory section (`#/dashboard/inventory`): levels per SKU and warehouse, low stock, transfers, stock log.
 // Every rule comes from merchant/inventory.ts through ./model; this file is layout and interaction.
 import { lazy, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Boxes, SearchX, SlidersHorizontal, ArrowLeftRight, Truck, History, Plus, CheckCircle2, ArrowLeft, Warehouse, Download, Upload, BellRing, Gauge, Layers } from 'lucide-react';
+import { Boxes, SearchX, SlidersHorizontal, ArrowLeftRight, Truck, History, Plus, CheckCircle2, ArrowLeft, Warehouse, Download, Upload, BellRing, Gauge, Layers, KeyRound, CalendarClock, PackageOpen, Mail, Hand } from 'lucide-react';
 import { replace, type Route } from '../../../core/router';
 import { useLang } from '../../../core/lang';
 import { useReviewMode } from '../../../core/review';
@@ -18,9 +18,10 @@ import { paginate } from '../products/model';
 import { NoAccess, ReviewTools, downloadText, ihref, roleBadge, useRole } from '../products/common';
 import { SkuCell, T_TONE, useInvNames } from './parts';
 import {
-  STATE_FILTERS, adjustPreview, coverFor, infoFor, isOpen, levelRows, levelsCsv, logRows, nextAdjId, readCols, readLoc, readStateFilter, readTab, skuInfo, tabCounts, units,
-  type LevelCols, type LevelRow, type SkuInfo,
+  STATE_FILTERS, adjustPreview, coverFor, infoFor, isOpen, levelRows, levelsCsv, logRows, nextAdjId, readCols, readLoc, readStateFilter, readTab, skuInfo, tabCounts, typedRows, units,
+  type LevelCols, type LevelRow, type SkuInfo, type TypedRow,
 } from './model';
+import { riyadhToday } from '../../merchant/catalog-extras';
 import { CompositionBar, StateHead, StatesModal, useStateNames } from './states';
 
 const TransferDetail = lazy(() => import('./transfer'));
@@ -97,6 +98,7 @@ function InventoryHome({ route }: { route: Route }) {
         { href: ihref('', { ...query, tab: 'low' }), label: tx('منخفض', 'Low stock'), current: tab === 'low', count: counts.low },
         { href: ihref('', { tab: 'transfers' }), label: tx('التحويلات', 'Transfers'), current: tab === 'transfers', count: counts.transfers },
         { href: ihref('', { ...query, tab: 'log' }), label: tx('سجل الحركة', 'Stock log'), current: tab === 'log' },
+        { href: ihref('', { tab: 'types', q: query.q }), label: tx('أكواد وحجوزات وحزم', 'Codes, bookings & bundles'), current: tab === 'types', count: typedRows(empty ? [] : products, levels, riyadhToday()).length || undefined },
       ]} />
     </div>
   );
@@ -114,7 +116,17 @@ function InventoryHome({ route }: { route: Route }) {
   );
 
   let body: ReactNode;
-  if (tab === 'transfers') body = <TransferList transfers={transfers} info={info} canTransfer={canTransfer} />;
+  if (tab === 'types') {
+    const rows = typedRows(empty ? [] : products, levels, riyadhToday(), q);
+    body = <>
+      <div className="flex flex-wrap items-center gap-2 p-4 sm:px-5">
+        <div className="flex w-full sm:w-auto sm:flex-1 sm:max-w-xs"><SearchInput value={q} onChange={(v) => go({ q: v || undefined })} placeholder={tx('ابحث بالمنتج أو SKU', 'Search product or SKU')} /></div>
+        <InfoHint>{tx('هذه المنتجات لا تُخزَّن في المستودعات: الكود يُباع من مخزون الأكواد، والحجز من مقاعد المواعيد، والحزمة من أقل مكوّناتها، والتنزيل والخدمة بلا حد.', 'These products are not kept in warehouses: a code sells from its code pool, a booking from slot places, a bundle from its scarcest part; downloads and services have no limit.')}</InfoHint>
+      </div>
+      {rows.length === 0 ? (q ? noResults : <EmptyState icon={<KeyRound className="size-6" aria-hidden="true" />} title={tx('لا منتجات رقمية أو حجوزات أو حزم', 'No codes, bookings or bundles')} action={<LinkButton href={sectionHref('products', 'new')}>{tx('أضف منتجًا', 'Add a product')}</LinkButton>}>{tx('اختر النوع عند إضافة المنتج.', 'Pick the type when you add a product.')}</EmptyState>)
+        : <TypedTable rows={rows} />}
+    </>;
+  } else if (tab === 'transfers') body = <TransferList transfers={transfers} info={info} canTransfer={canTransfer} />;
   else if (tab === 'log') {
     const rows = logRows(log, info, { q, loc });
     const pg = paginate(rows, route.query.get('page'));
@@ -414,4 +426,38 @@ function AlertLog({ info }: { info: Map<string, SkuInfo> }) {
       {alerts.length > shown.length && <p className="px-4 pb-3 text-xs text-muted sm:px-5">{tx(`تنبيهات أقدم: ${alerts.length - shown.length}`, `Older alerts: ${alerts.length - shown.length}`)}</p>}
     </section>
   );
+}
+
+/** Products sold without warehouse stock: what limits each one, and where to change it. */
+function TypedTable({ rows }: { rows: TypedRow[] }) {
+  const tx = useTx();
+  const { lang } = useLang();
+  const day = (d: string) => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
+  const typeName = (t: TypedRow['type']) => ({ digital: tx('تنزيل رقمي', 'Download'), code: tx('كود أو بطاقة', 'Code or card'), service: tx('خدمة', 'Service'), booking: tx('حجز', 'Booking'), bundle: tx('حزمة', 'Bundle') })[t];
+  const typeIcon = (t: TypedRow['type']) => t === 'code' ? KeyRound : t === 'booking' ? CalendarClock : t === 'bundle' ? PackageOpen : t === 'digital' ? Mail : Hand;
+  const measure = (r: TypedRow): ReactNode => {
+    if (r.codes) return <span className="space-y-0.5"><span className={cn('block font-semibold tabular-nums', r.codes.left === 0 ? 'text-red-600 dark:text-red-400' : r.codes.left <= 3 ? 'text-amber-700 dark:text-amber-300' : 'text-fg')}>{tx(`أكواد متبقية ${r.codes.left}`, `${r.codes.left} codes left`)}</span><span className="block text-xs text-muted">{tx(`سُلّم ${r.codes.sold}`, `${r.codes.sold} delivered`)}</span></span>;
+    if (r.slots) return r.slots.length === 0 ? <span className="text-xs font-semibold text-red-600 dark:text-red-400">{tx('لا مواعيد مفتوحة', 'No open slots')}</span> : (
+      <span className="flex flex-wrap gap-1.5">{r.slots.slice(0, 4).map((x) => <Badge key={x.id} tone={x.left === 0 ? 'gray' : 'sky'}>{day(x.date)} <bdi dir="ltr">{x.time}</bdi> · <b className="tabular-nums">{x.left}/{x.cap}</b></Badge>)}{r.slots.length > 4 && <span className="text-xs text-muted">+{r.slots.length - 4}</span>}</span>
+    );
+    if (r.bundle) return (
+      <span className="space-y-1">
+        <span className={cn('block font-semibold tabular-nums', r.bundle.stock === 0 ? 'text-red-600 dark:text-red-400' : 'text-fg')}>{tx(`متاح ${r.bundle.stock} حزمة`, `${r.bundle.stock} bundles available`)}<InfoHint>{tx('محسوب من مكوّناتها: المكوّن الأقل يحدد العدد.', 'Worked out from its parts: the scarcest part sets the number.')}</InfoHint></span>
+        <span className="flex flex-wrap gap-1.5">{r.bundle.parts.map((x) => <a key={x.sku} href={ihref('', { q: x.sku })} className="inline-flex items-center gap-1 rounded-lg bg-surface-2 px-2 py-0.5 text-xs text-fg hover:underline"><Ref>{x.sku}</Ref> ×{x.qty} · <b className="tabular-nums">{x.available}</b></a>)}</span>
+      </span>
+    );
+    return <span className="text-xs text-muted">{tx('بلا مخزون: يُباع بلا حد', 'No stock: sells without a limit')}</span>;
+  };
+  const action = (r: TypedRow) => <LinkButton size="sm" variant="secondary" href={sectionHref('products', r.id)}>{r.type === 'code' ? tx('أضف أكوادًا', 'Add codes') : r.type === 'booking' ? tx('المواعيد', 'Slots') : r.type === 'bundle' ? tx('المكوّنات', 'Parts') : tx('افتح', 'Open')}</LinkButton>;
+  const cell = (r: TypedRow) => {
+    const Icon = typeIcon(r.type);
+    return <span className="flex items-center gap-3"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted" aria-hidden="true"><Icon className="size-4" /></span><span className="min-w-0"><span className="block truncate font-semibold text-fg">{r.name[lang]}</span><span className="block text-xs text-muted">{typeName(r.type)} · <Ref>{r.sku}</Ref>{!r.active && <> · {tx('غير نشط', 'Not active')}</>}</span></span></span>;
+  };
+  const columns: Column<TypedRow>[] = [
+    { key: 'p', header: tx('المنتج', 'Product'), cell, className: 'max-w-72' },
+    { key: 'm', header: tx('ما يحدّ البيع', 'What limits sales'), cell: measure },
+    { key: 'a', header: <span className="sr-only">{tx('إجراء', 'Action')}</span>, align: 'end', cell: action },
+  ];
+  return <DataTable label={tx('أكواد وحجوزات وحزم', 'Codes, bookings & bundles')} rows={rows} rowKey={(r) => r.id} columns={columns}
+    card={(r) => <div className="space-y-2">{cell(r)}<div>{measure(r)}</div><div>{action(r)}</div></div>} />;
 }

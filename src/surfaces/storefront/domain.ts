@@ -588,7 +588,8 @@ export function requestReturn(o: Order, r: Omit<ReturnRequest, 'id' | 'state' | 
 export const PHONE_RE = /^5\d{8}$/;
 export const NATIONAL_RE = /^[A-Z]{4}\d{4}$/;
 export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-export const cleanPhone = (s: string) => s.replace(/[\s-]/g, '').replace(/^(\+?966|0)/, '').replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660));
+// Arabic digits are read first, so «٠٥…» loses its leading zero like «05…».
+export const cleanPhone = (s: string) => s.replace(/[\u0660-\u0669]/g, (d) => String(d.charCodeAt(0) - 0x0660)).replace(/[\s-]/g, '').replace(/^(\+?966|0)/, '');
 
 export type AddrErr = Partial<Record<'name' | 'phone' | 'city' | 'district' | 'street' | 'building' | 'nationalCode' | 'email', 'required' | 'format'>>;
 

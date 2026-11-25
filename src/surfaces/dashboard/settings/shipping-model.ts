@@ -112,7 +112,8 @@ export function quote(setup: ShippingSetup, zones: Zone[], dest: Dest, cart: Car
   const hidden: Hidden[] = [];
   const notReady = abroad && o.products ? cart.productIds.filter((id) => {
     const p = o.products!.find((x) => x.id === id);
-    return p && p.type !== 'digital' && readiness(p, setup.intl[id]).pct < 100;
+    if (p?.type === 'bundle') return (p.spec?.bundle ?? []).some((b) => { const c = o.products!.find((x) => x.sku === b.sku || x.variants.some((v) => v.sku === b.sku)); return !!c && readiness(c, setup.intl[c.id]).pct < 100; });
+    return p && customsItem(p) && readiness(p, setup.intl[id]).pct < 100;
   }).length : 0;
 
   for (const m of setup.methods) {
@@ -214,6 +215,12 @@ export function addWorkDays(from: number, days: number): number {
 export const promiseDates = (o: Pick<Offer, 'handling' | 'transit'>, now: number) => ({ from: addWorkDays(now, o.handling + o.transit[0]), to: addWorkDays(now, o.handling + o.transit[1]) });
 
 /* ---------- International readiness ---------- */
+
+/**
+ * Products that cross customs as themselves: physical goods and food. Downloads, codes, services and bookings never
+ * ship; a bundle ships as its components, which are listed (and checked) on their own.
+ */
+export const customsItem = (p: Pick<Product, 'type'>) => (p.type ?? 'physical') === 'physical' || p.type === 'food';
 
 export type IntlField = 'hs' | 'weight' | 'origin' | 'descAr' | 'descEn';
 export const INTL_FIELDS: IntlField[] = ['hs', 'weight', 'origin', 'descAr', 'descEn'];
@@ -353,7 +360,7 @@ export function impact(before: ShippingSetup, after: ShippingSetup, zones: Zone[
 
 /** Header figures: methods on, rules on, products ready for international shipping. */
 export function summary(setup: ShippingSetup, products: Product[]) {
-  const physical = products.filter((p) => p.type !== 'digital' && p.status !== 'archived');
+  const physical = products.filter((p) => customsItem(p) && p.status !== 'archived');
   return {
     methodsOn: setup.methods.filter((m) => m.on).length,
     methods: setup.methods.length,

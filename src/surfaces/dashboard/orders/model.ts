@@ -8,7 +8,7 @@ import {
   type Pay, type Refund, type Ship, type View,
 } from '../../merchant/domain';
 import type { Customer, Zone } from '../../merchant/workspace';
-import { CITIES as CITIES_LIST, nextOrderRef } from '../../merchant/domain';
+import { CITIES as CITIES_LIST, nextOrderRef, type Item } from '../../merchant/domain';
 import { matchCustomer, reserve, zoneFor as zoneOf } from '../../storefront/bridge';
 import { shippingQuote as quoteZone } from '../settings/model';
 import type { Product } from '../../merchant/catalog';
@@ -624,7 +624,7 @@ export function createManual(
   }
   let levels = book.levels;
   // Lines that need no shipping hold no stock; a bundle holds each component and lists it under the bundle at no price.
-  const items = q.lines.flatMap((l) => {
+  const items = q.lines.flatMap((l): Item[] => {
     if (l.opt.noShip) return [{ name: l.opt.name, variant: l.slot ? { ar: `${l.slot.date} ${l.slot.time}`, en: `${l.slot.date} ${l.slot.time}` } : l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, noShip: l.opt.noShip }];
     if (l.opt.bundle) {
       const parts = l.opt.bundle.map((b) => {
@@ -633,12 +633,12 @@ export function createManual(
         const own = options.find((o) => o.sku === b.sku);
         return { name: own?.name ?? { ar: b.sku, en: b.sku }, variant: { ar: `ضمن «${l.opt.name.ar}»`, en: `Part of “${l.opt.name.en}”` }, qty: l.qty * b.qty, unit: 0, sku: b.sku, reserved: r.picks };
       });
-      return [{ name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, noShip: undefined, reserved: {} }, ...parts];
+      return [{ name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku }, ...parts];
     }
     const r = reserve(levels, l.opt.sku, l.qty);
     levels = r.levels;
     return [{ name: l.opt.name, variant: l.opt.variant, qty: l.qty, unit: l.opt.unit, sku: l.opt.sku, reserved: r.picks }];
-  }).map(({ noShip, ...it }) => (noShip ? { ...it, noShip } : it));
+  });
   const paid = d.pay !== 'link';
   const ref = nextOrderRef(book.orders);
   // Codes are given when the order is paid; booking places are taken at once (the slot is promised).
@@ -664,7 +664,7 @@ export function createManual(
     ...(Object.keys(extras).length ? { extras } : {}),
   };
   order = act(order, 'manualCreated', who, now, { text: d.pay });
-  const held = items.reduce((s, it) => s + Object.values(('reserved' in it && it.reserved) || {}).reduce<number>((a, b) => a + (b ?? 0), 0), 0);
+  const held = items.reduce((s, it) => s + Object.values(it.reserved ?? {}).reduce<number>((a, b) => a + (b ?? 0), 0), 0);
   if (held) order = act(order, 'stockReserved', who, now, { units: held });
   return { order, levels, customers, errors: [], ...(products ? { products, short } : {}) };
 }

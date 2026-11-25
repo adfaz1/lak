@@ -17,6 +17,7 @@ import { storeBase } from './content';
 import { useRCtx } from './redirect-ctx';
 import { redirectsStore } from './state';
 import { StoreTabs } from './nav';
+import { RedirectTabs, SearchRedirects } from './search-redirects';
 import {
   R_KINDS, applyImport, flatten, fromIssue, health, nextRedirectNum, normPath, parseCsv, targetIssue, targetPath, toCsv, trace, validHttps,
   type ImportRow, type RCtx, type RHealth, type RKind, type RTarget, type Redirect,
@@ -40,6 +41,8 @@ export default function RedirectsPage({ route }: { route: Route }) {
   const tx = useTx();
   const role = useRole();
   if (!canSee(role, 'storefront')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('المتجر الإلكتروني غير متاح لدورك', 'The online store is not available for your role')} /></div>;
+  // One list of redirects: old addresses, and search terms (the search report's «وجّه البحث» lands here too).
+  if (route.query.get('src') === 'search') return <SearchRedirects route={route} />;
   return <RedirectList route={route} />;
 }
 
@@ -120,6 +123,7 @@ function RedirectList({ route }: { route: Route }) {
   return (
     <div className="space-y-6">
       {header}
+      <RedirectTabs current="url" />
       {bad > 0 && !hf && <Alert tone="warn" title={tx(`${bad} تحويل لا يوصل العميل لوجهته`, `${bad} redirect${bad > 1 ? 's' : ''} don’t get shoppers where they should`)} action={<Button size="sm" variant="secondary" onClick={() => go({ health: counts('broken') ? 'broken' : 'loop', page: undefined })}>{tx('اعرضها', 'Show them')}</Button>}>
         {tx('منتج أُرشف أو صفحة أُخفيت بعد إنشاء التحويل. عدّل الوجهة أو أوقف التحويل.', 'A product was archived or a page hidden after the redirect was made. Change the target or turn the redirect off.')}</Alert>}
       <TestUrl list={all} ctx={ctx} base={storeBase(settings.domain)} />

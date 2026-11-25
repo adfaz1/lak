@@ -6,26 +6,29 @@
 //   incoming  = units in a sent transfer, not yet received; never sold automatically
 //   plus awaiting payment, unavailable, safety reserve and outgoing (merchant/inventory.ts "Full stock states")
 import { LOC_IDS, allLocations, type L, type LocId, type Order } from '../../merchant/domain';
-import { normaliseDigits, skusOf, variantText, type Product } from '../../merchant/catalog';
+import { normaliseDigits, skusOf, variantText, type Product, type ProductType } from '../../merchant/catalog';
+import { bundleParts, bundleStock, openSlots, slotLeft, traits } from '../../merchant/catalog-extras';
 import {
   MAX_THRESHOLD, available, breakdown, coverage, levelOf, lowStock, type Breakdown, type Coverage, type History, type Level, type LogReason, type StockLog, type Transfer, type TransferStatus,
 } from '../../merchant/inventory';
 
-export interface SkuInfo { productId: string | undefined; name: L; variant: L }
+/** `noStock`: the product's type keeps no warehouse stock (download, code, service, booking); its SKU is not listed in Levels. */
+export interface SkuInfo { productId: string | undefined; name: L; variant: L; noStock?: boolean }
 
 /** Product name and variant label for every SKU in the catalogue. */
 export function skuInfo(products: Product[]): Map<string, SkuInfo> {
   const m = new Map<string, SkuInfo>();
   for (const p of products) for (const s of skusOf(p)) {
     const v = p.variants.find((x) => x.sku === s);
-    m.set(s, { productId: p.id, name: p.name, variant: v ? variantText(v.color, v.size) : { ar: '', en: '' } });
+    m.set(s, { productId: p.id, name: p.name, variant: v ? variantText(v.color, v.size) : { ar: '', en: '' }, ...(traits(p.type).warehouse || p.type === 'bundle' ? {} : { noStock: true }) });
   }
   return m;
 }
 export const infoFor = (m: Map<string, SkuInfo>, sku: string): SkuInfo => m.get(sku) ?? { productId: undefined, name: { ar: sku, en: sku }, variant: { ar: '', en: '' } };
 
-export type Tab = 'levels' | 'low' | 'transfers' | 'log';
-export const readTab = (v: string | null): Tab => (v === 'low' || v === 'transfers' || v === 'log' ? v : 'levels');
+/** `types`: products sold without warehouse stock (codes, bookings, bundles, downloads, services). */
+export type Tab = 'levels' | 'low' | 'transfers' | 'log' | 'types';
+export const readTab = (v: string | null): Tab => (v === 'low' || v === 'transfers' || v === 'log' || v === 'types' ? v : 'levels');
 /** A location id from the address when it names a known location (active or not), else ''. */
 export const readLoc = (v: string | null): LocId | '' => (v && allLocations().some((l) => l.id === v) ? v : '');
 
@@ -50,6 +53,8 @@ export function levelRows(levels: Level[], info: Map<string, SkuInfo>, f: { q: s
   const order = (loc: LocId) => { const i = LOC_IDS.indexOf(loc); return i < 0 ? 99 : i; };
   return [...levels
     .map((l) => ({ ...l, key: levelKey(l), available: available(l), low: available(l) <= l.threshold, info: infoFor(info, l.sku), states: breakdown(l, transfers) })), ...unstocked]
+    // Downloads, codes, services and bookings have no warehouse stock (stock kept from an earlier type stays stored, unlisted).
+    .filter((r) => !r.info.noStock)
     .filter((r) => (!f.loc || r.loc === f.loc) && (!f.lowOnly || r.low) && (!f.state || stateMatch(r.states, f.state)) && matches(f.q, r.sku, r.info))
     .sort((a, b) => (f.lowOnly ? a.available - b.available : 0) || a.sku.localeCompare(b.sku) || order(a.loc) - order(b.loc));
 }
@@ -282,4 +287,33 @@ export function compositionBar(b: Breakdown): { part: 'available' | 'reserved' |
   const parts = (['available', 'reserved', 'awaitingPay', 'unavailable', 'safety'] as const).map((part) => ({ part, n: Math.max(0, b[part]) }));
   const total = parts.reduce((s, x) => s + x.n, 0) || 1;
   return parts.filter((x) => x.n > 0).map((x) => ({ part: x.part, pct: Math.round((x.n * 1000) / total) / 10 }));
+}
+
+/* ---------- Products sold without warehouse stock (catalog-extras types) ---------- */
+
+export type TypedKind = Exclude<ProductType, 'physical' | 'food'>;
+export interface TypedRow {
+  id: string; sku: string; name: L; type: TypedKind; active: boolean;
+  /** Code: unsold codes in the pool and codes already delivered. */
+  codes?: { left: number; sold: number };
+  /** Booking: open slots (today on) with places left. */
+  slots?: { id: string; date: string; time: string; cap: number; left: number }[];
+  /** Bundle: units the components allow (the scarcest wins) and each component's sellable units. */
+  bundle?: { stock: number; parts: { sku: string; qty: number; name: L | null; available: number }[] };
+}
+/** How each non-warehouse product sells: codes left, booking places, a bundle's derived stock; downloads and services have no limit. */
+export function typedRows(products: Product[], levels: Level[], today: string, q = ''): TypedRow[] {
+  const n = q.trim().toLowerCase();
+  return products.filter((p) => p.status !== 'archived' && p.type !== 'physical' && p.type !== 'food' && !!p.type)
+    .filter((p) => !n || p.sku.toLowerCase().includes(n) || p.name.en.toLowerCase().includes(n) || p.name.ar.includes(q.trim()))
+    .map((p) => {
+      const base = { id: p.id, sku: p.sku, name: p.name, type: p.type as TypedKind, active: p.status === 'active' };
+      if (p.type === 'code') { const pool = p.spec?.codes ?? []; return { ...base, codes: { left: pool.filter((c) => !c.ref).length, sold: pool.filter((c) => !!c.ref).length } }; }
+      if (p.type === 'booking') return { ...base, slots: openSlots(p.spec?.slots, today).map((x) => ({ id: x.id, date: x.date, time: x.time, cap: x.cap, left: slotLeft(x) })) };
+      if (p.type === 'bundle') {
+        const items = p.spec?.bundle ?? [];
+        return { ...base, bundle: { stock: bundleStock(items, levels), parts: bundleParts(items, products).map((x) => ({ sku: x.sku, qty: x.qty, name: x.name, available: levels.filter((l) => l.sku === x.sku).reduce((a, l) => a + Math.max(0, available(l)), 0) })) } };
+      }
+      return base;
+    });
 }

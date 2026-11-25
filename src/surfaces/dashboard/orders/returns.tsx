@@ -317,7 +317,7 @@ function ExchangeModal({ o, r, onClose }: { o: Order; r: OrderReturn; onClose: (
   const tx = useTx();
   const { lang } = useLang();
   const who = useActor();
-  const opts = siblings(skuOptions(productsStore.use(), levelsStore.use()), o.items[r.lines[0].idx].sku);
+  const opts = siblings(skuOptions(productsStore.use(), levelsStore.use(), undefined, true), o.items[r.lines[0].idx].sku);
   const qty = r.inspection?.accepted.reduce((a, b) => a + b, 0) || r.lines.reduce((s, l) => s + l.qty, 0);
   const [sku, setSku] = useState(opts.find((x) => x.total >= qty)?.sku ?? '');
   const pick = opts.find((x) => x.sku === sku);

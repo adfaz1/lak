@@ -299,7 +299,7 @@ export default function Checkout() {
             <p className="flex items-start gap-2 rounded-xl bg-surface-2 px-4 py-3 text-sm"><Mail className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden="true" />
               <span>{tx('لا يحتاج توصيلًا: ', 'No delivery needed: ')}{split.map((x) => x.name).join(t.listSep)}. {needs.email ? tx('يصلك بالبريد بعد الدفع.', 'Sent by email after payment.') : tx('نؤكد موعدك بعد الدفع.', 'We confirm your appointment after payment.')}</span></p>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field id="sf-f-name" label={t.name} error={errMsg('name')} className="sm:col-span-2">
+              <Field id="sf-f-name" label={tx('الاسم', 'Full name')} error={errMsg('name')} className="sm:col-span-2">
                 {(p) => <Input {...p} autoComplete="name" value={co.addr.name ?? ''} onBlur={touch('name')} onChange={(e) => setAddr({ name: e.target.value })} className="h-11" />}
               </Field>
               <Field id="sf-f-phone" label={t.phone} error={errMsg('phone')} hint={t.phoneHint} className="sm:col-span-2">
@@ -426,6 +426,11 @@ export default function Checkout() {
           {step(noAddr ? 3 : 4, 'sf-pay-h', t.sPay, <>
             {notice}
             {!methods.length && <Alert tone="warn" title={t.noMethods} />}
+            {noAddr && methods.length > 0 && methods.every((pm) => !!elig(pm.id)) && (
+              <Alert tone="warn" title={tx('لا وسيلة دفع متاحة لهذه السلة', 'No payment method fits this bag')}>
+                {tx('الدفع عند الاستلام لا يصلح لما لا يُوصَّل، والمتجر لم يفعّل الدفع الإلكتروني بعد. تواصل مع المتجر.', 'Cash on delivery can’t be used when nothing is delivered, and the store has not turned on online payment yet. Contact the store.')}
+              </Alert>
+            )}
             <fieldset className="space-y-2">
               <legend className="sr-only">{t.sPay}</legend>
               {methods.map((pm) => {

@@ -1,7 +1,7 @@
 // Manual order (`#/dashboard/orders/new`): customer → items with stock per location → delivery → discount → payment →
 // review → create (stock held). The draft is kept in the session, so leaving and coming back restores it.
 import { useMemo, useState } from 'react';
-import { Lock, Minus, PackagePlus, Plus, Search, Trash2, UserPlus } from 'lucide-react';
+import { CalendarClock, KeyRound, Lock, Mail, Minus, PackageOpen, PackagePlus, Plus, Search, Trash2, UserPlus } from 'lucide-react';
 import { useLang } from '../../../core/lang';
 import { createStore } from '../../../core/store';
 import { navigate } from '../../../core/router';
@@ -57,10 +57,12 @@ export default function NewOrder() {
   };
   const toReview = () => { setTried(true); if (!q.errors.length) setReview(true); };
   const create = () => {
-    const r = createManual(d, { orders: ordersStore.get(), levels: levelsStore.get(), customers: customersStore.get() }, options, zones, who, Date.now());
+    const r = createManual(d, { orders: ordersStore.get(), levels: levelsStore.get(), customers: customersStore.get(), products: productsStore.get() }, options, zones, who, Date.now());
     if (!r.order) { setReview(false); setTried(true); return; }
     customersStore.set(r.customers);
     levelsStore.set(r.levels);
+    // Codes given and booking places taken by this order.
+    if (r.products && r.products !== productsStore.get()) productsStore.set(r.products);
     ordersStore.set((all) => [r.order!, ...all]);
     auditOrder(undefined, r.order);
     manualDraftStore.set(emptyManual());
@@ -68,6 +70,9 @@ export default function NewOrder() {
     toast({ tone: 'ok', text: tx(`أُنشئ الطلب #${r.order.ref} وحُجز المخزون`, `Order #${r.order.ref} created; stock held`) });
     navigate(ohref(r.order.ref));
   };
+  const day = (dt: string) => new Intl.DateTimeFormat(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }).format(new Date(`${dt}T00:00:00Z`));
+  const stockText = (o: (typeof options)[number]) => o.unlimited ? tx('بلا حد', 'no limit') : o.total === 0 ? tx('نفد', 'sold out')
+    : o.noShip === 'code' ? tx(`${o.total} كود متبقٍ`, `${o.total} codes left`) : o.noShip === 'booking' ? tx(`${o.total} مقعد`, `${o.total} places`) : o.bundle ? tx(`متاح ${o.total} حزمة`, `${o.total} bundles available`) : tx(`متاح ${o.total}`, `${o.total} available`);
   const payLabel: Record<ManualPay, string> = { cash: tx('مدفوع نقدًا', 'Paid in cash'), transfer: tx('مدفوع بتحويل', 'Paid by transfer'), cod: tx('عند الاستلام', 'Cash on delivery'), link: tx('رابط دفع', 'Payment link') };
 
   return (
@@ -115,7 +120,7 @@ export default function NewOrder() {
               <div className="flex flex-wrap gap-2">
                 <Select className="min-w-0 flex-1" value={pick} onChange={(e) => setPick(e.target.value)} aria-label={tx('اختر منتجًا', 'Choose a product')} aria-invalid={err('lines') || undefined}>
                   <option value="">{tx('اختر منتجًا أو متغيرًا…', 'Choose a product or variant…')}</option>
-                  {options.map((o) => <option key={o.sku} value={o.sku} disabled={o.total === 0}>{o.name[lang]}{o.variant ? ` · ${o.variant[lang]}` : ''} — {o.sku} ({o.total === 0 ? tx('نفد', 'sold out') : tx(`متاح ${o.total}`, `${o.total} available`)})</option>)}
+                  {options.map((o) => <option key={o.sku} value={o.sku} disabled={o.total === 0}>{o.name[lang]}{o.variant ? ` · ${o.variant[lang]}` : ''} — {o.sku} ({stockText(o)})</option>)}
                 </Select>
                 <Button variant="secondary" disabled={!pick} onClick={addLine}><Plus className="size-4" aria-hidden="true" />{tx('أضف', 'Add')}</Button>
               </div>
@@ -126,8 +131,22 @@ export default function NewOrder() {
                     <li key={l.opt.sku} className="space-y-2 px-3 py-3">
                       <div className="flex items-start gap-3"><ProductImage src={skuPhoto(l.opt.sku)} alt={l.opt.name[lang]} size={44} /><div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold text-fg">{l.opt.name[lang]}{l.opt.variant && <span className="font-normal text-muted"> · {l.opt.variant[lang]}</span>}</p>
-                        <p className="flex flex-wrap gap-1.5 pt-1">{LOC_IDS.map((loc) => <Badge key={loc} tone={(l.opt.avail[loc] ?? 0) ? 'sky' : 'gray'}>{LOCATIONS[loc][lang]} <b className="tabular-nums">{l.opt.avail[loc] ?? 0}</b></Badge>)}</p>
-                        {l.error && tried && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">{l.error === 'stock' ? tx(`المتاح ${l.opt.total} فقط`, `Only ${l.opt.total} available`) : tx('كمية صحيحة من 1', 'A whole number from 1')}</p>}
+                        {l.opt.noShip || l.opt.bundle ? (
+                          <p className="flex flex-wrap gap-1.5 pt-1">
+                            {l.opt.noShip === 'digital' && <Badge tone="gray" icon={<Mail className="size-3" aria-hidden="true" />}>{tx('رابط تنزيل بالبريد · بلا شحن', 'Download link by email · no shipping')}</Badge>}
+                            {l.opt.noShip === 'service' && <Badge tone="gray" icon={<CalendarClock className="size-3" aria-hidden="true" />}>{tx('خدمة · بلا شحن', 'Service · no shipping')}</Badge>}
+                            {l.opt.noShip === 'code' && <Badge tone={l.opt.total ? 'sky' : 'red'} icon={<KeyRound className="size-3" aria-hidden="true" />}>{tx(`أكواد متبقية ${l.opt.total}`, `${l.opt.total} codes left`)}</Badge>}
+                            {l.opt.noShip === 'code' && <Badge tone="gray">{d.pay === 'cash' || d.pay === 'transfer' ? tx('تُسلَّم عند الإنشاء', 'Delivered on create') : tx('تُسلَّم بعد الدفع', 'Delivered once paid')}</Badge>}
+                            {l.opt.bundle && <Badge tone="sky" icon={<PackageOpen className="size-3" aria-hidden="true" />}>{tx(`حزمة من ${l.opt.bundle.length} مكوّنات · يُحجز كل مكوّن`, `Bundle of ${l.opt.bundle.length} · each part is held`)}</Badge>}
+                          </p>
+                        ) : <p className="flex flex-wrap gap-1.5 pt-1">{LOC_IDS.map((loc) => <Badge key={loc} tone={(l.opt.avail[loc] ?? 0) ? 'sky' : 'gray'}>{LOCATIONS[loc][lang]} <b className="tabular-nums">{l.opt.avail[loc] ?? 0}</b></Badge>)}</p>}
+                        {l.opt.slots && (
+                          <Select className="mt-2" value={d.lines[i].slot ?? ''} onChange={(e) => set({ lines: d.lines.map((x, j) => (j === i ? { ...x, slot: e.target.value || undefined } : x)) })} aria-label={tx(`موعد ${l.opt.name.ar}`, `Slot for ${l.opt.name.en}`)} aria-invalid={(tried && l.error === 'slot') || undefined}>
+                            <option value="">{l.opt.slots.length ? tx('اختر الموعد…', 'Choose a slot…') : tx('لا مواعيد مفتوحة', 'No open slots')}</option>
+                            {l.opt.slots.map((x) => <option key={x.id} value={x.id} disabled={x.left === 0}>{day(x.date)} · {x.time} — {x.left ? tx(`${x.left} مقعد`, `${x.left} left`) : tx('ممتلئ', 'full')}</option>)}
+                          </Select>
+                        )}
+                        {l.error && tried && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">{l.error === 'slot' ? tx('اختر موعدًا', 'Choose a slot') : l.error === 'stock' ? tx(`المتاح ${l.slot ? l.slot.left : l.opt.total} فقط`, `Only ${l.slot ? l.slot.left : l.opt.total} available`) : tx('كمية صحيحة من 1', 'A whole number from 1')}</p>}
                       </div><IconButton label={tx('احذف السطر', 'Remove line')} onClick={() => set({ lines: d.lines.filter((_, j) => j !== i) })}><Trash2 className="size-4" /></IconButton></div>
                       <div className="flex items-center justify-between gap-3 ps-14"><span className="inline-flex h-10 items-center overflow-hidden rounded-xl border border-border">
                         <IconButton label={tx('إنقاص', 'Decrease')} className="rounded-none" onClick={() => set({ lines: d.lines.map((x, j) => (j === i ? { ...x, qty: String(Math.max(1, (Number(x.qty) || 1) - 1)) } : x)) })}><Minus className="size-4" /></IconButton>
@@ -143,6 +162,12 @@ export default function NewOrder() {
 
           <Card aria-labelledby="h-d">
             <CardHeader id="h-d" title={tx('التوصيل', 'Delivery')} />
+            {!q.ships ? (
+              <div className="space-y-3 px-5 pb-5">
+                <p className="flex items-start gap-2 rounded-xl bg-surface-2 px-4 py-3 text-sm text-fg"><Mail className="mt-0.5 size-4 shrink-0 text-muted" aria-hidden="true" />{tx('لا يحتاج توصيلًا ولا عنوانًا: الأكواد والروابط تُرسل للعميل، والخدمات والحجوزات في موعدها.', 'No delivery or address needed: codes and links go to the customer; services and bookings happen at their time.')}</p>
+                <Field label={tx('ملاحظة العميل', 'Customer note')} optional>{(p) => <Textarea {...p} className="min-h-16" value={d.customerNote} onChange={(e) => set({ customerNote: e.target.value.slice(0, 300) })} />}</Field>
+              </div>
+            ) : (
             <div className="grid gap-3 px-5 pb-5 sm:grid-cols-2">
               <Field label={tx('المدينة', 'City')} error={err('city') ? tx('اختر المدينة', 'Choose the city') : err('zone') ? tx('لا منطقة شحن تغطيها', 'No shipping zone covers it') : null}>
                 {(p) => <Select {...p} value={d.city} onChange={(e) => set({ city: e.target.value })}><option value="">{tx('اختر…', 'Choose…')}</option>{CITIES.map((c) => <option key={c.en} value={c.en}>{c[lang]}</option>)}</Select>}
@@ -155,12 +180,14 @@ export default function NewOrder() {
               </div>
               <Field label={tx('ملاحظة العميل', 'Customer note')} optional className="sm:col-span-2">{(p) => <Textarea {...p} className="min-h-16" value={d.customerNote} onChange={(e) => set({ customerNote: e.target.value.slice(0, 300) })} />}</Field>
             </div>
+            )}
           </Card>
 
           <Card aria-labelledby="h-p">
             <CardHeader id="h-p" title={tx('الدفع والخصم', 'Payment & discount')} />
             <div className="space-y-4 px-5 pb-5">
               <Segmented label={tx('طريقة الدفع', 'Payment')} value={d.pay} onChange={(v) => set({ pay: v })} options={(['cash', 'transfer', 'cod', 'link'] as ManualPay[]).map((v) => ({ value: v, label: payLabel[v] }))} />
+              {err('codNoShip') && <p role="alert" className="text-xs font-medium text-red-600 dark:text-red-400">{tx('لا دفع عند الاستلام لطلب بلا توصيل', 'No cash on delivery for an order with nothing to deliver')}</p>}
               <p className="flex flex-wrap items-center gap-2 text-xs text-muted">{d.pay === 'link' ? <>{tx('يبقى الطلب «بانتظار الدفع» ولا يُجهّز قبله. إرسال الرابط يحتاج مزوّدًا من الخادم.', 'The order stays “awaiting payment” and is not fulfilled before it. Sending the link needs a server-side provider.')}<Simulated /></> : d.pay === 'cod' ? tx('يُحصّل عند التسليم؛ لا يُحتسب محصّلًا قبله.', 'Collected on delivery; not counted as collected before.') : tx('سجّل المبلغ الذي استلمته فعلًا.', 'Record money you have actually received.')}</p>
               <Field label={tx('خصم (ر.س)', 'Discount (SAR)')} optional hint={tx('شامل الضريبة', 'VAT included')} error={err('discount') ? tx('مبلغ صحيح لا يتجاوز المجموع', 'A valid amount up to the subtotal') : null} className="max-w-56">
                 {(p) => <Input {...p} dir="ltr" inputMode="decimal" value={d.discount} onChange={(e) => set({ discount: e.target.value })} placeholder="0" />}
@@ -196,14 +223,15 @@ export default function NewOrder() {
           footer={<><Button variant="secondary" onClick={() => setReview(false)}>{tx('عدّل', 'Edit')}</Button><Button onClick={create}>{tx('أنشئ الطلب', 'Create order')}</Button></>}>
           <dl className="divide-y divide-border !rounded-xl !border !border-border !px-4">
             <Row label={tx('العميل', 'Customer')}>{chosen ? chosen.name[lang] : d.newName}{!chosen && <Badge tone="brand" className="ms-2">{tx('جديد', 'New')}</Badge>}</Row>
-            <Row label={tx('إلى', 'To')}>{d.address} · {CITIES.find((c) => c.en === d.city)?.[lang]}</Row>
+            <Row label={tx('إلى', 'To')}>{q.ships ? <>{d.address} · {CITIES.find((c) => c.en === d.city)?.[lang]}</> : tx('لا يحتاج توصيلًا', 'No delivery needed')}</Row>
             <Row label={tx('الدفع', 'Payment')}>{payLabel[d.pay]}</Row>
             <Row label={tx('الإجمالي', 'Total')} strong><Money v={q.total} /></Row>
             <Row label={tx('منها ضريبة', 'Incl. VAT')} tone="muted"><Money v={q.vat} /></Row>
           </dl>
           <div>
             <p className="mb-2 flex items-center gap-1 text-[13px] font-semibold text-fg">{tx('حجز المخزون', 'Stock to hold')}<InfoHint>{tx('السطر كاملًا من أول مستودع يكفيه، وإلا يُقسم.', 'Each line from the first warehouse that covers it, else split.')}</InfoHint></p>
-            <ul className="space-y-1.5 text-sm">{q.lines.map((l) => <li key={l.opt.sku} className="flex items-center justify-between gap-2"><span className="truncate text-fg">{l.opt.name[lang]}{l.opt.variant && ` · ${l.opt.variant[lang]}`}</span><b className="tabular-nums">× {l.qty}</b></li>)}</ul>
+            <ul className="space-y-1.5 text-sm">{q.lines.map((l) => <li key={l.opt.sku} className="flex items-center justify-between gap-2"><span className="min-w-0 truncate text-fg">{l.opt.name[lang]}{l.opt.variant && ` · ${l.opt.variant[lang]}`}
+              {l.opt.noShip && <span className="block text-xs text-muted">{l.opt.noShip === 'code' ? ((d.pay === 'cash' || d.pay === 'transfer') ? tx(`يُسلَّم ${l.qty} كود من المخزون ويُرسل للعميل (محاكاة)`, `${l.qty} code(s) given from the pool and sent (simulated)`) : tx('الأكواد تُسلَّم بعد الدفع', 'Codes are given once paid')) : l.slot ? tx(`يُحجز ${l.qty} مقعد · ${day(l.slot.date)} ${l.slot.time}`, `${l.qty} place(s) booked · ${day(l.slot.date)} ${l.slot.time}`) : tx('لا مخزون يُحجز', 'No stock held')}</span>}</span><b className="tabular-nums">× {l.qty}</b></li>)}</ul>
           </div>
           {d.pay === 'link' && <Alert tone="warn">{tx('يُحجز المخزون والطلب غير مدفوع. ألغِه إن لم يدفع العميل.', 'Stock is held while the order is unpaid. Cancel it if the customer does not pay.')}</Alert>}
           <p className={cn('text-xs text-muted')}>{tx('تصل العميل رسالة «استلام الطلب» حسب إعدادات إشعارات العملاء (محاكاة). يُسجّل في سجل الطلب باسمك.', 'The customer gets the “Order placed” message set in customer notifications (simulated). Logged on the order under your name.')}</p>

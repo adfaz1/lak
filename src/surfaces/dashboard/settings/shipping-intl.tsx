@@ -13,7 +13,7 @@ import { productPhoto } from '../model/media';
 import { sectionHref } from '../pages';
 import { useSessionDraft } from './drafts';
 import { Section, useSave } from './common';
-import { HS_BY_CAT, ORIGINS, bulkFill, catKey, countryName, readiness, validHs, type IntlField } from './shipping-model';
+import { HS_BY_CAT, ORIGINS, bulkFill, catKey, countryName, customsItem, readiness, validHs, type IntlField } from './shipping-model';
 import { commitShipping, shipHref, useShipping } from './shipping-ui';
 
 const PER = 8;
@@ -35,7 +35,8 @@ export default function IntlTab() {
   const [fill, setFill] = useState(false);
   const [edit, setEdit] = useState<Product | null>(null);
 
-  const physical = products.filter((p) => p.type !== 'digital' && p.status !== 'archived');
+  // Only what ships as itself (catalog-extras types): no downloads, codes, services or bookings; bundles ship as their parts.
+  const physical = products.filter((p) => customsItem(p) && p.status !== 'archived');
   const rows = physical.map((p) => ({ p, r: readiness(p, setup.intl[p.id]) }));
   const needle = q.trim().toLowerCase();
   const shown = rows.filter((x) => (!needle || `${x.p.name.ar} ${x.p.name.en} ${x.p.sku}`.toLowerCase().includes(needle))
@@ -66,7 +67,7 @@ export default function IntlTab() {
   return (
     <>
       <Section id="in-h" flush title={tx('جاهزية الشحن الدولي', 'International readiness')}
-        hint={<InfoHint>{tx('الشحن الدولي يظهر للعميل فقط إذا كانت كل منتجات سلته جاهزة 100%. الوزن من صفحة المنتج.', 'International shipping shows only when every product in the cart is 100% ready. Weight comes from the product page.')}</InfoHint>}
+        hint={<InfoHint>{tx('الشحن الدولي يظهر للعميل فقط إذا كانت كل منتجات سلته جاهزة 100%. الوزن من صفحة المنتج. التنزيلات والأكواد والخدمات والحجوزات لا تُشحن، والحزمة تُشحن بمكوّناتها.', 'International shipping shows only when every product in the cart is 100% ready. Weight comes from the product page. Downloads, codes, services and bookings never ship; bundles ship as their parts.')}</InfoHint>}
         action={<span className="text-[13px] text-muted tabular-nums">{tx(`${ready} من ${rows.length} جاهز`, `${ready} of ${rows.length} ready`)}</span>}>
         <div className="space-y-3 px-5 pb-3">
           {sel.size > 0 || all ? (
