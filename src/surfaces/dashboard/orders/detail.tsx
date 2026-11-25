@@ -1,4 +1,6 @@
 // Order detail (`#/dashboard/orders/<ref>`): what state is this order in, and what is the one thing to do next?
+import { walletPaid } from '../../merchant/wallet';
+import { walletStore } from '../../merchant/wallet-store';
 import { useState, type ReactNode } from 'react';
 import {
   AlarmClock, Ban, CheckCircle2, Copy, CreditCard, ExternalLink, FileText, Gift, Hourglass, Mail, MapPin, MessageSquare, MoreHorizontal, PackageCheck, PackageOpen,
@@ -40,6 +42,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
   const toast = useToast();
   const state = useDashState();
   const all = ordersStore.use();
+  const walletLedger = walletStore.use();
   const role = testStore.use().role;
   const perms = orderPerms(role);
   const who = useActor();
@@ -74,6 +77,7 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
 
   const next = nextAction(o);
   const m = moneyBreakdown(o);
+  const fromWallet = walletPaid(walletLedger, o.ref);
   const lines = lineViews(o);
   const multi = lines.some((l) => l.stock.length > 0);
   const canCancel = perms.fulfil && (m.refundable === 0 || perms.refund);
@@ -276,6 +280,10 @@ export default function OrderDetail({ refId, route }: { refId: string; route: Ro
               <Row label={tx('منها ضريبة القيمة المضافة 15%', 'Incl. 15% VAT')} tone="muted"><Money v={m.vat} /></Row>
               <div className="my-1 border-t border-border" />
               <Row label={tx('الإجمالي', 'Total')} strong><Money v={m.total} /></Row>
+              {fromWallet > 0 && <>
+                <Row label={<span className="flex items-center gap-1">{tx('من محفظة العميل', 'From customer wallet')}<InfoHint>{tx('رصيد سبق أن التزم به المتجر للعميل؛ لا يمر عبر مزوّد الدفع.', 'Credit the store already owed the customer; it does not go through the payment provider.')}</InfoHint></span>} tone="muted"><Money v={fromWallet} /></Row>
+                <Row label={tx('المدفوع بوسيلة الدفع', 'Paid by payment method')} tone="muted"><Money v={Math.max(0, m.total - fromWallet)} /></Row>
+              </>}
               {m.pay === 'cod_due' && !o.cancelled && <Row label={<span className="flex items-center gap-1">{tx('يُحصّل عند التسليم', 'To collect on delivery')}<InfoHint>{tx('الدفع عند الاستلام: لا يُحتسب محصّلًا حتى التسليم.', 'Cash on delivery: not counted as collected until delivered.')}</InfoHint></span>} tone="amber"><Money v={m.codDue} /></Row>}
               {m.pay === 'bank_due' && <Row label={tx('بانتظار التحويل', 'Awaiting transfer')} tone="amber"><Money v={m.total} /></Row>}
               {m.pay === 'verifying' && <Row label={tx('بانتظار تحقق المزوّد', 'Awaiting provider check')} tone="amber"><Money v={m.total} /></Row>}
