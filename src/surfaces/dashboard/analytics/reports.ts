@@ -1,7 +1,7 @@
 // Reports (owner requirement 4, BP-P03-ANA-001…011): sales, conversion funnel, products, customers, channels,
 // coupons, abandoned carts and payments. Each report is data only: headline metrics with a definition, the same
 // metrics for the comparison period, and tables a generic view renders and exports as CSV. No React.
-import { total, subtotal, type Channel, type L, type Order } from '../../merchant/domain';
+import { total, subtotal, type Channel, type SalesChannel, type L, type Order } from '../../merchant/domain';
 import type { Product } from '../../merchant/catalog';
 import type { Cart, Coupon, DayStat } from '../../merchant/growth';
 import { couponRedemptions } from '../../merchant/growth';
@@ -69,6 +69,8 @@ export interface Inputs {
   txs: Tx[];
   /** Whether customer names may be shown (role can open customers). */
   names: boolean;
+  /** Customer wallet ledger (merchant/wallet.ts); the financial summary notes the outstanding store credit. Optional. */
+  wallet?: import('../../merchant/wallet').WalletTxn[];
   /* Demand signals and operations (optional: older callers and tests do not pass them). */
   searches?: import('../../merchant/demand').SearchEvent[];
   redirects?: import('../../merchant/demand').SearchRedirect[];
@@ -87,7 +89,7 @@ const BOOK_START = (orders: Order[]) => orders.reduce((m, o) => (orderDay(o) < m
 /** The ledger (fees, refunds) starts with the first payout period. */
 export const LEDGER_START = '2026-11-01';
 const CH: Channel[] = ['online', 'market', 'app'];
-export const CHANNEL_LABEL: Record<Channel, L> = { online: l('المتجر الإلكتروني', 'Online store'), market: l('سوق لك', 'LAK marketplace'), app: l('تطبيق المتجر', 'Store app') };
+export const CHANNEL_LABEL: Record<SalesChannel, L> = { online: l('المتجر الإلكتروني', 'Online store'), market: l('سوق لك', 'LAK marketplace'), app: l('تطبيق المتجر', 'Store app'), pos: l('نقطة البيع', 'Point of sale'), wholesale: l('الجملة', 'Wholesale') };
 
 /* ---------- Sales (ANA-001/002, owner 4) ---------- */
 

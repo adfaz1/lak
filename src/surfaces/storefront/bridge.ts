@@ -13,6 +13,7 @@ import type { BankDetails, Plan } from '../merchant/finance';
 import { shippingQuote, visibleAtCheckout } from '../dashboard/settings/model';
 import { hiddenOnline, noShipKind, openSlots, riyadhToday, slotKey, slotLeft, stockFor, storeX, traits, type CatalogX, type OrderExtras } from '../merchant/catalog-extras';
 import { quote, setupOf, warehouseFor, zoneForCity, type CartIn } from '../dashboard/settings/shipping-model';
+import { walletBalance, walletUse } from '../merchant/wallet';
 import type { Location } from '../merchant/domain';
 import type { ShippingSetup } from '../merchant/workspace';
 import {
@@ -536,3 +537,20 @@ export function docTitle(seo: StoreSeo, storeName: L, lang: 'ar' | 'en', page?: 
 /** Social links the merchant saved, in a fixed order, https only. */
 export const socialLinks = (s: Partial<Record<SocialId, string>> | undefined) =>
   SOCIAL_IDS.flatMap((id) => (s?.[id] && /^https:\/\//i.test(s[id]!.trim()) ? [{ id, url: s[id]!.trim() }] : []));
+
+/** Partner (affiliate/influencer) code from a store link `?ref=CODE`: latin letters and digits, upper-cased; else undefined. */
+export function partnerRef(query: URLSearchParams): string | undefined {
+  const raw = (query.get('ref') ?? '').replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660)).trim().toUpperCase();
+  return /^[A-Z0-9]{3,16}$/.test(raw) ? raw : undefined;
+}
+
+/* ───────────── Customer wallet at checkout (merchant/wallet.ts) ───────────── */
+
+/**
+ * Store credit a signed-in shopper may put toward this order: their balance, limited by the merchant's cap per order
+ * and the order total. `want` is the amount the shopper chose (partial use); the rest is paid by the chosen method.
+ */
+export function walletAtCheckout(ledger: import('../merchant/wallet').WalletTxn[], settings: import('../merchant/wallet').WalletSettings, customerId: string | undefined, orderTotal: number, want?: number) {
+  const balance = customerId ? walletBalance(ledger, customerId) : 0;
+  return { balance, ...walletUse(balance, orderTotal, settings, want) };
+}

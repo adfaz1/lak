@@ -18,7 +18,10 @@ import {
   payEvent, pendingForSession, signIn, signOut, stripSaved, submit,
 } from '../state';
 import { useCatalog, useConfig } from '../data';
-import { shipOptions } from '../bridge';
+import { shipOptions, walletAtCheckout } from '../bridge';
+import { WALLET_TODAY, walletCheckoutStore, walletSettingsStore, walletStore } from '../../merchant/wallet-store';
+import { expiringSoon, spendWallet } from '../../merchant/wallet';
+import { parseMoney } from '../../merchant/catalog';
 import { simNow, useSim } from '../review';
 import { CheckoutQuestions, useCheckoutExtras } from '../../dashboard/products/storefront-parts';
 import { bagNeeds } from '../../merchant/catalog-extras';
@@ -73,6 +76,14 @@ export default function Checkout() {
   const offered = cfg.methods.filter((pm) => pm !== 'applepay' || sim.applePay);
   const methodOk = offered.includes(co.method) && !elig(co.method);
   const totals = computeTotals(lines, { discount, ship, freeShip, cod: co.method === 'cod' && methodOk, codFee: cfg.codFee });
+  // Store credit (signed-in shoppers): up to the merchant's cap per order; the rest is paid by the chosen method.
+  const wch = walletCheckoutStore.use();
+  const wLedger = walletStore.use();
+  const wSettings = walletSettingsStore.use();
+  const wal = walletAtCheckout(wLedger, wSettings, signed ? CUSTOMER.id : undefined, totals.total, wch.amount ?? undefined);
+  const walletApplied = wch.on ? wal.applied : 0;
+  const toPay = totals.total - walletApplied;
+  const wSoon = signed ? expiringSoon(wLedger.filter((x) => x.customerId === CUSTOMER.id), WALLET_TODAY, wSettings.warnDays)[0] : undefined;
   const errs = noAddr ? validateContact(co.addr, { email: co.email, needEmail: needs.email })
     : { ...validateAddress(co.addr, { email: co.email }), ...(needs.email && !co.email.trim() ? { email: 'required' as const } : {}) };
   // Which items ship and which do not (shown on a mixed bag, and as the note on a bag that needs no delivery).
@@ -138,6 +149,7 @@ export default function Checkout() {
     setBusy(true);
     checkoutStore.set((c) => ({ ...c, notice: undefined }));
     const { order } = submit(buildDraft(), cx.extras);
+    if (walletApplied > 0) walletStore.set((l) => spendWallet(l, { customerId: CUSTOMER.id, amount: walletApplied, orderRef: order.ref }, WALLET_TODAY));
     if (!canPay(order.pay.state)) {
       lock.current = false;
       setBusy(false);
@@ -199,7 +211,7 @@ export default function Checkout() {
   };
   const cityObj = cityById(city);
   const saved = signed ? acc.addresses : [];
-  const payLabel = co.method === 'cod' || co.method === 'bank' ? t.placeCod : t.pay(m(totals.total));
+  const payLabel = co.method === 'cod' || co.method === 'bank' ? t.placeCod : t.pay(m(toPay));
   const anyErr = Object.keys(errs).length > 0 || !shipOk || !methodOk;
 
   const notice = co.notice && (() => {
@@ -232,6 +244,12 @@ export default function Checkout() {
       <CouponBox idp={idp} products={products} />
       <Breakdown totals={totals} coupon={coupon?.status === 'valid' ? coupon.code : undefined}
         shippingLabel={shipOk ? l(ship.name) : t.shipping} shippingPending={!shipOk} />
+      {walletApplied > 0 && (
+        <dl className="mt-2.5 space-y-2.5 border-t border-dashed border-border pt-2.5 text-sm">
+          <div className="flex items-baseline justify-between gap-4"><dt className="text-muted">{tx('من رصيد محفظتك', 'From your wallet')}</dt><dd className="text-emerald-700 dark:text-emerald-400"><span dir="ltr" className="inline-flex items-baseline">−<Money v={walletApplied} /></span></dd></div>
+          <div className="flex items-baseline justify-between gap-4 text-base"><dt className="font-semibold">{tx('المتبقي للدفع', 'Left to pay')}</dt><dd className="font-bold"><Money v={toPay} /></dd></div>
+        </dl>
+      )}
     </div>
   );
 
@@ -430,6 +448,24 @@ export default function Checkout() {
               <Alert tone="warn" title={tx('لا وسيلة دفع متاحة لهذه السلة', 'No payment method fits this bag')}>
                 {tx('الدفع عند الاستلام لا يصلح لما لا يُوصَّل، والمتجر لم يفعّل الدفع الإلكتروني بعد. تواصل مع المتجر.', 'Cash on delivery can’t be used when nothing is delivered, and the store has not turned on online payment yet. Contact the store.')}
               </Alert>
+            )}
+            {signed && wSettings.enabled && wal.balance > 0 && (
+              <div className={cn('space-y-3 rounded-xl border p-4', wch.on ? 'border-brand-600 bg-brand-500/[.04]' : 'border-border')}>
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input type="checkbox" className="mt-0.5 size-[18px] accent-brand-600" checked={wch.on} disabled={wal.max === 0} onChange={(e) => walletCheckoutStore.set({ on: e.target.checked, amount: null })} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-semibold">{tx('استخدم رصيد محفظتك', 'Use your store credit')} · <Money v={wal.balance} /></span>
+                    <span className="mt-0.5 block text-[13px] text-muted">{wal.max === 0 ? tx('لا يمكن استخدامه في هذا الطلب', 'Can’t be used on this order') : <>{tx('حتى', 'Up to')} <Money v={wal.max} />{wal.cappedBy === 'cap' ? tx(' (حد المتجر لكل طلب)', ' (the store’s limit per order)') : ''}</>}</span>
+                    {wSoon && <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">{tx(`ينتهي ${m(wSoon.amount)} منه في ${wSoon.expires}`, `${m(wSoon.amount)} of it expires on ${wSoon.expires}`)}</span>}
+                  </span>
+                </label>
+                {wch.on && wal.max > 0 && (
+                  <Field id="sf-wallet-amt" label={tx('المبلغ من المحفظة (ر.س)', 'Amount from wallet (SAR)')} hint={tx('استخدم جزءًا أو الحد كاملًا', 'Use part or all of the limit')}>
+                    {(p) => <Input {...p} dir="ltr" inputMode="decimal" className="h-11 max-w-40" defaultValue={(walletApplied / 100).toFixed(2)} key={wal.max}
+                      onChange={(e) => { const v = parseMoney(e.target.value); walletCheckoutStore.set({ on: true, amount: v === null ? null : Math.min(v, wal.max) }); }} />}
+                  </Field>
+                )}
+              </div>
             )}
             <fieldset className="space-y-2">
               <legend className="sr-only">{t.sPay}</legend>

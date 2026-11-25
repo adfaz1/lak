@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { useLang } from '../../core/lang';
 import type { Route } from '../../core/router';
 import { ordersStore } from '../merchant/stores';
-import { VIEW_IDS, type Channel, type Ful, type Order, type Pay, type Ship, type View } from '../merchant/domain';
+import { VIEW_IDS, type Channel, type SalesChannel, type Ful, type Order, type Pay, type Ship, type View } from '../merchant/domain';
 import { Icon, Pill, useTx, type IconName, type Tone } from './ui';
 import { isLate, stageOf, type Stage } from './data';
 
@@ -47,7 +47,7 @@ export function useLabels() {
   const tx = useTx();
   return {
     view: (v: View) => ({ all: tx('الكل', 'All'), needs: tx('يحتاج تجهيزًا', 'To fulfil'), late: tx('متأخر', 'Late'), payfail: tx('تعثّر الدفع', 'Payment failed'), shipped: tx('شُحن', 'Shipped'), returns: tx('مرتجعات', 'Returns') })[v],
-    channel: (c: Channel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app') })[c],
+    channel: (c: SalesChannel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app'), pos: tx('نقطة البيع', 'Point of sale'), wholesale: tx('الجملة', 'Wholesale') })[c],
     pay: (p: Pay) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
     ful: (f: Ful) => ({ none: tx('لم يُجهَّز', 'Unfulfilled'), partial: tx('مجهّز جزئيًا', 'Partly fulfilled'), done: tx('مجهّز', 'Fulfilled') })[f],
     ship: (s: Ship) => ({ none: tx('لا شحنة', 'No shipment'), label: tx('صدر الملصق', 'Label issued'), transit: tx('في الطريق', 'In transit'), delivered: tx('تم التسليم', 'Delivered') })[s],

@@ -13,7 +13,8 @@ import { itemCount } from './domain';
 import { H1, WRAP, to, useS } from './kit';
 import { accountStore } from './state';
 import { useCart, useCategories, useConfig, useStoreContent } from './data';
-import { servedPage, socialLinks } from './bridge';
+import { partnerRef, servedPage, socialLinks } from './bridge';
+import { recordPartnerVisit } from '../dashboard/marketing/affiliates-store';
 import ContentPage, { useDocTitle } from './pages/Content';
 import { ReviewPanel, setSfState, useSfState } from './review';
 import { headingText, liveAnnouncement, liveIdentity, mediaSrc, storeCss } from './theme';
@@ -69,6 +70,9 @@ export default function Storefront({ route }: { route: Route }) {
   }, [favicon]);
 
   const [a, b] = route.path;
+  // A partner link (`?ref=CODE`) is remembered for the merchant's cookie window (marketing/affiliates).
+  const pref = partnerRef(route.query);
+  useEffect(() => { if (pref) recordPartnerVisit(pref); }, [pref]);
   const content = useStoreContent();
   useDocTitle(route);
   const page = (() => {

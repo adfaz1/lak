@@ -2,15 +2,17 @@
 import { useState } from 'react';
 import { useLang } from '../../../core/lang';
 import { formatMoney } from '../../../core/format';
-import { LOCATIONS, LOC_IDS, refundQuote, refundable, refundedQty, requestRefund, shippingRefunded, total, type LocId, type Order } from '../../merchant/domain';
+import { LOCATIONS, LOC_IDS, refundQuote, refundable, refundedQty, requestRefund, settleRefund, shippingRefunded, total, type LocId, type Order } from '../../merchant/domain';
 import { refundTx } from '../../merchant/finance';
-import { financeStore, levelsStore, stockLogStore } from '../../merchant/stores';
+import { customersStore, financeStore, levelsStore, stockLogStore } from '../../merchant/stores';
 import { Alert, Field, Input, Modal, Simulated, Switch, Textarea } from '../../../ds/kit';
 import { Button, Money, ProductImage, Segmented, cn, useTx } from '../../../ds/ui';
 import { skuPhoto } from '../model/media';
 import { REFUND_REASONS, applyRestock, refundFromNextPayout, type RefundReason } from './model';
 import { Qty, Row, saveOrder, useActor } from './ui';
 import { act, stamp } from '../../merchant/ops';
+import { addDays, customerOf, refundToWallet } from '../../merchant/wallet';
+import { WALLET_TODAY, walletEvent, walletSettingsStore, walletStore } from '../../merchant/wallet-store';
 
 export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg?: string) => void }) {
   const tx = useTx();
@@ -23,6 +25,12 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
   const [reason, setReason] = useState('');
   const [reasonErr, setReasonErr] = useState(false);
   const [step, setStep] = useState<'form' | 'confirm'>('form');
+  // Store credit instead of the card: only for a known customer; settled at once (no provider), tied to the refund.
+  const [dest, setDest] = useState<'original' | 'wallet'>('original');
+  const walletCustomer = customerOf(o, customersStore.use());
+  const wSet = walletSettingsStore.use();
+  const wExpires = wSet.expiryDays === null ? null : addDays(WALLET_TODAY, wSet.expiryDays);
+  const toWallet = dest === 'wallet' && !!walletCustomer;
   const q = refundQuote(o, qty, ship, restock);
   const restockUnits = restock.reduce((a, b) => a + b, 0);
   const reasonText: Record<RefundReason, string> = { damaged: tx('تالف عند الاستلام', 'Damaged on arrival'), size: tx('مقاس أو لون غير مناسب', 'Wrong size or colour'), mind: tx('غيّر العميل رأيه', 'Changed their mind'), late: tx('تأخر التوصيل', 'Late delivery') };
@@ -35,11 +43,17 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
     const next = stamp(o, requestRefund(o, qty, ship, restock, loc, reason.trim()), who, Date.now());
     if (next === o) return;
     const r = next.refunds[next.refunds.length - 1];
-    saveOrder(next);
-    financeStore.set((f) => ({ ...f, txs: [...f.txs, refundTx(next, r, `TX-${r.id}`, undefined, false)] }));
+    if (toWallet && walletCustomer) {
+      saveOrder(settleRefund(next, r.id, true));
+      walletStore.set((l) => refundToWallet(l, { customerId: walletCustomer.id, amount: r.amount, orderRef: o.ref, refundId: r.id, reason: reason.trim(), expires: wExpires }, { by: tx('أنت', 'You'), today: WALLET_TODAY }));
+      walletEvent(walletCustomer.id, tx(`استرداد ${formatMoney(r.amount)} ر.س كرصيد في المحفظة (#${o.ref})`, `Refund of SAR ${formatMoney(r.amount)} as wallet credit (#${o.ref})`), tx('أنت', 'You'));
+    } else {
+      saveOrder(next);
+      financeStore.set((f) => ({ ...f, txs: [...f.txs, refundTx(next, r, `TX-${r.id}`, undefined, false)] }));
+    }
     const rs = applyRestock(levelsStore.get(), next, r);
     if (rs.log.length) { levelsStore.set(rs.levels); stockLogStore.set((lg) => [...rs.log, ...lg]); }
-    onClose(tx(`طُلب استرداد ${formatMoney(r.amount)} ر.س، بانتظار المزوّد`, `Refund of SAR ${formatMoney(r.amount)} requested, awaiting the provider`));
+    onClose(toWallet ? tx(`أُضيف ${formatMoney(r.amount)} ر.س لمحفظة العميل`, `SAR ${formatMoney(r.amount)} added to the customer’s wallet`) : tx(`طُلب استرداد ${formatMoney(r.amount)} ر.س، بانتظار المزوّد`, `Refund of SAR ${formatMoney(r.amount)} requested, awaiting the provider`));
   };
   const toConfirm = () => { if (!reason.trim()) { setReasonErr(true); return; } setStep('confirm'); };
 
@@ -47,7 +61,7 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
     <Modal title={tx('تأكيد طلب الاسترداد', 'Confirm the refund request')} onClose={() => onClose()}
       footer={<><Button variant="secondary" onClick={() => setStep('form')}>{tx('رجوع', 'Back')}</Button><Button onClick={submit}>{tx('اطلب استرداد', 'Request refund of')}&nbsp;<Money v={q.amount} /></Button></>}>
       <div className="rounded-xl bg-surface-2 p-5 text-center">
-        <p className="text-xs text-muted">{tx('إلى وسيلة الدفع الأصلية', 'To the original payment method')}</p>
+        <p className="text-xs text-muted">{toWallet ? tx('إلى محفظة العميل في متجرك', 'To the customer’s store wallet') : tx('إلى وسيلة الدفع الأصلية', 'To the original payment method')}</p>
         <p className="mt-1 text-3xl font-bold tracking-tight text-fg"><Money v={q.amount} /></p>
         <p className="mt-1 text-xs text-muted">{tx('منها ضريبة', 'incl. VAT')} <Money v={q.vat} />{q.shipping ? tx(' · يشمل الشحن', ' · incl. shipping') : ''}</p>
       </div>
@@ -56,9 +70,11 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
         <Row label={tx('إعادة للمخزون', 'Restock')}>{restockUnits ? tx(`${restockUnits} في ${LOCATIONS[loc].ar}`, `${restockUnits} at ${LOCATIONS[loc].en}`) : tx('لا شيء', 'Nothing')}</Row>
         {refundFromNextPayout(o) && <Row label={tx('من', 'From')}>{tx('التحويل القادم', 'Next payout')}</Row>}
       </dl>
-      <Alert tone="info" title={tx('يبقى «بانتظار المزوّد» حتى يؤكده', 'Stays “awaiting provider” until confirmed')}>
+      {toWallet ? <Alert tone="info" title={tx('يُضاف للمحفظة فورًا', 'Credited to the wallet at once')}>
+        <span className="flex flex-wrap items-center gap-2">{tx(`لا يُعاد للبطاقة ولا يُخصم من تحويلك؛ يصبح رصيدًا قائمًا للعميل ${wExpires ? `ينتهي ${wExpires}` : 'بلا انتهاء'}، مربوطًا بهذا الاسترداد.`, `Not returned to the card or taken from your payout; it becomes outstanding customer credit ${wExpires ? `expiring ${wExpires}` : 'with no expiry'}, tied to this refund.`)}<Simulated /></span>
+      </Alert> : <Alert tone="info" title={tx('يبقى «بانتظار المزوّد» حتى يؤكده', 'Stays “awaiting provider” until confirmed')}>
         <span className="flex flex-wrap items-center gap-2">{tx('لا تتغير حالة الدفع قبل التأكيد. تصل العميل رسالة «تم الاسترداد» عند تأكيد المزوّد.', 'Payment state changes only on confirmation. The customer gets the “Refunded” message once the provider confirms.')}<Simulated /></span>
-      </Alert>
+      </Alert>}
     </Modal>
   );
 
@@ -131,6 +147,12 @@ export function RefundModal({ order: o, onClose }: { order: Order; onClose: (msg
         )}
       </Field>
 
+      {walletCustomer && refundable(o) > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-[13px] font-semibold text-fg">{tx('إلى أين يعود المبلغ؟', 'Where does the money go?')}</span>
+          <Segmented label={tx('وجهة الاسترداد', 'Refund destination')} value={dest} onChange={setDest} options={[{ value: 'original', label: tx('وسيلة الدفع', 'Original method') }, { value: 'wallet', label: tx('محفظة العميل', 'Store wallet') }]} />
+        </div>
+      )}
       <dl className="!rounded-xl !border !border-border !px-4 !py-1">
         <Row label={tx('المنتجات', 'Items')}><Money v={q.items} /></Row>
         <Row label={tx('الشحن', 'Shipping')}><Money v={q.shipping} /></Row>

@@ -30,6 +30,9 @@ import { InvoicePrint, Invoices } from './invoices';
 import { PeriodFilter } from './period-filter';
 import { maskIban } from '../../merchant/finance';
 import { printHref } from '../orders/print-link';
+import { WalletLiabilityCard } from '../marketing/wallet-liability';
+import { BillingTab, LimitChanges } from './billing-tab';
+import { DecisionMarker } from '../settings/decision-marker';
 
 const href = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard/finance${path ? `/${path}` : ''}`, q);
 const txHref = (f: Partial<LedgerFilter>) => href('', ledgerQuery(f));
@@ -132,6 +135,7 @@ function Overview({ route }: { route: Route }) {
       <PayoutHoldNotice />
       <IssuesPanel issues={issues} />
       <MoneyCards data={data} empty={empty} />
+      <WalletLiabilityCard empty={empty} />
       <Card>
         <div className="px-4 pt-2 sm:px-5">
           <Tabs label={tx('أقسام المالية', 'Finance sections')} items={tabs.map((t) => ({ href: href('', { tab: t.id === 'payouts' ? undefined : t.id }), label: t.label, current: tab === t.id, count: t.count }))} />
@@ -139,7 +143,7 @@ function Overview({ route }: { route: Route }) {
         {tab === 'payouts' && <Payouts route={route} payouts={payouts} txs={txs} />}
         {tab === 'transactions' && <Transactions route={route} data={data} />}
         {tab === 'invoices' && <Invoices route={route} empty={empty} />}
-        {tab === 'billing' && <Billing />}
+        {tab === 'billing' && <BillingTab route={route} plan={<Billing />} />}
       </Card>
       {!empty && <FinanceLog />}
     </div>
@@ -681,12 +685,12 @@ function Billing() {
     setTarget(null);
   };
   return (
-    <div className="space-y-6 border-t border-border p-4 sm:p-5">
+    <div className="space-y-6 p-4 sm:p-5">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-brand-300 bg-brand-500/[.04] p-5 dark:border-brand-500/40">
           <p className="text-xs font-medium text-muted">{tx('خطتك الحالية', 'Current plan')}</p>
           <p className="mt-1 text-2xl font-bold text-fg">{n.plan(cur)}</p>
-          <p className="mt-2 flex items-center gap-1"><Badge tone="amber">{tx('السعر بانتظار الاعتماد', 'Price awaiting approval')}</Badge><InfoHint>{tx('أسماء الخطط أسماء عمل من المخطط، ولا أسعار معتمدة بعد. لا يُحصَّل أي مبلغ في هذه المعاينة.', 'Plan names are working names from the blueprint; no prices are approved yet. Nothing is charged in this preview.')}</InfoHint></p>
+          <p className="mt-2 flex flex-wrap items-center gap-1"><Badge tone="amber">{tx('السعر بانتظار الاعتماد', 'Price awaiting approval')}</Badge><DecisionMarker id="plans" /><InfoHint>{tx('أسماء الخطط أسماء عمل من المخطط، ولا أسعار معتمدة بعد. لا يُحصَّل أي مبلغ في هذه المعاينة.', 'Plan names are working names from the blueprint; no prices are approved yet. Nothing is charged in this preview.')}</InfoHint></p>
         </div>
         <div className="rounded-2xl border border-border p-5">
           <p className="text-xs font-medium text-muted">{tx('مقاعد الفريق', 'Team seats')}</p>
@@ -752,6 +756,7 @@ function Billing() {
             </div>
           </div>
           {impact.lost.length > 0 && <Alert tone="info">{tx('لا تُحذف بياناتك السابقة؛ تصبح الميزة للقراءة أو متوقفة وفق السياسة المعتمدة.', 'Your existing data is not deleted; the feature becomes read-only or paused under the approved policy.')}</Alert>}
+          <LimitChanges from={cur} to={target} />
           {impact.seatsOver > 0 && <Alert tone="warn" title={tx('المقاعد تتجاوز الحد', 'Seats over the limit')}>{tx(`تستخدم ${seats} مقاعد والحد ${impact.seatLimit}. أزل ${impact.seatsOver} قبل أن يسري التغيير.`, `You use ${seats} seats; the limit is ${impact.seatLimit}. Remove ${impact.seatsOver} before the change applies.`)}</Alert>}
           <div className="rounded-xl bg-surface-2/60 p-4"><dl className="space-y-2 text-sm">
             {[[tx('السعر الجديد', 'New price'), tx('بانتظار الاعتماد', 'Awaiting approval')], [tx('التناسب والضريبة', 'Proration and VAT'), tx('بانتظار الاعتماد', 'Awaiting approval')], [tx('موعد السريان', 'Effective'), tx('بعد اعتماد الأسعار وموافقتك', 'After prices are approved and you agree')]]

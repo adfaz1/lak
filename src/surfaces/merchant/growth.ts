@@ -1003,3 +1003,368 @@ export function runReorder(r: ReorderRule, cands: ReorderCandidate[], deliveries
   }
   return { deliveries: out, coupons: made };
 }
+
+/* ---------- Affiliates and influencer collaborations (P03-AFF, P03-INF) ---------- */
+// The merchant's own programme: people the merchant adds, a tracked link and/or code each, the merchant's commission
+// rules, attribution of store orders, commission states and payout runs. Whether LAK runs a managed affiliate network
+// or pays affiliates itself is an open decision: here payouts are recorded by the merchant (paid outside LAK).
+// No marketplace of people: every partner is added by the merchant; fixture entries are labelled «مثال».
+
+export type CommissionKind = 'percent' | 'fixed';
+/** percent: % of the eligible items' net value (after discount, before VAT and shipping). fixed: halalas per eligible unit. */
+export interface Rate { kind: CommissionKind; value: number }
+export interface CommissionRules {
+  base: Rate;
+  /** Category (English name) → rate that replaces the base for items in it. */
+  byCategory: Record<string, Rate>;
+  excludeCategories: string[];
+  /** Product ids that never earn commission. */
+  excludeProducts: string[];
+  /** Days a link visit stays attributable (1–90). */
+  cookieDays: number;
+  /** An affiliate is paid once owed at least this much (halalas). */
+  minPayout: number;
+  version: number; by: string; at: string;
+}
+export type PartnerKind = 'affiliate' | 'influencer';
+export type PartnerStatus = 'invited' | 'active' | 'paused';
+export type SocialPlatform = 'instagram' | 'tiktok' | 'snapchat' | 'x' | 'youtube';
+export const SOCIAL_PLATFORMS: SocialPlatform[] = ['instagram', 'tiktok', 'snapchat', 'x', 'youtube'];
+export interface Partner {
+  id: string; kind: PartnerKind; name: string; email?: string; phone?: string;
+  handles: { platform: SocialPlatform; handle: string }[];
+  /** Tracked link parameter (`?ref=CODE`) and, when `coupon` is set, the code shoppers type at checkout. */
+  code: string;
+  /** Coupon code that backs the code at checkout (a discount for followers). Absent = link only. */
+  coupon?: string;
+  /** Own rate instead of the programme base; null = no commission (e.g. an influencer paid a fee). */
+  rate?: Rate | null;
+  status: PartnerStatus; addedAt: string; by: string;
+  /** Fixture entry, shown with «مثال». */
+  example?: boolean;
+}
+/** Which partner an order is credited to, how, and the rules in force when it was placed (later edits apply to new orders). */
+export interface Attribution {
+  ref: string; partnerId: string; via: 'link' | 'code'; at: number;
+  rules: Pick<CommissionRules, 'base' | 'byCategory' | 'excludeCategories' | 'excludeProducts'>; rate?: Rate | null;
+  /** Fraud review: a held order the merchant approved anyway, or rejected (no commission). */
+  review?: { decision: 'approved' | 'rejected'; by: string; at: string };
+}
+export interface PayoutLine { partnerId: string; refs: { ref: string; amount: number }[]; total: number }
+export interface Payout { id: string; at: string; by: string; lines: PayoutLine[]; total: number; method: 'outside' }
+
+const AFF_DAY = 86_400_000;
+export const CODE_RE = /^[A-Z0-9]{3,16}$/;
+const digitsOf = (s: string) => toLatin(s).replace(/\D/g, '');
+const phoneTail = (s?: string) => (s ? digitsOf(s).slice(-9) : '');
+const emailKey = (s?: string) => (s ?? '').trim().toLowerCase();
+
+/** Tracked link to the storefront (any store path) for a partner code. */
+export const partnerLink = (code: string, path = '') => `#/store${path}?ref=${encodeURIComponent(code)}`;
+/** A suggested free code from a seed (latin letters/digits from the name or e-mail, else P + number). */
+export function suggestCode(seed: string, taken: string[]): string {
+  const up = new Set(taken.map((t) => t.toUpperCase()));
+  const base = (toLatin(seed).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 10)) || 'P';
+  if (base.length >= 3 && !up.has(base)) return base;
+  for (let i = 10; i < 10_000; i++) { const c = `${base.length >= 3 ? base.slice(0, 8) : 'PARTNER'.slice(0, Math.max(1, 3 - base.length) + 4)}${i}`; if (!up.has(c)) return c; }
+  return `P${Date.now()}`.slice(0, 16);
+}
+
+export interface PartnerDraft {
+  kind: PartnerKind; name: string; email: string; phone: string; code: string;
+  handles: { platform: SocialPlatform; handle: string }[];
+  /** Give followers a discount: creates a coupon with the same code. */
+  discount: boolean; discountPct: string;
+  /** '' = programme base; 'none' = no commission; else own rate. */
+  rateMode: '' | 'none' | CommissionKind; rateValue: string;
+}
+export const emptyPartnerDraft = (kind: PartnerKind): PartnerDraft => ({
+  kind, name: '', email: '', phone: '', code: '', handles: kind === 'influencer' ? [{ platform: 'instagram', handle: '' }] : [],
+  discount: kind === 'influencer', discountPct: '', rateMode: kind === 'influencer' ? 'none' : '', rateValue: '',
+});
+export type PartnerError = 'name' | 'contact' | 'email' | 'phone' | 'code' | 'codeTaken' | 'pct' | 'rate' | 'handle';
+const validEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+const validSaPhone = (s: string) => /^(\+?966|0)?5\d{8}$/.test(digitsOf(s).replace(/^00/, ''));
+/** Number from merchant input (Arabic digits, Arabic decimal comma). NaN when not a plain number. */
+export const numIn = (s: string) => { const t = toLatin(s).replace('٫', '.').replace(/[,،\s]/g, ''); return /^\d+(\.\d{1,2})?$/.test(t) ? Number(t) : NaN; };
+
+export function validatePartner(d: PartnerDraft, partners: Partner[], coupons: Coupon[], editingId?: string): PartnerError[] {
+  const e: PartnerError[] = [];
+  if (d.name.trim().length < 2) e.push('name');
+  // Affiliates get an invitation, so they need a way to be reached; influencers may be added by handle only.
+  if (d.kind === 'affiliate' && !d.email.trim() && !d.phone.trim()) e.push('contact');
+  if (d.email.trim() && !validEmail(d.email)) e.push('email');
+  if (d.phone.trim() && !validSaPhone(d.phone)) e.push('phone');
+  if (d.kind === 'influencer' && !d.handles.some((h) => h.handle.trim())) e.push('handle');
+  const code = toLatin(d.code).toUpperCase();
+  if (!CODE_RE.test(code)) e.push('code');
+  else if (partners.some((p) => p.id !== editingId && p.code === code) || (!editingId && coupons.some((c) => c.code === code))) e.push('codeTaken');
+  if (d.discount && !editingId) { const p = numIn(d.discountPct); if (!Number.isInteger(p) || p < 1 || p > 90) e.push('pct'); }
+  if (d.rateMode === 'percent') { const v = numIn(d.rateValue); if (!(v > 0 && v <= 90)) e.push('rate'); }
+  if (d.rateMode === 'fixed') { const v = numIn(d.rateValue); if (!(v > 0 && v <= 10_000)) e.push('rate'); }
+  return e;
+}
+export function rateFromDraft(d: Pick<PartnerDraft, 'rateMode' | 'rateValue'>): Rate | null | undefined {
+  if (d.rateMode === '') return undefined;
+  if (d.rateMode === 'none') return null;
+  const v = numIn(d.rateValue);
+  return d.rateMode === 'percent' ? { kind: 'percent', value: v } : { kind: 'fixed', value: Math.round(v * 100) };
+}
+export function partnerFromDraft(d: PartnerDraft, id: string, by: string, today: string): Partner {
+  const code = toLatin(d.code).toUpperCase();
+  return {
+    id, kind: d.kind, name: d.name.trim(), email: d.email.trim() || undefined, phone: d.phone.trim() ? digitsOf(d.phone) : undefined,
+    handles: d.handles.filter((h) => h.handle.trim()).map((h) => ({ platform: h.platform, handle: h.handle.trim().replace(/^@?/, '@') })),
+    code, ...(d.discount ? { coupon: code } : {}), rate: rateFromDraft(d), status: d.kind === 'affiliate' ? 'invited' : 'active', addedAt: today, by,
+  };
+}
+/** The coupon that lets followers type the partner's code at checkout. One use per customer; the merchant can edit it later. */
+export const partnerCoupon = (code: string, pct: number, today: string): Coupon =>
+  ({ code, type: 'percent', value: pct, minSpend: 0, limitTotal: null, limitPerCustomer: 1, used: 0, starts: today, ends: null, status: 'active' });
+
+export interface RulesDraft { baseKind: CommissionKind; baseValue: string; cookieDays: string; minPayout: string; byCategory: { cat: string; kind: CommissionKind; value: string }[]; excludeCategories: string[]; excludeProducts: string[] }
+const rateText = (r: Rate) => (r.kind === 'percent' ? String(r.value) : (r.value / 100).toFixed(2).replace(/\.00$/, ''));
+export const rulesDraft = (r: CommissionRules): RulesDraft => ({
+  baseKind: r.base.kind, baseValue: rateText(r.base), cookieDays: String(r.cookieDays), minPayout: (r.minPayout / 100).toFixed(2).replace(/\.00$/, ''),
+  byCategory: Object.entries(r.byCategory).map(([cat, x]) => ({ cat, kind: x.kind, value: rateText(x) })), excludeCategories: [...r.excludeCategories], excludeProducts: [...r.excludeProducts],
+});
+export type RulesError = 'base' | 'cookie' | 'min' | 'cat' | 'catDup';
+const rateOk = (kind: CommissionKind, s: string) => { const v = numIn(s); return kind === 'percent' ? v >= 0 && v <= 90 : v >= 0 && v <= 10_000; };
+export function validateRules(d: RulesDraft): RulesError[] {
+  const e: RulesError[] = [];
+  if (!rateOk(d.baseKind, d.baseValue)) e.push('base');
+  const c = numIn(d.cookieDays); if (!Number.isInteger(c) || c < 1 || c > 90) e.push('cookie');
+  if (!(numIn(d.minPayout) >= 0)) e.push('min');
+  if (d.byCategory.some((x) => !x.cat || !rateOk(x.kind, x.value))) e.push('cat');
+  if (new Set(d.byCategory.map((x) => x.cat)).size !== d.byCategory.length) e.push('catDup');
+  return e;
+}
+const toRate = (kind: CommissionKind, s: string): Rate => (kind === 'percent' ? { kind, value: numIn(s) } : { kind, value: Math.round(numIn(s) * 100) });
+export function rulesFromDraft(d: RulesDraft, prev: CommissionRules, by: string, at: string): CommissionRules {
+  return {
+    base: toRate(d.baseKind, d.baseValue), byCategory: Object.fromEntries(d.byCategory.map((x) => [x.cat, toRate(x.kind, x.value)])),
+    excludeCategories: d.excludeCategories, excludeProducts: d.excludeProducts, cookieDays: numIn(d.cookieDays), minPayout: Math.round(numIn(d.minPayout) * 100),
+    version: prev.version + 1, by, at,
+  };
+}
+
+/* Attribution: a code typed at checkout wins over a link visit; a link counts within the cookie window. Paused partners earn nothing new. */
+export interface AffTouch { code: string; at: number }
+export function attributeOrder(order: { ref: string; coupon?: string }, touch: AffTouch | null, partners: Partner[], rules: CommissionRules, now: number): Attribution | null {
+  const live = partners.filter((p) => p.status !== 'paused');
+  const byCode = order.coupon ? live.find((p) => p.coupon && p.coupon === order.coupon) : undefined;
+  const byLink = !byCode && touch && now - touch.at <= rules.cookieDays * AFF_DAY ? live.find((p) => p.code === touch.code.toUpperCase()) : undefined;
+  const p = byCode ?? byLink;
+  if (!p) return null;
+  const { base, byCategory, excludeCategories, excludeProducts } = rules;
+  return { ref: order.ref, partnerId: p.id, via: byCode ? 'code' : 'link', at: now, rules: { base, byCategory, excludeCategories, excludeProducts }, ...(p.rate !== undefined ? { rate: p.rate } : {}) };
+}
+
+type CProduct = { id: string; sku: string; category: L; variants: { sku: string }[] };
+const productBySku = (products: CProduct[]) => {
+  const m = new Map<string, CProduct>();
+  for (const p of products) { m.set(p.sku, p); for (const v of p.variants) m.set(v.sku, p); }
+  return m;
+};
+export interface CommissionItem { sku: string; name: L; category?: L; units: number; net: number; rate: Rate | null; amount: number; excluded?: 'category' | 'product' }
+/** Share of the order total refunded (confirmed refunds), 0–1. */
+export const refundShare = (o: Order) => { const t = o.items.reduce((s, i) => s + i.qty * i.unit, 0) - (o.discount ?? 0) + o.fee; const r = o.refunds.filter((x) => x.status === 'confirmed').reduce((s, x) => s + x.amount, 0); return t > 0 ? Math.min(1, r / t) : 0; };
+/** Commission on an attributed order with the rules recorded at attribution. Net = after the order discount, before VAT, without shipping. */
+export function commissionFor(o: Order, a: Attribution, products: CProduct[]): { items: CommissionItem[]; base: number; amount: number } {
+  const bySku = productBySku(products);
+  const gross = o.items.reduce((s, i) => s + i.qty * i.unit, 0);
+  const keep = gross > 0 ? Math.max(0, gross - (o.discount ?? 0)) / gross : 0;
+  const left = 1 - refundShare(o);
+  const items = o.items.filter((i) => i.unit > 0).map((i): CommissionItem => {
+    const p = bySku.get(i.sku);
+    const units = Math.round(i.qty * left * 100) / 100;
+    const net = Math.round((i.qty * i.unit * keep * left) / 1.15);
+    const base = { sku: i.sku, name: i.name, category: p?.category, units, net };
+    if (p && a.rules.excludeProducts.includes(p.id)) return { ...base, rate: null, amount: 0, excluded: 'product' };
+    if (p && a.rules.excludeCategories.includes(p.category.en)) return { ...base, rate: null, amount: 0, excluded: 'category' };
+    const rate = a.rate === null ? null : (p && a.rules.byCategory[p.category.en]) || a.rate || a.rules.base;
+    const amount = !rate ? 0 : rate.kind === 'percent' ? Math.round((net * rate.value) / 100) : Math.round(rate.value * units);
+    return { ...base, rate, amount };
+  });
+  return { items, base: items.filter((x) => !x.excluded).reduce((s, x) => s + x.net, 0), amount: items.reduce((s, x) => s + x.amount, 0) };
+}
+
+/** Fraud checks: the partner bought through their own link or code (same phone or e-mail). */
+export function selfReferral(o: Order, p: Partner): boolean {
+  const ph = phoneTail(o.contact?.phone);
+  const em = emailKey(o.contact?.email);
+  return (!!ph && ph === phoneTail(p.phone)) || (!!em && em === emailKey(p.email));
+}
+
+/**
+ * pending: inside the return window · approved: window over, payable · held: fraud check, waiting for the merchant ·
+ * paid: fully paid in a payout · reversed: cancelled/refunded before payment (or rejected) · clawback: paid, then refunded,
+ * so the next payout deducts the difference.
+ */
+export type CommissionState = 'pending' | 'approved' | 'held' | 'paid' | 'reversed' | 'clawback';
+export interface CommissionLine { ref: string; partnerId: string; via: Attribution['via']; at: number; ageDays: number; revenue: number; base: number; amount: number; paid: number; owed: number; state: CommissionState; flags: ('self' | 'refund' | 'cancelled')[]; approvesIn: number }
+export const orderAgeDays = (o: Order, now: number) => (o.placedAt ? (now - o.placedAt) / AFF_DAY : o.hoursAgo / 24);
+export function paidByRef(payouts: Payout[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const po of payouts) for (const l of po.lines) for (const r of l.refs) m.set(r.ref, (m.get(r.ref) ?? 0) + r.amount);
+  return m;
+}
+export function commissionLines(orders: Order[], atts: Attribution[], partners: Partner[], products: CProduct[], payouts: Payout[], returnDays: number, now: number): CommissionLine[] {
+  const byRef = new Map(orders.map((o) => [o.ref, o]));
+  const paid = paidByRef(payouts);
+  const out: CommissionLine[] = [];
+  for (const a of atts) {
+    const o = byRef.get(a.ref);
+    const p = partners.find((x) => x.id === a.partnerId);
+    if (!o || !p) continue;
+    const cancelled = !!o.cancelled || o.pay === 'failed';
+    const refunded = refundShare(o);
+    const flags: CommissionLine['flags'] = [];
+    if (selfReferral(o, p)) flags.push('self');
+    if (refunded > 0) flags.push('refund');
+    if (cancelled) flags.push('cancelled');
+    const rejected = a.review?.decision === 'rejected';
+    const c = cancelled || rejected ? { base: 0, amount: 0 } : commissionFor(o, a, products);
+    const got = paid.get(a.ref) ?? 0;
+    const age = orderAgeDays(o, now);
+    const revenue = cancelled ? 0 : Math.round((o.items.reduce((s, i) => s + i.qty * i.unit, 0) - (o.discount ?? 0)) * (1 - refunded));
+    let state: CommissionState;
+    if (got > c.amount) state = 'clawback';
+    else if (c.amount === 0 && (cancelled || rejected || refunded >= 1)) state = 'reversed';
+    else if (got > 0 && got === c.amount) state = 'paid';
+    else if (flags.includes('self') && a.review?.decision !== 'approved') state = 'held';
+    else if (age < returnDays) state = 'pending';
+    else state = 'approved';
+    out.push({ ref: a.ref, partnerId: a.partnerId, via: a.via, at: a.at, ageDays: age, revenue, base: c.base, amount: c.amount, paid: got, owed: c.amount - got, state, flags, approvesIn: Math.max(0, Math.ceil(returnDays - age)) });
+  }
+  return out.sort((x, y) => x.ageDays - y.ageDays);
+}
+
+export interface PartnerTotals { orders: number; revenue: number; pending: number; approved: number; paid: number; held: number; clawback: number }
+export function partnerTotals(lines: CommissionLine[], partnerId?: string): PartnerTotals {
+  const l = partnerId ? lines.filter((x) => x.partnerId === partnerId) : lines;
+  const sum = (s: CommissionState[], f: (x: CommissionLine) => number) => l.filter((x) => s.includes(x.state)).reduce((a, x) => a + f(x), 0);
+  return {
+    orders: l.filter((x) => x.state !== 'reversed').length, revenue: l.reduce((a, x) => a + x.revenue, 0),
+    pending: sum(['pending'], (x) => x.owed), approved: sum(['approved'], (x) => x.owed), held: sum(['held'], (x) => x.owed),
+    paid: l.reduce((a, x) => a + x.paid, 0), clawback: sum(['clawback'], (x) => -x.owed),
+  };
+}
+
+/** Who a payout run would pay now: approved owed minus clawbacks, per partner; under the minimum or nothing owed = skipped. */
+export interface PayoutPreviewRow { partner: Partner; refs: { ref: string; amount: number }[]; approved: number; clawback: number; total: number; skip?: 'min' | 'none' | 'paused' }
+export function payoutPreview(lines: CommissionLine[], partners: Partner[], minPayout: number): PayoutPreviewRow[] {
+  return partners.map((p) => {
+    const mine = lines.filter((l) => l.partnerId === p.id && (l.state === 'approved' || l.state === 'clawback'));
+    const refs = mine.map((l) => ({ ref: l.ref, amount: l.owed }));
+    const approved = refs.filter((r) => r.amount > 0).reduce((s, r) => s + r.amount, 0);
+    const clawback = -refs.filter((r) => r.amount < 0).reduce((s, r) => s + r.amount, 0);
+    const total = approved - clawback;
+    const skip = !refs.length || total <= 0 ? 'none' as const : p.status === 'paused' ? 'paused' as const : total < minPayout ? 'min' as const : undefined;
+    return { partner: p, refs, approved, clawback, total, ...(skip ? { skip } : {}) };
+  }).filter((r) => r.refs.length > 0);
+}
+export function runPayout(preview: PayoutPreviewRow[], id: string, by: string, at: string): Payout | null {
+  const lines = preview.filter((r) => !r.skip).map((r) => ({ partnerId: r.partner.id, refs: r.refs, total: r.total }));
+  return lines.length ? { id, at, by, lines, total: lines.reduce((s, l) => s + l.total, 0), method: 'outside' } : null;
+}
+
+const STATE_TEXT: Record<CommissionState, L> = {
+  pending: { ar: 'معلّقة حتى انتهاء مهلة الإرجاع', en: 'Pending (return window)' }, approved: { ar: 'معتمدة', en: 'Approved' }, held: { ar: 'موقوفة للمراجعة', en: 'Held for review' },
+  paid: { ar: 'مدفوعة', en: 'Paid' }, reversed: { ar: 'ملغاة', en: 'Reversed' }, clawback: { ar: 'تُخصم من الدفعة القادمة', en: 'Deducted next payout' },
+};
+export const commissionStateText = (s: CommissionState) => STATE_TEXT[s];
+const csvCell = (v: string | number) => { const s = String(v); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+/** Statement for one partner: every attributed order with its commission and state. Amounts in SAR. */
+export function statementCsv(p: Partner, lines: CommissionLine[], lang: 'ar' | 'en'): string {
+  const sar = (h: number) => (h / 100).toFixed(2);
+  const head = lang === 'ar' ? ['الطلب', 'المصدر', 'عمر الطلب (يوم)', 'المبيعات', 'أساس العمولة', 'العمولة', 'مدفوع', 'المتبقي', 'الحالة'] : ['Order', 'Source', 'Order age (days)', 'Sales', 'Commission base', 'Commission', 'Paid', 'Owed', 'State'];
+  const rows = lines.filter((l) => l.partnerId === p.id).map((l) => [l.ref, l.via === 'code' ? (lang === 'ar' ? 'كود' : 'Code') : (lang === 'ar' ? 'رابط' : 'Link'), Math.floor(l.ageDays), sar(l.revenue), sar(l.base), sar(l.amount), sar(l.paid), sar(l.owed), STATE_TEXT[l.state][lang]]);
+  const t = partnerTotals(lines, p.id);
+  return [[`${p.name} · ${p.code}`], head, ...rows, [], [lang === 'ar' ? 'الإجمالي المدفوع' : 'Total paid', sar(t.paid)], [lang === 'ar' ? 'معتمد غير مدفوع' : 'Approved unpaid', sar(t.approved)], [lang === 'ar' ? 'معلّق' : 'Pending', sar(t.pending)]]
+    .map((r) => r.map(csvCell).join(',')).join('\n');
+}
+
+/* Influencer collaborations: the merchant's brief, deliverables with dates, gifted products (zero-priced manual orders), cost and results. */
+export type DeliverableKind = 'post' | 'story' | 'reel' | 'video' | 'live';
+export const DELIVERABLE_KINDS: DeliverableKind[] = ['post', 'story', 'reel', 'video', 'live'];
+export interface Deliverable { id: string; kind: DeliverableKind; platform: SocialPlatform; due: string; done?: { at: string; url?: string }; missed?: boolean }
+export interface Collab {
+  id: string; partnerId: string; title: string; brief: string; starts: string; ends: string;
+  /** What the merchant pays the influencer (halalas), entered by the merchant. */
+  fee: number;
+  deliverables: Deliverable[];
+  /** Zero-priced manual orders sent as gifts; `value` = cost of the goods (product cost, else price before VAT). */
+  gifts: { ref: string; value: number }[];
+  status: 'active' | 'done' | 'cancelled'; createdAt: string; by: string; example?: boolean;
+}
+export type DeliverableState = 'planned' | 'due' | 'late' | 'delivered' | 'missed';
+export function deliverableState(d: Deliverable, today: string): DeliverableState {
+  if (d.done) return 'delivered';
+  if (d.missed) return 'missed';
+  if (d.due < today) return 'late';
+  return d.due === today ? 'due' : 'planned';
+}
+export interface CollabDraft { title: string; brief: string; starts: string; ends: string; fee: string; deliverables: { kind: DeliverableKind; platform: SocialPlatform; due: string }[] }
+export type CollabError = 'title' | 'dates' | 'fee' | 'deliverables' | 'due';
+export function validateCollab(d: CollabDraft): CollabError[] {
+  const e: CollabError[] = [];
+  if (d.title.trim().length < 3) e.push('title');
+  if (!d.starts || !d.ends || d.ends < d.starts) e.push('dates');
+  if (d.fee.trim() && !(numIn(d.fee) >= 0)) e.push('fee');
+  if (!d.deliverables.length) e.push('deliverables');
+  if (d.deliverables.some((x) => !x.due || x.due < d.starts || x.due > d.ends)) e.push('due');
+  return e;
+}
+export function collabFromDraft(d: CollabDraft, id: string, partnerId: string, by: string, today: string): Collab {
+  return {
+    id, partnerId, title: d.title.trim(), brief: d.brief.trim(), starts: d.starts, ends: d.ends, fee: d.fee.trim() ? Math.round(numIn(d.fee) * 100) : 0,
+    deliverables: d.deliverables.map((x, i) => ({ id: `${id}-D${i + 1}`, kind: x.kind, platform: x.platform, due: x.due })), gifts: [], status: 'active', createdAt: today, by,
+  };
+}
+/** Results of a collaboration: orders credited to the influencer from its start to 7 days after it ends, and the return on its cost. */
+export function collabResults(c: Collab, lines: CommissionLine[], orders: Order[], now: number, today: string) {
+  const dayOf = (ref: string) => { const o = orders.find((x) => x.ref === ref); return o ? new Date(now - orderAgeDays(o, now) * AFF_DAY + 3 * 3_600_000).toISOString().slice(0, 10) : ''; };
+  const end = new Date(Date.parse(`${c.ends}T00:00:00Z`) + 7 * AFF_DAY).toISOString().slice(0, 10);
+  const mine = lines.filter((l) => l.partnerId === c.partnerId && l.state !== 'reversed' && dayOf(l.ref) >= c.starts && dayOf(l.ref) <= end);
+  const revenue = mine.reduce((s, l) => s + l.revenue, 0);
+  const commission = mine.reduce((s, l) => s + l.amount, 0);
+  const gifts = c.gifts.reduce((s, g) => s + g.value, 0);
+  const cost = c.fee + gifts + commission;
+  const delivered = c.deliverables.filter((d) => deliverableState(d, today) === 'delivered').length;
+  return { orders: mine.length, revenue, commission, gifts, fee: c.fee, cost, roi: cost > 0 ? (revenue - cost) / cost : null, delivered, total: c.deliverables.length, late: c.deliverables.filter((d) => deliverableState(d, today) === 'late').length };
+}
+
+/* Fixtures: one example affiliate and one example influencer, labelled «مثال», credited with a few existing orders. */
+export function commissionRulesFixture(): CommissionRules {
+  return { base: { kind: 'percent', value: 10 }, byCategory: {}, excludeCategories: [], excludeProducts: [], cookieDays: 30, minPayout: 10000, version: 1, by: 'مثال للتجربة', at: '2026-11-01' };
+}
+export function partnerFixtures(): Partner[] {
+  return [
+    { id: 'AF-EX1', kind: 'affiliate', name: 'مسوّق تجريبي', email: 'affiliate@example.com', handles: [], code: 'EXAMPLE', rate: undefined, status: 'active', addedAt: '2026-10-01', by: 'مثال للتجربة', example: true },
+    { id: 'IN-EX1', kind: 'influencer', name: 'حساب مؤثر تجريبي', handles: [{ platform: 'instagram', handle: '@example' }], code: 'EXAMPLEIG', rate: null, status: 'active', addedAt: '2026-11-10', by: 'مثال للتجربة', example: true },
+  ];
+}
+export function attributionFixtures(orders: Order[], rules = commissionRulesFixture()): Attribution[] {
+  const { base, byCategory, excludeCategories, excludeProducts } = rules;
+  const r = { base, byCategory, excludeCategories, excludeProducts };
+  const paid = orders.filter((o) => o.pay !== 'failed' && !o.cancelled && !o.manual);
+  const pick = (from: number, to: number, step: number, n: number) => paid.filter((o) => o.hoursAgo >= from && o.hoursAgo <= to).filter((_, i) => i % step === 0).slice(0, n);
+  const aff = [...pick(0, 300, 9, 4), ...pick(400, 900, 11, 5)];
+  const inf = pick(100, 330, 13, 3).filter((o) => !aff.includes(o));
+  return [
+    ...aff.map((o, i): Attribution => ({ ref: o.ref, partnerId: 'AF-EX1', via: i % 3 === 0 ? 'code' : 'link', at: 0, rules: r })),
+    ...inf.map((o): Attribution => ({ ref: o.ref, partnerId: 'IN-EX1', via: 'link', at: 0, rules: r, rate: null })),
+  ];
+}
+export function collabFixtures(): Collab[] {
+  return [{
+    id: 'CO-EX1', partnerId: 'IN-EX1', title: 'حملة عطور الشتاء', brief: 'مثال للتجربة: مراجعة صادقة لعطر العود مع ذكر الرابط.', starts: '2026-11-10', ends: '2026-11-30', fee: 50000,
+    deliverables: [
+      { id: 'CO-EX1-D1', kind: 'reel', platform: 'instagram', due: '2026-11-15', done: { at: '2026-11-15' } },
+      { id: 'CO-EX1-D2', kind: 'story', platform: 'instagram', due: '2026-11-22' },
+      { id: 'CO-EX1-D3', kind: 'post', platform: 'instagram', due: '2026-11-28' },
+    ],
+    gifts: [], status: 'active', createdAt: '2026-11-10', by: 'مثال للتجربة', example: true,
+  }];
+}

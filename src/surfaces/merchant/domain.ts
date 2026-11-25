@@ -9,6 +9,8 @@ export type Ful = 'none' | 'partial' | 'done';
 export type Ship = 'none' | 'label' | 'transit' | 'delivered';
 export type View = 'all' | 'needs' | 'late' | 'payfail' | 'shipped' | 'returns';
 export type Channel = 'online' | 'market' | 'app';
+/** Every order source: the product-visibility channels plus in-store POS and B2B wholesale (Phase D, channels group). */
+export type SalesChannel = Channel | 'pos' | 'wholesale';
 export type CarrierId = 'a' | 'b';
 /** A stock location id. Locations are data (see `Location`); 'ryd' and 'jed' are the two fixture warehouses. */
 export type LocId = string;
@@ -129,7 +131,8 @@ export interface Order {
   items: Item[];
   log: LogEntry[];
   confirmed: boolean;
-  channel: Channel;
+  /** Where the order came from. 'pos' = sold at the counter (dashboard/pos), 'wholesale' = B2B quote converted (dashboard/wholesale). */
+  channel: SalesChannel;
   fulfilments: Fulfilment[];
   refunds: Refund[];
   slips: number;
@@ -175,6 +178,13 @@ export interface Order {
   sub?: { id: string; parent: string; name: L; notify: boolean; at: number; by: string };
   /** What the checkout added (catalogue depth, catalog-extras.ts): answers, pre-order, codes, bookings, bundles. */
   extras?: import('./catalog-extras').OrderExtras;
+  /* Phase D channels (merchant/pos.ts, wholesale.ts, ads.ts). All optional. */
+  /** Counter sale: location, cashier, shift, receipt, tenders and change. */
+  pos?: import('./pos').PosMeta;
+  /** B2B order converted from a quote: buyer company, VAT, payment terms. */
+  wholesale?: import('./wholesale').WholesaleMeta;
+  /** Campaign tags the shopper arrived with (utm_source / utm_medium / utm_campaign). */
+  utm?: { source: string; medium: string; campaign: string };
 }
 
 export const CARRIERS: Record<CarrierId, { name: L; price: number }> = {

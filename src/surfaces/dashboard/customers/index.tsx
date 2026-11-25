@@ -22,6 +22,7 @@ import {
 import { Activity, AddressesCard, BlockModal, RewardsCard, WithdrawConsent } from './activity';
 import SegmentEditor from './segments';
 import ImportCustomers from './import';
+import { WalletCard } from './wallet-card';
 
 const href = (path = '', q?: Record<string, string | undefined>) => link(`/dashboard/customers${path ? `/${path}` : ''}`, q);
 
@@ -265,6 +266,7 @@ function Profile({ id, route }: { id: string; route: Route }) {
           </Card>
           <AddressesCard c={c} />
           <RewardsCard c={c} />
+          <WalletCard c={c} />
           <NotesCard id={c.id} />
         </div>
       </div>

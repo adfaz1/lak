@@ -12,6 +12,7 @@ import SeoPage from './seo';
 import LandingPages from './landing';
 import RedirectsPage from './redirects';
 import BlogPage from './blog';
+import ThemesPage from './themes';
 import { can, canSee } from '../../merchant/perms';
 import { logAction, settingsStore, themeStore } from '../../merchant/stores';
 import type { StoreIdentity, StoreStatus } from '../../merchant/workspace';
@@ -41,6 +42,7 @@ export default function StorefrontSection({ route }: { route: Route }) {
   if (sub === 'landing') return <LandingPages route={route} />;
   if (sub === 'redirects') return <RedirectsPage route={route} />;
   if (sub === 'blog') return <BlogPage route={route} />;
+  if (sub === 'themes') return <ThemesPage route={route} />;
   if (sub) return <SubNotFound />;
   return <ThemePage route={route} />;
 }

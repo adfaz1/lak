@@ -11,6 +11,7 @@ import { normTerm, type NotifyRequest, type SearchEvent, type SearchRedirect, ty
 import { link } from '../../../core/router';
 import { productIdForSku } from '../model/media';
 import { TODAY, inRange, orderDay, ordersIn, pct, type Range } from './range';
+import { walletLiability } from '../../merchant/wallet';
 import { LEDGER_START, type Cell, type Inputs, type Metric, type Report, type Table, type Unit } from './reports';
 
 const l = (ar: string, en: string): L => ({ ar, en });
@@ -102,6 +103,11 @@ export function financeReport(x: Inputs, r: Range, c: Range | null, q: Record<st
   const notes: L[] = [];
   if (a.refunds === null) notes.push(l('الاستردادات والرسوم: «لا بيانات» قبل بداية السجل المالي (1 نوفمبر)، فالمحصّل والصافي هنا قبل الاستردادات والرسوم.', 'Refunds and fees: no data before the ledger starts (1 Nov), so collected and net here are before refunds and fees.'));
   if (a.cogs === null) notes.push(l(`التكلفة والربح التقديري غير معروضين: التكلفة مسجلة لـ${a.costCoverage ?? 0}% من القطع (المطلوب 80%).`, `Cost and estimated profit not shown: cost is recorded for ${a.costCoverage ?? 0}% of units (80% needed).`));
+  if (x.wallet?.length) {
+    const w = walletLiability(x.wallet, TODAY, 30);
+    const m = (v: number) => (v / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    notes.push(l(`رصيد محافظ العملاء القائم ${m(w.outstanding)} ر.س (ينتهي منه خلال 30 يومًا ${m(w.soon)} ر.س): التزام على المتجر وليس إيرادًا. الاستردادات إلى المحفظة لا تظهر في «الاستردادات» لأنها لم تُدفع نقدًا.`, `Outstanding customer wallet credit SAR ${m(w.outstanding)} (SAR ${m(w.soon)} expiring within 30 days): owed by the store, not revenue. Refunds to the wallet are not in “Refunds” because no cash was paid out.`));
+  }
   return { id: 'finance', metrics, tables: [statement], notes, source: l('دفتر الطلبات والسجل المالي', 'Order book and ledger') };
 }
 

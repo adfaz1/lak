@@ -19,6 +19,9 @@ import { appsSimStore, syncLogStore } from './state';
 import { useReviewMode } from '../../../core/review';
 import { logAction } from '../../merchant/stores';
 import { Select } from '../../../ds/kit';
+import ServicesPage from './services';
+import PackagingPage from './packaging';
+import { HubTabs } from './hub';
 import { APP_VIEWS, actionsFor, categories, filterApps, isPersonal, isWrite, limits, needsAttention, personalScopes, viewCounts, type AppAction, type AppView } from './model';
 
 const S_TONE: Record<AppState, Tone> = { not_connected: 'gray', connected: 'green', reauth: 'amber', error: 'red' };
@@ -38,6 +41,8 @@ export default function Apps({ route }: { route: Route }) {
   const tx = useTx();
   const role = useRole();
   if (!canSee(role, 'apps')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('التطبيقات غير متاحة لدورك', 'Apps are not available for your role')} /></div>;
+  if (!route.path[0] && route.query.get('tab') === 'services') return <ServicesPage route={route} />;
+  if (!route.path[0] && route.query.get('tab') === 'packaging') return <PackagingPage route={route} />;
   return route.path[0] ? <Detail id={route.path[0]} /> : <Catalogue route={route} />;
 }
 
@@ -69,6 +74,7 @@ function Catalogue({ route }: { route: Route }) {
     <>
       <PageHeader title={tx('التطبيقات', 'Apps')} description={tx('كتالوج تجريبي · كل ربط محاكاة', 'Demo catalogue · every connection is simulated')}
         actions={state === 'live' && attention.length > 0 ? <LinkButton href={hrefA(attention[0].id)}>{tx(`راجع ${attention.length} تحتاج انتباهك`, `Review ${attention.length} needing attention`)}</LinkButton> : undefined} />
+      <HubTabs current="apps" />
       <ReviewRole />
     </>
   );

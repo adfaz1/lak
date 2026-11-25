@@ -21,10 +21,14 @@ import Loyalty from './loyalty';
 import GiftCards from './gift-cards';
 import Reviews from './reviews';
 import Reminders from './reminders';
+import WalletTab from './wallet';
+import Cashback from './cashback';
+import Affiliates from './affiliates';
+import Influencers from './influencers';
 
-export type Tab = 'coupons' | 'carts' | 'reminders' | 'campaigns' | 'loyalty' | 'gift-cards' | 'reviews';
+export type Tab = 'coupons' | 'carts' | 'reminders' | 'campaigns' | 'loyalty' | 'gift-cards' | 'reviews' | 'wallet' | 'cashback' | 'affiliates' | 'influencers';
 export const mhref = (q?: Record<string, string | undefined>) => link('/dashboard/marketing', q);
-const SUB: Tab[] = ['reminders', 'loyalty', 'gift-cards', 'reviews'];
+const SUB: Tab[] = ['reminders', 'loyalty', 'gift-cards', 'reviews', 'wallet', 'cashback', 'affiliates', 'influencers'];
 
 export default function Marketing({ route }: { route: Route }) {
   const tx = useTx();
@@ -38,6 +42,9 @@ export default function Marketing({ route }: { route: Route }) {
   useSendRunner();
 
   if (!canSee(role, 'marketing')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('التسويق غير متاح لدورك', 'Marketing is not available for your role')} /></div>;
+  if (route.path[0] === 'affiliates' && route.path[1]) return <Affiliates route={route} empty={false} canManage={can(role, 'marketing.manage')} />;
+  if (route.path[0] === 'influencers' && route.path[1]) return <Influencers route={route} empty={false} canManage={can(role, 'marketing.manage')} />;
+  if (route.path[0] === 'cashback' && route.path[1]) return <Cashback route={route} empty={false} canManage={can(role, 'marketing.manage')} />;
   if (route.path[0] === 'coupons' && route.path[1]) return <CouponEditor key={route.path[1] + (route.query.get('auto') ?? '')} code={route.path[1]} auto={route.query.get('auto') === '1'} />;
 
   const q = route.query.get('tab');
@@ -69,6 +76,10 @@ export default function Marketing({ route }: { route: Route }) {
         { href: sublink('loyalty'), label: tx('الولاء', 'Loyalty'), current: tab === 'loyalty' },
         { href: sublink('gift-cards'), label: tx('بطاقات الهدايا', 'Gift cards'), current: tab === 'gift-cards', count: cnt(cards.filter((g) => giftState(g) === 'active').length) },
         { href: sublink('reviews'), label: tx('التقييمات والأسئلة', 'Reviews & questions'), current: tab === 'reviews', count: cnt(reviews.filter((r) => r.status === 'pending').length) },
+        { href: sublink('wallet'), label: tx('محفظة العميل', 'Customer wallet'), current: tab === 'wallet' },
+        { href: sublink('cashback'), label: tx('الكاش باك', 'Cashback'), current: tab === 'cashback' },
+        { href: sublink('affiliates'), label: tx('التسويق بالعمولة', 'Affiliates'), current: tab === 'affiliates' },
+        { href: sublink('influencers'), label: tx('المؤثرون', 'Influencers'), current: tab === 'influencers' },
       ]} />
     </>
   );
@@ -92,6 +103,10 @@ export default function Marketing({ route }: { route: Route }) {
       {tab === 'loyalty' && <Loyalty route={route} empty={empty} canManage={manage} />}
       {tab === 'gift-cards' && <GiftCards route={route} empty={empty} canManage={manage} />}
       {tab === 'reviews' && <Reviews route={route} empty={empty} canManage={manage} />}
+      {tab === 'wallet' && <WalletTab route={route} empty={empty} canManage={manage} />}
+      {tab === 'cashback' && <Cashback route={route} empty={empty} canManage={manage} />}
+      {tab === 'affiliates' && <Affiliates route={route} empty={empty} canManage={manage} />}
+      {tab === 'influencers' && <Influencers route={route} empty={empty} canManage={manage} />}
     </div>
   );
 }

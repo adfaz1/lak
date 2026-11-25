@@ -541,13 +541,13 @@ Declared: 244 features. PDF pages 11–30. Source states 24 modules; 24 groups f
 
 | ID | PDF page | Group | Feature | What it does | Plan access | Screen / route | Status | Evidence | Note |
 |---|---|---|---|---|---|---|---|---|---|
-| BP-P03-AFF-001 | 23 | Marketing — Affiliate | Affiliate Program | Referral links, commissions, payout management | Pro | — | not built | — |  |
+| BP-P03-AFF-001 | 23 | Marketing — Affiliate | Affiliate Program | Referral links, commissions, payout management | Pro | — | built (simulated payouts) | `#/dashboard/marketing/affiliates` | managed network = decision `affiliateNetwork` |
 
 ### P03-INF — Marketing — Influencer (declared 1)
 
 | ID | PDF page | Group | Feature | What it does | Plan access | Screen / route | Status | Evidence | Note |
 |---|---|---|---|---|---|---|---|---|---|
-| BP-P03-INF-001 | 23 | Marketing — Influencer | Influencer Discovery & Campaigns | Search, contract, execute, track, pay influencers | Pro | — | not built | — |  |
+| BP-P03-INF-001 | 23 | Marketing — Influencer | Influencer Discovery & Campaigns | Search, contract, execute, track, pay influencers | Pro | — | partial (no discovery) | `#/dashboard/marketing/influencers` | discovery/marketplace = decision `influencers` |
 
 ### P03-ADS — Marketing — Ads (declared 6)
 

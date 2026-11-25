@@ -5,7 +5,7 @@ import { ChevronDown, Minus, Plus, FlaskConical } from 'lucide-react';
 import { link } from '../../../core/router';
 import { useReviewMode } from '../../../core/review';
 import { levelsStore, logAction, ordersStore, stockLogStore, teamStore, testStore } from '../../merchant/stores';
-import type { Channel, Ful, Order, Pay, Ship } from '../../merchant/domain';
+import type { SalesChannel, Ful, Order, Pay, Ship } from '../../merchant/domain';
 import { payView, type Actor, type PayView, type ReturnStage, type StockEffect } from '../../merchant/ops';
 import { applyStockEffects } from '../../merchant/inventory';
 import { Badge, buttonClass, cn, useTx, type Tone } from '../../../ds/ui';
@@ -72,7 +72,7 @@ export function useLabels() {
     payView: (p: PayView) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), verifying: tx('بانتظار التحقق', 'Pending verification'), bank_due: tx('بانتظار التحويل', 'Awaiting transfer'), cod_due: tx('دفع عند الاستلام', 'Cash on delivery'), cod_collected: tx('حُصّل عند الاستلام', 'COD collected'), link: tx('بانتظار الدفع', 'Awaiting payment'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
     method: (m: PayMethodFilter) => ({ card: tx('بطاقة', 'Card'), applepay: 'Apple Pay', bnpl: tx('تقسيط', 'Buy now, pay later'), cod: tx('عند الاستلام', 'Cash on delivery'), bank: tx('تحويل بنكي', 'Bank transfer'), manual: tx('يدوي', 'Manual') })[m],
     stage: (s: ReturnStage) => ({ requested: tx('طلب جديد', 'Requested'), approved: tx('موافق عليه', 'Approved'), rejected: tx('مرفوض', 'Rejected'), received: tx('استُلم', 'Received'), inspected: tx('فُحص', 'Inspected'), refunded: tx('رُدّ المبلغ', 'Refunded'), exchanged: tx('استُبدل', 'Exchanged') })[s],
-    channel: (c: Channel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app') })[c],
+    channel: (c: SalesChannel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app'), pos: tx('نقطة البيع', 'Point of sale'), wholesale: tx('الجملة', 'Wholesale') })[c],
     pay: (p: Pay) => ({ paid: tx('مدفوع', 'Paid'), failed: tx('فشل الدفع', 'Payment failed'), partially_refunded: tx('مسترد جزئيًا', 'Partly refunded'), refunded: tx('مسترد بالكامل', 'Refunded') })[p],
     ful: (f: Ful) => ({ none: tx('لم يُجهَّز', 'Unfulfilled'), partial: tx('مجهّز جزئيًا', 'Partly fulfilled'), done: tx('مجهّز', 'Fulfilled') })[f],
     ship: (s: Ship) => ({ none: tx('لا شحنة', 'No shipment'), label: tx('صدر الملصق', 'Label issued'), transit: tx('في الطريق', 'In transit'), delivered: tx('تم التسليم', 'Delivered') })[s],

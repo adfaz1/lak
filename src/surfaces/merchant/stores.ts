@@ -99,7 +99,7 @@ export const reviewsStore = createStore.key('merchant.reviewsStore')<Review[]>(r
 export const reviewSettingsStore = createStore.key('merchant.reviewSettingsStore')(reviewSettingsFixture);
 export const segmentsStore = createStore.key('merchant.segmentsStore')<SavedSegment[]>(segmentFixtures);
 /** Things done to a customer record (block, unblock, consent withdrawn, points adjusted, imported), newest first. */
-export interface CustomerEvent { id: string; kind: 'blocked' | 'unblocked' | 'consentWithdrawn' | 'points' | 'imported' | 'giftCard'; text: string; by: string; at: number }
+export interface CustomerEvent { id: string; kind: 'blocked' | 'unblocked' | 'consentWithdrawn' | 'points' | 'imported' | 'giftCard' | 'wallet'; text: string; by: string; at: number }
 export const customerEventsStore = createStore.key('merchant.customerEventsStore')<Record<string, CustomerEvent[]>>(() => ({}));
 
 /* ---------- Customer order messages (orders group; merchant/ops.ts recordNotices). Simulated: nothing is sent. ---------- */

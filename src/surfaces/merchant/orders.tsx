@@ -4,7 +4,7 @@ import type { Route } from '../../core/router';
 import { Alert, Badge, Dialog, Sim, type Tone } from '../../core/ui';
 import {
   VIEWS, VIEW_IDS, bulkEligibility, runBulk, search, simBulkFails, total,
-  type BulkAction, type Channel, type Ful, type Ineligible, type Order, type Pay, type Ship, type View,
+  type BulkAction, type Channel, type SalesChannel, type Ful, type Ineligible, type Order, type Pay, type Ship, type View,
 } from './domain';
 import { can } from './perms';
 import { ordersStore, testStore } from './stores';
@@ -20,7 +20,7 @@ const CHANNELS: Channel[] = ['online', 'market', 'app'];
 
 export function useChannelName() {
   const tx = useTx();
-  return (c: Channel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app') })[c];
+  return (c: SalesChannel) => ({ online: tx('المتجر الإلكتروني', 'Online store'), market: tx('سوق لك', 'LAK marketplace'), app: tx('تطبيق المتجر', 'Store app'), pos: tx('نقطة البيع', 'Point of sale'), wholesale: tx('الجملة', 'Wholesale') })[c];
 }
 
 export function OrdersPage({ route }: { route: Route }) {

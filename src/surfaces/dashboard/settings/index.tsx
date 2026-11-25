@@ -29,6 +29,7 @@ const PAGES: Record<CatId, React.LazyExoticComponent<() => JSX.Element>> = {
   'order-statuses': lazy(() => import('./order-statuses')),
   invoice: lazy(() => import('./invoice')),
   exports: lazy(() => import('./exports')),
+  decisions: lazy(() => import('./decisions')),
 };
 
 export default function Settings({ route }: { route: Route }) {

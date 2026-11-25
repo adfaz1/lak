@@ -12,6 +12,8 @@ import { CUSTOMER, accountStore, cancelFromStore, cartStore, checkStatus, selfCa
 import { useCatalog, useConfig, useOrders } from '../data';
 import { simNow, useSim } from '../review';
 import { OrderHelp } from './Help';
+import { walletStore } from '../../merchant/wallet-store';
+import { walletPaid } from '../../merchant/wallet';
 
 export const payTone = (s: PayState): Tone =>
   s === 'paid' || s === 'cod_collected' ? 'green' : s === 'declined' ? 'red' : s === 'verifying' || s === 'challenge' || s === 'awaiting' || s === 'transfer_due' ? 'amber' : 'sky';
@@ -139,7 +141,21 @@ function Summary({ o }: { o: Order }) {
       <h2 className={H3}>{t.summary}</h2>
       <Lines o={o} />
       <Breakdown totals={o.totals} coupon={o.coupon} />
+      <WalletPaid orderRef={o.ref} total={o.totals.total} />
     </div>
+  );
+}
+
+/** Part of the order paid from store credit (merchant/wallet.ts), shown under the money breakdown. */
+function WalletPaid({ orderRef, total }: { orderRef: string; total: number }) {
+  const tx = useTx();
+  const paid = walletPaid(walletStore.use(), orderRef);
+  if (!paid) return null;
+  return (
+    <dl className="space-y-2.5 border-t border-dashed border-border pt-2.5 text-sm">
+      <div className="flex items-baseline justify-between gap-4"><dt className="text-muted">{tx('دُفع من رصيد المحفظة', 'Paid from store credit')}</dt><dd className="text-emerald-700 dark:text-emerald-400"><span dir="ltr" className="inline-flex items-baseline">−<Money v={paid} /></span></dd></div>
+      <div className="flex items-baseline justify-between gap-4"><dt className="font-semibold">{tx('بوسيلة الدفع', 'By payment method')}</dt><dd className="font-bold"><Money v={total - paid} /></dd></div>
+    </dl>
   );
 }
 

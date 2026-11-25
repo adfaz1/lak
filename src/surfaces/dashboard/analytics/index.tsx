@@ -17,6 +17,7 @@ import { productPhoto } from '../model/media';
 import { useDashState, setDashState } from '../review';
 import { sectionHref } from '../pages';
 import { downloadCsv } from '../finance/download';
+import { walletStore } from '../../merchant/wallet-store';
 import { byChannel, figuresFor, history, overviewCsv, parseMetric, periodProducts, rangePoints, rangeRows, topCities, type ChartMetric, type Figure } from './model';
 import { compareRange, ordersIn, periodQuery, readCompare, readPeriod, type CompareMode, type Preset, type Range } from './range';
 import { REPORTS, REPORT_DESC, REPORT_GROUPS, REPORT_LABEL, buildReport, isReport, parseProductSort, type Inputs, type ReportId } from './reports';
@@ -104,7 +105,7 @@ function Page({ route }: { route: Route }) {
     href: href({ ...qs({}, false), report: t === 'overview' ? undefined : t }),
     label: t === 'overview' ? tx('نظرة عامة', 'Overview') : REPORT_LABEL[t][lang], current: tab === t,
   }));
-  const inputs: Inputs = { orders: empty ? [] : allOrders, series: empty ? [] : full, products, carts: empty ? [] : carts, coupons: empty ? [] : coupons, txs: empty ? [] : fin.txs, names: canSee(role, 'customers'),
+  const inputs: Inputs = { orders: empty ? [] : allOrders, series: empty ? [] : full, products, carts: empty ? [] : carts, coupons: empty ? [] : coupons, txs: empty ? [] : fin.txs, names: canSee(role, 'customers'), wallet: empty ? [] : walletStore.get(),
     searches: empty ? [] : searches, redirects, notify: empty ? [] : notify, wishes: empty ? [] : wishes, levels, subs };
   const fix = tab === 'search' ? q.get('fix') : null;
   const alertKey = tab === 'demand' ? q.get('alert') : null;
