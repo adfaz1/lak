@@ -32,7 +32,8 @@ export default function FeeCalculator() {
     const d = feeFromOrders(orders.map((o) => ({ method: o.payment?.method, total: total(o), refunded: o.pay === 'refunded' })));
     set({ aov: d.aov, orders: d.orders, mix: d.mix, refundPct: d.refundPct });
   };
-  const errText = (x?: FeeErr) => x === 'required' ? tx('مطلوب', 'Required') : x === 'number' ? tx('رقم فقط', 'Numbers only') : x === 'pct' ? tx('من 0 إلى 100', '0 to 100') : x === 'mix' ? tx('مجموع الحصص يجب أن يكون 100%', 'Shares must total 100%') : null;
+  // Nothing is marked missing before the merchant starts filling the calculator.
+  const errText = (x?: FeeErr) => !started && (x === 'required' || x === 'mix') ? null : x === 'required' ? tx('مطلوب', 'Required') : x === 'number' ? tx('رقم فقط', 'Numbers only') : x === 'pct' ? tx('من 0 إلى 100', '0 to 100') : x === 'mix' ? tx('مجموع الحصص يجب أن يكون 100%', 'Shares must total 100%') : null;
   const method = (m: FeeMethod) => ({ mada: tx('مدى', 'mada'), card: tx('فيزا وماستركارد', 'Visa & Mastercard'), applepay: 'Apple Pay', bnpl: tx('تقسيط (تابي/تمارا)', 'BNPL (Tabby/Tamara)'), cod: tx('الدفع عند الاستلام', 'Cash on delivery') })[m];
   const mixSum = FEE_METHODS.reduce((a, m) => a + (parseNum(i.mix[m]) ?? 0), 0);
   const fmtDate = (iso: string) => new Date(`${iso}T00:00:00Z`).toLocaleDateString(lang === 'ar' ? 'ar-SA-u-nu-latn-ca-gregory' : 'en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
