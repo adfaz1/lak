@@ -209,7 +209,8 @@ function Ledger({ route, ledger, canManage, onAdjust, onBulk }: { route: Route; 
   return (
     <Card aria-labelledby="h-wled">
       <CardHeader id="h-wled" title={tx('سجل المحفظة', 'Wallet ledger')} hint={tx('كل حركة بمن قام بها ومتى ولماذا، ومربوطة بالطلب أو الاسترداد أو العرض الذي أنشأها. الرصيد = مجموع الحركات.', 'Every movement with who, when and why, tied to the order, refund or offer behind it. Balance = sum of movements.')}
-        action={canManage ? <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" onClick={onBulk}><Users className="size-3.5" aria-hidden="true" />{tx('رصيد لشريحة', 'Credit a segment')}</Button><Button size="sm" onClick={onAdjust}><Plus className="size-3.5" aria-hidden="true" />{tx('إضافة أو خصم', 'Credit or debit')}</Button></div> : undefined} />
+ />
+      {canManage && <div className="flex flex-wrap gap-2 px-4 pb-3 sm:px-5"><Button size="sm" onClick={onAdjust}><Plus className="size-3.5" aria-hidden="true" />{tx('إضافة أو خصم', 'Credit or debit')}</Button><Button size="sm" variant="secondary" onClick={onBulk}><Users className="size-3.5" aria-hidden="true" />{tx('رصيد لشريحة', 'Credit a segment')}</Button></div>}
       <div className="flex flex-wrap items-center gap-2 px-4 pb-3 sm:px-5">
         <SearchInput value={q} onChange={(v) => replace(href({ q: v || undefined, page: undefined }))} placeholder={tx('ابحث بالعميل أو الطلب أو السبب', 'Search customer, order or reason')} />
         <FilterChip label={tx('الحركة', 'Movement')} value={kind} onChange={(v) => replace(href({ kind: v || undefined, page: undefined }))} options={KINDS.map((k) => ({ value: k, label: kindName(k) }))} />

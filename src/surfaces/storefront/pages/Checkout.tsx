@@ -456,7 +456,7 @@ export default function Checkout() {
                   <span className="min-w-0 flex-1">
                     <span className="block text-sm font-semibold">{tx('استخدم رصيد محفظتك', 'Use your store credit')} · <Money v={wal.balance} /></span>
                     <span className="mt-0.5 block text-[13px] text-muted">{wal.max === 0 ? tx('لا يمكن استخدامه في هذا الطلب', 'Can’t be used on this order') : <>{tx('حتى', 'Up to')} <Money v={wal.max} />{wal.cappedBy === 'cap' ? tx(' (حد المتجر لكل طلب)', ' (the store’s limit per order)') : ''}</>}</span>
-                    {wSoon && <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">{tx(`ينتهي ${m(wSoon.amount)} منه في ${wSoon.expires}`, `${m(wSoon.amount)} of it expires on ${wSoon.expires}`)}</span>}
+                    {wSoon && <span className="mt-1 block text-xs font-medium text-amber-700 dark:text-amber-300">{tx(`ينتهي ${m(wSoon.amount)} منه في `, `${m(wSoon.amount)} of it expires on `)}<bdi dir="ltr">{wSoon.expires}</bdi></span>}
                   </span>
                 </label>
                 {wch.on && wal.max > 0 && (
