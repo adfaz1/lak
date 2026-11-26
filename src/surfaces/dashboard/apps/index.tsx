@@ -20,6 +20,7 @@ import { useReviewMode } from '../../../core/review';
 import { logAction } from '../../merchant/stores';
 import { Select } from '../../../ds/kit';
 import ServicesPage from './services';
+import FreeApps from './free';
 import PackagingPage from './packaging';
 import { HubTabs } from './hub';
 import { APP_VIEWS, actionsFor, categories, filterApps, isPersonal, isWrite, limits, needsAttention, personalScopes, viewCounts, type AppAction, type AppView } from './model';
@@ -41,6 +42,7 @@ export default function Apps({ route }: { route: Route }) {
   const tx = useTx();
   const role = useRole();
   if (!canSee(role, 'apps')) return <div className="space-y-6"><ReviewRole /><NoAccess title={tx('التطبيقات غير متاحة لدورك', 'Apps are not available for your role')} /></div>;
+  if ((!route.path[0] && route.query.get('tab') === 'free') || route.path[0] === 'free') return <FreeApps route={route} />;
   if (!route.path[0] && route.query.get('tab') === 'services') return <ServicesPage route={route} />;
   if (!route.path[0] && route.query.get('tab') === 'packaging') return <PackagingPage route={route} />;
   return route.path[0] ? <Detail id={route.path[0]} /> : <Catalogue route={route} />;
