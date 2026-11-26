@@ -35,6 +35,12 @@ import { blogStore, redirectsStore } from '../dashboard/storefront/state';
 import { servedPosts } from '../dashboard/storefront/blog-model';
 import { useRCtx } from '../dashboard/storefront/redirect-ctx';
 import { servedPath, trace } from '../dashboard/storefront/redirects-model';
+// Store-facing free apps (dashboard → Apps → Free): each renders only when installed and on.
+import { StoreLiveChat } from '../dashboard/apps/free/livechat-store';
+import { StoreWelcomePopup } from '../dashboard/apps/free/popup-store';
+import { StoreBarTop } from '../dashboard/apps/free/bar-store';
+import { StoreWhatsApp, useLinkVisit } from '../dashboard/apps/free/integrations-store';
+import { CurrencyNote, CurrencyPicker } from '../dashboard/apps/free/currency-store';
 import '../../ds/lak.css';
 
 function readPref(key: string, fallback: string) { try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; } }
@@ -73,6 +79,8 @@ export default function Storefront({ route }: { route: Route }) {
   // A partner link (`?ref=CODE`) is remembered for the merchant's cookie window (marketing/affiliates).
   const pref = partnerRef(route.query);
   useEffect(() => { if (pref) recordPartnerVisit(pref); }, [pref]);
+  // A short link or QR code (`?lk=CODE`, free QR app) is counted and remembered for attribution.
+  useLinkVisit(route);
   const content = useStoreContent();
   useDocTitle(route);
   const page = (() => {
@@ -132,9 +140,14 @@ export default function Storefront({ route }: { route: Route }) {
             {announcement.link ? <a href={announcement.link.startsWith('/') ? to(announcement.link) : announcement.link} {...(announcement.link.startsWith('/') ? {} : { target: '_blank', rel: 'noopener' })} className="underline underline-offset-2">{headingText(announcement.heading, lang)}</a> : headingText(announcement.heading, lang)}
           </p>}
           <Header route={route} dark={dark} setDark={setDark} />
+          {!closed && <CurrencyNote />}
+          {!closed && <StoreBarTop />}
           <main id="sf-main" ref={mainRef} className="flex-1" aria-busy={state === 'loading' || undefined}>{body}</main>
           <Footer />
         </div>
+        {!closed && <StoreLiveChat />}
+        {!closed && <StoreWhatsApp route={route} />}
+        {!closed && <StoreWelcomePopup route={route} />}
         <ReviewPanel />
       </ToastProvider>
     </div>
@@ -276,6 +289,7 @@ function Header({ route, dark, setDark }: { route: Route; dark: boolean; setDark
               onChange={(e) => { setQ(e.target.value); if (onSearch) replace(to('/search', { q: e.target.value || undefined, sort: route.query.get('sort') ?? undefined })); }}
               className="h-10 w-60 rounded-full border border-border bg-surface ps-9 pe-3 text-sm placeholder:text-subtle focus:border-brand-500 focus:outline-none focus:ring-4 focus:ring-brand-500/15" />
           </form>
+          <CurrencyPicker />
           <a href={to('/search')} aria-label={t.search} className="grid size-10 place-items-center rounded-xl text-fg hover:bg-surface-2 xl:hidden"><Search className="size-5" aria-hidden="true" /></a>
           <span className="hidden items-center lg:flex">{prefs}</span>
           <a href={to('/account', { tab: 'wishlist' })} aria-label={`${t.wishlist}${acc.wishlist.length ? ` (${acc.wishlist.length})` : ''}`} className="relative hidden size-10 place-items-center rounded-xl text-fg hover:bg-surface-2 sm:grid">

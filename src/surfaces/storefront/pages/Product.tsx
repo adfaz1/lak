@@ -20,6 +20,9 @@ import { ProductGrid } from './Listing';
 import { ProductReviews } from '../../dashboard/marketing/storefront-reviews';
 import { AskQuestion } from './Help';
 import { ProductDetails, ProductFacts, SlotPicker } from '../../dashboard/products/storefront-parts';
+import { StoreProof } from '../../dashboard/apps/free/proof-store';
+import { StoreBarProduct } from '../../dashboard/apps/free/bar-store';
+import { StoreOftenBought } from '../../dashboard/apps/free/upsell-store';
 
 export default function ProductPage({ route, id }: { route: Route; id: string }) {
   const { t, l, lang, dl, m } = useS();
@@ -178,6 +181,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
           )}
           {allOut ? <p role="status" className="text-sm font-medium">{p.colors.length + p.sizes.length > 0 ? t.allOut : t.allOutOne}</p> : soldOutVariant && <p className="text-[13px] text-muted">{t.optSoldOut}</p>}
           {variant && variant.stock > 0 && room <= 0 && <p className="text-[13px] text-muted">{t.maxed}</p>}
+          {!allOut && <StoreProof p={p} variant={variant} />}
 
           <div className="flex items-center gap-2">
             {unavailable ? (
@@ -203,6 +207,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
               <Heart className={cn('size-5', wish && 'fill-current text-brand-700 dark:text-brand-300')} aria-hidden="true" />
             </button>
           </div>
+          {!unavailable && <StoreBarProduct price={price * qty} />}
           {notified && <p role="status" className="text-[13px] text-muted">{t.notifyNote}</p>}
           {!canOrder && <p className="text-[13px] text-amber-800 dark:text-amber-300">{t.browseOnly}</p>}
 
@@ -245,6 +250,7 @@ export default function ProductPage({ route, id }: { route: Route; id: string })
         </div>
       </div>
 
+      <StoreOftenBought productId={p.id} className="mt-10 max-w-2xl" />
       <ProductReviews productId={p.id} />
       <AskQuestion productId={p.id} />
 

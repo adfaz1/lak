@@ -88,7 +88,7 @@ export function CaseView({ c, all, src, now, backHref }: { c: Case; all: Case[];
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-fg sm:text-xl">{c.subject[lang]}</h1>
           <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-muted">
-            <Ref>{c.id}</Ref>{c.orderRef && <><span aria-hidden="true">·</span><a className="font-semibold text-brand-700 hover:underline dark:text-brand-300" href={link(`/dashboard/orders/${c.orderRef}`)}><Ref>#{c.orderRef}</Ref></a></>}<span aria-hidden="true">·</span><span>{T.type(c.type)}{c.ship && ` · ${T.issue(c.ship.issue)}`}</span><span aria-hidden="true">·</span><span>{T.source(c.source)}</span><span aria-hidden="true">·</span><When at={c.openedAt} />
+            <Ref>{c.id}</Ref>{c.orderRef && <><span aria-hidden="true">·</span><a className="font-semibold text-brand-700 hover:underline dark:text-brand-300" href={link(`/dashboard/orders/${c.orderRef}`)}><Ref>#{c.orderRef}</Ref></a></>}<span aria-hidden="true">·</span><span>{T.type(c.type)}{c.ship && ` · ${T.issue(c.ship.issue)}`}</span><span aria-hidden="true">·</span><span>{c.sourceId?.startsWith('chat:') ? tx('من الدردشة المباشرة في المتجر', 'From live chat in the store') : T.source(c.source)}</span><span aria-hidden="true">·</span><When at={c.openedAt} />
           </p>
         </div>
         <div className="hidden shrink-0 items-center gap-2 sm:flex"><StatusBadge s={c.status} />{(c.priority === 'urgent' || c.priority === 'high') && <Badge tone={PRIO_TONE[c.priority]}>{T.prio(c.priority)}</Badge>}</div>

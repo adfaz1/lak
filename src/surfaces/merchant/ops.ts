@@ -537,7 +537,11 @@ export type NoticeVars = Partial<Record<NoticeVar, string>>;
 export const renderNotice = (text: string, vars: NoticeVars): string => text.replace(/\{([^{}\s]+)\}/g, (m, k: string) => vars[k as NoticeVar] ?? m);
 
 /** What the message layer needs to know about the store and the customer. */
-export interface NoticeCtx { store: string; trackBase: string; contact: { phone?: string; email?: string }; now: number }
+export interface NoticeCtx {
+  store: string; trackBase: string; contact: { phone?: string; email?: string }; now: number;
+  /** Per-channel gate set by the app that runs the channel (WhatsApp free app): 'off' = not composed at all; a reason = recorded as skipped. */
+  gate?: Partial<Record<NoticeChannel, 'off' | SkipReason>>;
+}
 const money = (h: number, lang: 'ar' | 'en') => (lang === 'ar' ? `${(h / 100).toFixed(2)} ر.س` : `SAR ${(h / 100).toFixed(2)}`);
 const DAY = 86_400_000;
 /** When an unpaid order (awaiting a transfer or a payment link) stops waiting: recorded, else placed + 3 days. */
@@ -560,7 +564,7 @@ export function noticeVars(o: Order, ctx: NoticeCtx, lang: 'ar' | 'en', extra: N
 }
 
 export type MessageStatus = 'sent' | 'failed' | 'skipped';
-export type SkipReason = 'noPhone' | 'noEmail' | 'muted';
+export type SkipReason = 'noPhone' | 'noEmail' | 'muted' | 'noConsent' | 'quiet';
 export interface CustomerMessage {
   id: string; event: NoticeEvent; channel: NoticeChannel; lang: 'ar' | 'en'; to?: string; subject?: string; body: string; at: number;
   status: MessageStatus; reason?: SkipReason; actor: string; role: string;
@@ -608,14 +612,15 @@ export function composeNotice(o: Order, event: NoticeEvent, cfg: NoticeConfig, c
   const lang = opts.lang ?? customerLang(o, cfg);
   const tpl = cfg.templates[event] ?? DEFAULT_TEMPLATES[event];
   const vars = noticeVars(o, ctx, lang, opts.extra);
-  const chans = opts.only ?? NOTICE_CHANNELS.filter((c) => cfg.channels[event]?.[c]);
+  const chans = (opts.only ?? NOTICE_CHANNELS.filter((c) => cfg.channels[event]?.[c])).filter((c) => ctx.gate?.[c] !== 'off');
   const base = (o.messages ?? []).length;
   return chans.map((c, i) => {
     const to = c === 'email' ? ctx.contact.email : ctx.contact.phone;
-    const status: MessageStatus = opts.muted || !to ? 'skipped' : cfg.simFail === c ? 'failed' : 'sent';
+    const gated = ctx.gate?.[c] as SkipReason | undefined;
+    const status: MessageStatus = opts.muted || !to || gated ? 'skipped' : cfg.simFail === c ? 'failed' : 'sent';
     return {
       id: `MSG-${o.ref}-${base + i + 1}`, event, channel: c, lang, to, at: ctx.now, actor: who.name, role: who.role, status,
-      reason: opts.muted ? 'muted' : !to ? (c === 'email' ? 'noEmail' : 'noPhone') : undefined,
+      reason: opts.muted ? 'muted' : !to ? (c === 'email' ? 'noEmail' : 'noPhone') : gated,
       subject: c === 'email' ? renderNotice(tpl.subject[lang], vars) : undefined, body: renderNotice(tpl.body[lang], vars),
     };
   });

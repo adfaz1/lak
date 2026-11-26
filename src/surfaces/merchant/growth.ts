@@ -20,8 +20,8 @@ export interface Coupon {
   scope?: OfferScope;
   /** Buy-X-get-Y: for every `buy` units in scope, the next `get` cheapest units are `pct`% off (100 = free). */
   bogo?: { buy: number; get: number; pct: number };
-  /** Made by a reminder (single-use code for one customer), not by hand. Absent = made by the merchant. */
-  origin?: 'reminder';
+  /** Made by a reminder or the welcome pop-up (single-use code for one customer), not by hand. Absent = made by the merchant. */
+  origin?: 'reminder' | 'popup';
 }
 
 export function couponFixtures(): Coupon[] {

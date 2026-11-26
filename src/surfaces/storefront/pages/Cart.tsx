@@ -8,6 +8,8 @@ import { Breakdown, CouponBox, H1, H3, PANEL, ProductPhoto, Stepper, WRAP, to, u
 import { cartStore, couponResult } from '../state';
 import { useCart, useCatalog, useConfig } from '../data';
 import { freeDeliveryOffer } from '../bridge';
+import { StoreBagSuggestion } from '../../dashboard/apps/free/upsell-store';
+import { StoreBarBag } from '../../dashboard/apps/free/bar-store';
 
 export default function CartPage() {
   const { t, l, lang, m } = useS();
@@ -93,6 +95,7 @@ export default function CartPage() {
               );
             })}
           </ul>
+          <StoreBagSuggestion />
           <a href={to('/c/all')} className="mt-5 inline-block text-sm font-semibold underline-offset-4 hover:underline">{t.keepShopping}</a>
         </section>
 
@@ -106,6 +109,7 @@ export default function CartPage() {
                 <div className="h-full rounded-full bg-brand-600 transition-[width] duration-300" style={{ width: `${progress}%` }} />
               </div>
             </div>}
+            <StoreBarBag />
             <CouponBox products={products} />
             <Breakdown totals={totals} shippingPending shippingNote={t.shipNote} coupon={c?.status === 'valid' ? c.code : undefined} />
             {checkoutBtn}

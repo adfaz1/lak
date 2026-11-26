@@ -66,7 +66,7 @@ export function MessagesCard({ o }: { o: Order }) {
   const canSend = can(role, 'customer.message') || can(role, 'customer.contact');
   const [open, setOpen] = useState<string | null>(null);
   const msgs = [...(o.messages ?? [])].reverse();
-  const reason = (m: CustomerMessage) => (m.reason === 'noEmail' ? tx('لا بريد للعميل', 'No customer email') : m.reason === 'noPhone' ? tx('لا جوال للعميل', 'No customer mobile') : m.reason === 'muted' ? tx('اخترت عدم الإبلاغ', 'You chose not to notify') : tx('تعذّر الإرسال لدى المزوّد', 'The provider did not accept it'));
+  const reason = (m: CustomerMessage) => (m.reason === 'noEmail' ? tx('لا بريد للعميل', 'No customer email') : m.reason === 'noPhone' ? tx('لا جوال للعميل', 'No customer mobile') : m.reason === 'muted' ? tx('اخترت عدم الإبلاغ', 'You chose not to notify') : m.reason === 'noConsent' ? tx('لا موافقة من العميل على واتساب', 'No WhatsApp consent from the customer') : m.reason === 'quiet' ? tx('ساعات الهدوء في تطبيق واتساب', 'WhatsApp app quiet hours') : tx('تعذّر الإرسال لدى المزوّد', 'The provider did not accept it'));
   const resend = (m: CustomerMessage) => {
     const next = resendMessage(o, m.id, noticesStore.get(), noticeCtx(o), who);
     if (next === o) return;

@@ -23,6 +23,7 @@ import {
 
 import { attributeOrder } from '../dashboard/storefront/state';
 import { creditPartnerOrder } from '../dashboard/marketing/affiliates-store';
+import { attributeLinkOrder } from '../dashboard/apps/free/integrations-state';
 
 const sid = () => Math.random().toString(36).slice(2, 10);
 
@@ -135,6 +136,7 @@ export function submit(draft: Draft, extras?: OrderExtras): { order: Order; crea
   ordersStore.set((all) => { res = submitOrder(all, draft, Date.now()); return res.orders; });
   if (res.created) attributeOrder(res.order.ref);
   if (res.created) creditPartnerOrder(res.order);
+  if (res.created) attributeLinkOrder(res.order.ref);
   if (extras && !isSettled(res.order.pay.state)) extrasStore.set((m) => ({ ...m, [res.order.ref]: extras }));
   return { order: res.order, created: res.created };
 }

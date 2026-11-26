@@ -11,6 +11,7 @@ import { couponsStore } from '../merchant/stores';
 import { strings, type Strings } from './i18n';
 import { photoFor } from './photos';
 import { cartStore, couponResult } from './state';
+import { ApproxPrice } from '../dashboard/apps/free/currency-store';
 
 /* ───────────── Language helpers ───────────── */
 
@@ -116,6 +117,7 @@ export function Price({ v, compareAt, from, className }: { v: number; compareAt?
       {from && <span className="text-[0.85em] font-normal text-muted">{t.from}</span>}
       <Money v={v} className={cn('font-semibold', compareAt && 'text-red-700 dark:text-red-400')} />
       {compareAt && <s className="text-[0.85em] font-normal text-muted"><span className="sr-only">{t.was} </span><Money v={compareAt} /></s>}
+      <ApproxPrice v={v} />
     </span>
   );
 }

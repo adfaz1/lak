@@ -114,8 +114,11 @@ export function noticeCtx(o: NoticeOrder, now = Date.now()): NoticeCtx {
   const c = customersStore.get().find((x) => x.id === o.customerId) ?? customersStore.get().find((x) => x.name.en === o.customer.en);
   let base = '#/store/track/';
   try { base = `${window.location.origin}${window.location.pathname}#/store/track/`; } catch { /* tests: no window */ }
-  return { store: settingsStore.get().store.name, trackBase: base, contact: { phone: o.contact?.phone ?? c?.phone, email: o.contact?.email ?? c?.email }, now };
+  return { store: settingsStore.get().store.name, trackBase: base, contact: { phone: o.contact?.phone ?? c?.phone, email: o.contact?.email ?? c?.email }, now, gate: { whatsapp: whatsappGate(freeAppsStore.get(), c, now) ?? undefined } };
 }
+// WhatsApp is a channel the free WhatsApp app enables: off until it is installed, on and approved; consent and quiet hours apply.
+import { freeAppsStore } from '../dashboard/apps/free/registry';
+import { whatsappGate } from '../dashboard/apps/free/whatsapp-model';
 {
   // Every orders write, from any screen or the online store, records the messages its state changes send.
   const write = ordersStore.set;
