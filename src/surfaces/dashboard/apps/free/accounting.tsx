@@ -97,10 +97,10 @@ function Screen() {
           {!lines.length ? <EmptyState icon={<FileSpreadsheet className="size-6" aria-hidden="true" />} title={badRange ? tx('صحّح الفترة', 'Fix the period') : tx('لا قيود في هذه الفترة', 'No entries in this period')}>{!badRange && tx('جرّب الشهر الماضي.', 'Try last month.')}</EmptyState> : (
             <>
               <div className="overflow-x-auto rounded-xl border border-border">
-                <table className="w-full min-w-[520px] text-sm">
-                  <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 text-start font-medium">{tx('الحساب', 'Account')}</th><th className="px-3 py-2 text-start font-medium">{tx('دوره', 'Role')}</th><th className="px-3 py-2 text-end font-medium">{tx('مدين', 'Debit')}</th><th className="px-3 py-2 text-end font-medium">{tx('دائن', 'Credit')}</th></tr></thead>
+                <table className="w-full text-sm">
+                  <thead className="bg-surface-2 text-xs text-muted"><tr><th className="px-3 py-2 text-start font-medium">{tx('الحساب', 'Account')}</th><th className="hidden px-3 py-2 text-start font-medium sm:table-cell">{tx('دوره', 'Role')}</th><th className="px-3 py-2 text-end font-medium">{tx('مدين', 'Debit')}</th><th className="px-3 py-2 text-end font-medium">{tx('دائن', 'Credit')}</th></tr></thead>
                   <tbody className="divide-y divide-border">{accounts.map((a) => (
-                    <tr key={a.key}><td className="px-3 py-2"><Ref>{saved.map[a.key].code}</Ref> <span className="text-fg">{saved.map[a.key].name}</span></td><td className="px-3 py-2 text-muted">{ACCOUNT_ROLE[a.key][lang]}</td><td className="px-3 py-2 text-end">{a.debit ? <Money v={a.debit} /> : '—'}</td><td className="px-3 py-2 text-end">{a.credit ? <Money v={a.credit} /> : '—'}</td></tr>
+                    <tr key={a.key}><td className="px-3 py-2"><Ref>{saved.map[a.key].code}</Ref> <span className="text-fg">{saved.map[a.key].name}</span></td><td className="hidden px-3 py-2 text-muted sm:table-cell">{ACCOUNT_ROLE[a.key][lang]}</td><td className="px-3 py-2 text-end">{a.debit ? <Money v={a.debit} /> : '—'}</td><td className="px-3 py-2 text-end">{a.credit ? <Money v={a.credit} /> : '—'}</td></tr>
                   ))}</tbody>
                 </table>
               </div>

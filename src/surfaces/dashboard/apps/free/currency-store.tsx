@@ -19,13 +19,14 @@ function activeFrom(apps: Partial<Record<FreeAppId, Installed>>, chosen: string)
   return { s, list, cur: (list as string[]).includes(chosen) ? (chosen as Gcc) : null };
 }
 
-export function CurrencyPicker() {
+/** Header picker (from the small-tablet width up; phones get it in the strip under the header). */
+export function CurrencyPicker({ inline }: { inline?: boolean }) {
   const { lang } = useLang();
   const a = useActive();
   if (!a) return null;
   const label = lang === 'ar' ? 'عملة العرض (الدفع بالريال)' : 'Display currency (you pay in SAR)';
   return (
-    <label className="relative inline-flex h-10 items-center" data-free-app="currency">
+    <label className={inline ? 'relative inline-flex items-center' : 'relative hidden h-10 items-center sm:inline-flex'} data-free-app="currency">
       <span className="sr-only">{label}</span>
       <select title={label} value={a.cur ?? 'SAR'} onChange={(e) => shopperCurrencyStore.set(e.target.value)}
         className="h-9 appearance-none rounded-lg border border-border bg-surface ps-2 pe-2 text-[13px] font-semibold text-fg hover:bg-surface-2" dir="ltr">
@@ -49,12 +50,18 @@ export function ApproxPrice({ v }: { v: number }) {
 export function CurrencyNote() {
   const { lang } = useLang();
   const a = useActive();
-  if (!a?.cur) return null;
+  if (!a) return null;
+  if (!a.cur) return (
+    <p className="flex items-center justify-center gap-2 border-b border-border px-4 py-1.5 text-[12px] text-muted sm:hidden">
+      {lang === 'ar' ? 'اعرض الأسعار بعملة أخرى (تقريبية):' : 'See prices in another currency (approximate):'} <CurrencyPicker inline />
+    </p>
+  );
   const name = GCC_INFO[a.cur][lang];
   return (
-    <p className="bg-amber-500/10 px-4 py-1.5 text-center text-[12px] text-amber-900 dark:text-amber-200" role="note" data-free-app="currency">
+    <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 bg-amber-500/10 px-4 py-1.5 text-center text-[12px] text-amber-900 dark:text-amber-200" role="note" data-free-app="currency">
+      <span className="sm:hidden"><CurrencyPicker inline /></span>
       {lang === 'ar' ? `الأسعار بـ${name} تقريبية؛ يتم الدفع بالريال السعودي.` : `Prices in ${name} are approximate; you pay in Saudi riyals.`}
-      <button type="button" className="ms-2 font-semibold underline underline-offset-2" onClick={() => shopperCurrencyStore.set('SAR')}>{lang === 'ar' ? 'اعرض بالريال' : 'Show in SAR'}</button>
+      <button type="button" className="font-semibold underline underline-offset-2" onClick={() => shopperCurrencyStore.set('SAR')}>{lang === 'ar' ? 'اعرض بالريال' : 'Show in SAR'}</button>
     </p>
   );
 }

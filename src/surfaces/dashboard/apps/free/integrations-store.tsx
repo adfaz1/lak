@@ -1,7 +1,7 @@
 // Storefront side of the WhatsApp and QR/short-link apps: the floating WhatsApp button with a message prefilled for the
 // page, and the short-link visit (`?lk=CODE`) that is counted, remembered for attribution and, for a coupon link,
 // puts the coupon in the bag. Nothing renders unless the app is installed and on.
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { MessageCircle } from 'lucide-react';
 import { useLang } from '../../../../core/lang';
 import type { Route } from '../../../../core/router';
@@ -16,8 +16,10 @@ import { useCatalog, useCategories } from '../../../storefront/data';
 /** Count a short-link visit once per address; a coupon link applies its code to the bag. */
 export function useLinkVisit(route: Route) {
   const code = linkCodeOf(route.query);
+  const counted = useRef<string>();
   useEffect(() => {
-    if (!code) return;
+    if (!code || counted.current === code) return;
+    counted.current = code;
     const apps = freeAppsStore.get();
     if (!apps.qr?.on) return;
     const l = ((apps.qr.settings as Partial<QrSettings>).links ?? []).find((x) => x.code === code && x.on);
